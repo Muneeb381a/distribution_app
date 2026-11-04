@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useConfirm, usePrompt, useToast } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
 import { api } from '@/lib/api';
 
@@ -58,7 +59,9 @@ export default function UsersPage() {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<string | 'new' | null>(null);
   const [error, setError] = useState('');
-  const [msg, setMsg] = useState('');
+  const toast = useToast();
+  const prompt = usePrompt();
+  const confirm = useConfirm();
 
   const load = useCallback(async () => {
     try {
@@ -82,34 +85,31 @@ export default function UsersPage() {
       await api('/users', { method: 'POST', json: form });
       setForm({ username: '', password: '', roleId: '' });
       setAdding(false);
+      toast.success(`User ${form.username} created`);
       await load();
     } catch (err) {
-      setError((err as Error).message);
+      toast.error((err as Error).message);
     }
   }
 
   async function patch(id: string, body: object, done?: string) {
-    setError('');
-    setMsg('');
     try {
       await api(`/users/${id}`, { method: 'PATCH', json: body });
-      if (done) setMsg(done);
+      if (done) toast.success(done);
       await load();
     } catch (err) {
-      setError((err as Error).message);
+      toast.error((err as Error).message);
     }
   }
 
   async function saveRole(id: string | 'new', name: string, permissions: string[]) {
-    setError('');
-    setMsg('');
     try {
       await api(id === 'new' ? '/roles' : `/roles/${id}`, { method: id === 'new' ? 'POST' : 'PATCH', json: { name, permissions } });
       setEditing(null);
-      setMsg(`Role "${name}" saved. The change applies immediately.`);
+      toast.success(`Role "${name}" saved. The change applies immediately.`);
       await load();
     } catch (err) {
-      setError((err as Error).message);
+      toast.error((err as Error).message);
     }
   }
 
@@ -122,7 +122,6 @@ export default function UsersPage() {
         {!adding && <button onClick={() => setAdding(true)}><Icon name="plus" /> Add user</button>}
       </div>
       {error && <p className="error">{error}</p>}
-      {msg && <p className="ok">{msg}</p>}
 
       {adding && (
         <form className="card form" onSubmit={create}>
@@ -155,8 +154,20 @@ export default function UsersPage() {
               </td>
               <td><span className={`badge ${u.isActive ? 'green' : 'red'}`}>{u.isActive ? 'Active' : 'Disabled'}</span></td>
               <td>
-                <button className="secondary" onClick={() => patch(u.id, { isActive: !u.isActive })}>{u.isActive ? 'Disable' : 'Enable'}</button>{' '}
-                <button className="secondary" onClick={() => { const p = prompt(`New password for ${u.username} (min 6 characters)`); if (p) patch(u.id, { password: p }, 'Password changed'); }}>Reset password</button>
+                <button
+                  className="secondary"
+                  onClick={async () => {
+                    if (u.isActive && !(await confirm({ title: `Disable ${u.username}?`, body: <p>They are signed out and cannot sign in until enabled again.</p>, confirmLabel: 'Disable', danger: true }))) return;
+                    patch(u.id, { isActive: !u.isActive }, `${u.username} ${u.isActive ? 'disabled' : 'enabled'}`);
+                  }}
+                >{u.isActive ? 'Disable' : 'Enable'}</button>{' '}
+                <button
+                  className="secondary"
+                  onClick={async () => {
+                    const p = await prompt({ title: `Reset password for ${u.username}`, label: 'New password', type: 'password', minLength: 6, confirmLabel: 'Change password' });
+                    if (p) patch(u.id, { password: p }, `Password changed for ${u.username}`);
+                  }}
+                >Reset password</button>
               </td>
             </tr>
           ))}

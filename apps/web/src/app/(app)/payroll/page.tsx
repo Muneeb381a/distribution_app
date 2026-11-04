@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useConfirm, usePrompt, useToast } from '@/components/Feedback';
 import { api } from '@/lib/api';
 
 interface Option { id: string; name: string }
@@ -27,7 +28,9 @@ export default function PayrollPage() {
   const [attDate, setAttDate] = useState(today());
   const [att, setAtt] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
-  const [msg, setMsg] = useState('');
+  const toast = useToast();
+  const confirm = useConfirm();
+  const prompt = usePrompt();
 
   const load = useCallback(async () => {
     try {
@@ -46,24 +49,35 @@ export default function PayrollPage() {
   }, [load]);
 
   async function act(fn: () => Promise<unknown>, done: string) {
-    setError('');
-    setMsg('');
     try {
       await fn();
-      setMsg(done);
+      toast.success(done);
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      toast.error((e as Error).message);
     }
   }
 
-  const run = (p: Preview) => {
-    if (!confirm(`Finalise ${p.employee.name} for ${month}?\nPay ${n(p.netPaid)}${Number(p.carryOut) ? `, carry ${n(p.carryOut)} to next month` : ''}.`)) return;
+  const run = async (p: Preview) => {
+    const ok = await confirm({
+      title: `Finalise ${p.employee.name} for ${month}?`,
+      body: <p>Pay <b>Rs {n(p.netPaid)}</b>{Number(p.carryOut) ? <>, carry {n(p.carryOut)} to next month</> : null}. The slip is saved and cannot be edited.</p>,
+      confirmLabel: 'Finalise & pay',
+    });
+    if (!ok) return;
     return act(() => api('/payroll/run', { method: 'POST', json: { employeeId: p.employee.id, month } }), `Payroll saved for ${p.employee.name}`);
   };
 
-  const cancelRun = (p: Preview) => {
-    const reason = prompt(`Cancel ${p.employee.name}'s payroll for ${month}?\nAdvances become open again and the salary expense is cancelled.\n\nReason:`);
+  const cancelRun = async (p: Preview) => {
+    const reason = await prompt({
+      title: `Cancel ${p.employee.name}'s payroll for ${month}?`,
+      body: <p>Advances become open again and the salary expense is cancelled.</p>,
+      label: 'Reason',
+      minLength: 3,
+      confirmLabel: 'Cancel payroll',
+      cancelLabel: 'Keep',
+      danger: true,
+    });
     if (!reason || reason.trim().length < 3) return;
     return act(() => api(`/payroll/${p.alreadyRun!.id}/cancel`, { method: 'POST', json: { reason: reason.trim() } }), `Payroll cancelled for ${p.employee.name}`);
   };
@@ -86,7 +100,6 @@ export default function PayrollPage() {
     <>
       <div className="page-head"><div><h1>Payroll</h1><p>Monthly salaries, advances and attendance</p></div></div>
       {error && <p className="error">{error}</p>}
-      {msg && <p className="ok">{msg}</p>}
       <div className="toolbar">
         <label>Month <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></label>
       </div>

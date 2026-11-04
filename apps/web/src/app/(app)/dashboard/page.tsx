@@ -1,9 +1,27 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import StackedColumns, { LINE_SERIES, type Point } from '@/components/Chart';
 import { Icon, type IconName } from '@/components/Icon';
 import { api, can, useUser } from '@/lib/api';
+import { formatQty, productLabel } from '@/lib/lookups';
+
+interface ProfitRow { period: string; lines: Record<'BOTTLES' | 'RICE', { netSales: string }> }
+interface StockRow { productId: string; productName: string; size: string | null; line: string; baseUnit: string; units: { unitName: string; factorToBase: string }[]; locationId: string; locationName: string; ok: string; damaged: string }
+interface Collections { rows: { byMethod: Record<string, string>; total: string; count: number }[] }
+
+const iso = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+const METHOD_LABEL: Record<string, string> = { CASH: 'Cash', BANK: 'Bank', EASYPAISA: 'Easypaisa', JAZZCASH: 'JazzCash' };
+/** Low stock: under 5 cartons for bottles, under 100 kg for rice. */
+function isLow(r: StockRow) {
+  const q = Number(r.ok);
+  if (r.baseUnit === 'BOTTLE') {
+    const f = Number(r.units.find((u) => u.unitName === 'CARTON')?.factorToBase ?? 1);
+    return q < 5 * f;
+  }
+  return q < 100;
+}
 
 interface Summary {
   today: { bills: number; netSales: string; cashWithBills: string; receipts: string; udhaar: string; expenses: string; grossProfit: string; netProfit: string };
@@ -16,8 +34,6 @@ interface Summary {
 }
 
 const n = (v: string | number) => Math.round(Number(v)).toLocaleString();
-const short = (v: number) => (v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M` : v >= 1000 ? `${(v / 1000).toFixed(v >= 10_000 ? 0 : 1)}k` : String(Math.round(v)));
-const weekday = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short' });
 
 function Stat({ label, value, sub, icon, tone = '', negative = false }: { label: string; value: string; sub?: string; icon: IconName; tone?: string; negative?: boolean }) {
   return (
@@ -47,17 +63,48 @@ export default function DashboardPage() {
   const allowed = can(user, 'REPORT_VIEW');
   const [data, setData] = useState<Summary | null>(null);
   const [error, setError] = useState('');
+  const [month, setMonth] = useState<ProfitRow[] | null>(null);
+  const [stock, setStock] = useState<StockRow[] | null>(null);
+  const [collections, setCollections] = useState<Collections | null>(null);
 
   useEffect(() => {
     if (!allowed) return;
     api<Summary>('/dashboard/summary').then(setData).catch((e) => setError(e.message));
+    const t = new Date();
+    const first = iso(new Date(t.getFullYear(), t.getMonth(), 1));
+    api<{ rows: ProfitRow[] }>(`/reports/profit?from=${first}&to=${iso(t)}&groupBy=day`).then((r) => setMonth(r.rows)).catch(() => setMonth([]));
+    api<Collections>(`/reports/collections?from=${iso(t)}&to=${iso(t)}`).then(setCollections).catch(() => setCollections({ rows: [] }));
+    api<StockRow[]>('/stock').then(setStock).catch(() => setStock([]));
   }, [allowed]);
+
+  const monthChart = useMemo<Point[]>(() => {
+    if (!month) return [];
+    const t = new Date();
+    const by = new Map(month.map((r) => [r.period, r]));
+    return Array.from({ length: t.getDate() }, (_, i) => {
+      const d = new Date(t.getFullYear(), t.getMonth(), i + 1);
+      const r = by.get(iso(d));
+      return {
+        label: String(i + 1),
+        title: d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }),
+        values: { BOTTLES: r ? Number(r.lines.BOTTLES.netSales) : 0, RICE: r ? Number(r.lines.RICE.netSales) : 0 },
+      };
+    });
+  }, [month]);
+
+  const byMethod = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const r of collections?.rows ?? []) for (const [k, v] of Object.entries(r.byMethod)) m[k] = (m[k] ?? 0) + Number(v);
+    return Object.entries(m).sort((a, b) => b[1] - a[1]);
+  }, [collections]);
+  const collectedTotal = byMethod.reduce((s, [, v]) => s + v, 0);
+  const damaged = (stock ?? []).filter((r) => Number(r.damaged) > 0);
+  const low = (stock ?? []).filter(isLow).sort((a, b) => Number(a.ok) - Number(b.ok));
 
   if (!user) return null;
   if (!allowed) return <Welcome name={user.username} canSell={can(user, 'SALE_CREATE')} />;
 
   const todayLabel = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  const max = data ? Math.max(...data.trend.map((t) => Number(t.sales)), 1) : 1;
 
   return (
     <>
@@ -86,16 +133,10 @@ export default function DashboardPage() {
 
           <div className="dash-grid">
             <div className="card">
-              <div className="card-head"><h2>Sales, last 7 days</h2><span className="muted">Rs {n(data.trend.reduce((s, t) => s + Number(t.sales), 0))} total</span></div>
-              <div className="bars">
-                {data.trend.map((t, i) => (
-                  <div key={t.date} className={`bar-col${i === data.trend.length - 1 ? ' today' : ''}`} title={`${t.date}: Rs ${n(t.sales)} · ${t.bills} bills`}>
-                    <span className="bar-val">{Number(t.sales) ? short(Number(t.sales)) : ''}</span>
-                    <div className="bar" style={{ height: `${(Number(t.sales) / max) * 100}%` }} />
-                    <span className="bar-day">{weekday(t.date)}</span>
-                  </div>
-                ))}
-              </div>
+              <div className="card-head"><h2>Sales this month</h2><Link href="/reports">Reports</Link></div>
+              {!month ? <span className="skeleton" style={{ display: 'block', height: 250 }} />
+                : <StackedColumns data={monthChart} series={LINE_SERIES} caption="Net sales per day this month, bottles and rice" highlight={String(new Date().getDate())} />}
+              <p className="muted chart-note">Last 7 days: Rs {n(data.trend.reduce((s, t) => s + Number(t.sales), 0))} · {data.trend.reduce((s, t) => s + t.bills, 0)} bills</p>
             </div>
 
             <div className="card">
@@ -114,8 +155,54 @@ export default function DashboardPage() {
           <div className="stats" style={{ marginTop: 20 }}>
             <Stat label="Customers owe us" value={n(data.khata.receivable)} sub={`${data.khata.customersOwing} customers${data.khata.overLimit ? ` · ${data.khata.overLimit} over limit` : ''}`} icon="customers" tone="amber" />
             <Stat label="We owe suppliers" value={n(data.payable)} sub="open supplier balances" icon="suppliers" tone="red" />
-            <Stat label="Damaged stock" value={String(data.damagedProducts)} sub="products awaiting write-off / return" icon="alert" tone={data.damagedProducts ? 'amber' : ''} />
+            <div className="stat">
+              <div className="label"><span className="icon green"><Icon name="wallet" /></span>Collected today</div>
+              <div className="value"><small>Rs</small>{n(collectedTotal)}</div>
+              <div className="method-bar" aria-hidden="true">
+                {byMethod.map(([m, v], i) => <span key={m} style={{ flex: v, background: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100'][i] }} />)}
+              </div>
+              <div className="sub method-list">
+                {byMethod.length ? byMethod.map(([m, v], i) => <span key={m}><i style={{ background: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100'][i] }} />{METHOD_LABEL[m] ?? m} {n(v)}</span>) : 'No receipts yet today'}
+              </div>
+            </div>
           </div>
+
+          {stock && (low.length > 0 || damaged.length > 0) && (
+            <div className="card alert-card">
+              <div className="card-head">
+                <h2><Icon name="alert" /> Stock needs attention</h2>
+                <Link href="/stock">Open stock</Link>
+              </div>
+              <div className="alert-cols">
+                <div>
+                  <h3>Low stock <span className="badge amber">{low.length}</span></h3>
+                  <ul className="list">
+                    {low.slice(0, 5).map((r) => (
+                      <li key={`${r.productId}|${r.locationId}`}>
+                        <span className="who-line"><b>{productLabel({ name: r.productName, size: r.size })}</b><span>{r.locationName}</span></span>
+                        <span className={`amt${Number(r.ok) <= 0 ? ' error' : ''}`}>{formatQty(r.ok, r.units, r.baseUnit)}</span>
+                      </li>
+                    ))}
+                    {!low.length && <li className="muted">Nothing is running low.</li>}
+                  </ul>
+                  {low.length > 5 && <p className="muted" style={{ margin: '8px 0 0', fontSize: 13 }}>+{low.length - 5} more</p>}
+                </div>
+                <div>
+                  <h3>Damaged stock <span className="badge red">{damaged.length}</span></h3>
+                  <ul className="list">
+                    {damaged.slice(0, 5).map((r) => (
+                      <li key={`${r.productId}|${r.locationId}`}>
+                        <span className="who-line"><b>{productLabel({ name: r.productName, size: r.size })}</b><span>{r.locationName}</span></span>
+                        <span className="amt">{formatQty(r.damaged, r.units, r.baseUnit)}</span>
+                      </li>
+                    ))}
+                    {!damaged.length && <li className="muted">No damaged stock waiting.</li>}
+                  </ul>
+                </div>
+              </div>
+              <p className="muted" style={{ margin: '12px 0 0', fontSize: 12.5 }}>Low = under 5 cartons (bottles) or 100 kg (rice) at a location.</p>
+            </div>
+          )}
 
           <div className="dash-grid">
             <div className="card">
@@ -135,7 +222,7 @@ export default function DashboardPage() {
                     </li>
                   ))}
                 </ul>
-              ) : <div className="empty">No bills yet. Create the first one.</div>}
+              ) : <div className="empty">No bills yet.{can(user, 'SALE_CREATE') && <> <Link href="/sales/new">Create the first one</Link>.</>}</div>}
             </div>
 
             <div className="card">

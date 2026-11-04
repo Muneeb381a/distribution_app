@@ -14,6 +14,7 @@ export default function CustomersPage() {
       title="Customers"
       path="/customers"
       editPermission="MASTER_DATA_EDIT"
+      icon="customers"
       fields={[
         { name: 'name', label: 'Name', required: true },
         { name: 'shopName', label: 'Shop name' },
@@ -28,14 +29,14 @@ export default function CustomersPage() {
         { name: 'openingBalance', label: 'Opening balance (they owe)', type: 'number' },
       ]}
       columns={[
-        { header: 'Name', render: (r) => r.name },
-        { header: 'Shop', render: (r) => r.shopName ?? '' },
-        { header: 'Area', render: (r) => r.area ?? '' },
+        { header: 'Name', render: (r) => <b>{r.name}</b>, value: (r) => r.name },
+        { header: 'Shop', render: (r) => r.shopName ?? '', value: (r) => r.shopName },
+        { header: 'Area', render: (r) => r.area ?? '', value: (r) => r.area },
         { header: 'Type', render: (r) => <span className={`badge ${r.type === 'CREDIT' ? 'amber' : 'green'}`}>{r.type === 'CREDIT' ? 'Udhaar' : 'Cash'}</span> },
-        { header: 'Credit limit', num: true, render: (r) => (r.creditLimit ? Number(r.creditLimit).toLocaleString() : '—') },
-        { header: 'Opening balance', num: true, render: (r) => Number(r.openingBalance).toLocaleString() },
+        { header: 'Credit limit', num: true, value: (r) => r.creditLimit, render: (r) => (r.creditLimit ? Number(r.creditLimit).toLocaleString() : '—') },
+        { header: 'Opening balance', num: true, value: (r) => r.openingBalance, render: (r) => Number(r.openingBalance).toLocaleString() },
       ]}
-      extraRowActions={(r) => <Link href={`/customers/${r.id}`}>Rates →</Link>}
+      extraRowActions={(r) => <><Link href={`/khata/${r.id}`}>Khata</Link><Link href={`/customers/${r.id}`}>Rates</Link></>}
     />
   );
 }

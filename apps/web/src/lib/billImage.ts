@@ -8,7 +8,7 @@ const PAD = 16;
  * Urdu (Nastaliq) text themselves, so the bill is printed as an image.
  */
 export async function renderBill(bill: OutboxBill, urduFamily: string): Promise<string> {
-  await document.fonts.load(`24px ${urduFamily}`, 'ڈسٹری بیوشن');
+  await document.fonts.load(`24px ${urduFamily}`, 'ڈسٹری بیوشن').catch(() => []); // a missing local fallback font must not stop the print
   const rows = bill.lines.length;
   const height = 380 + rows * 72;
   const canvas = document.createElement('canvas');
