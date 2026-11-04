@@ -3,6 +3,7 @@ import { Type } from 'class-transformer';
 import { ArrayNotEmpty, IsArray, IsEnum, IsISO8601, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Min, ValidateNested } from 'class-validator';
 import { Prisma, StockStatus, UnitName } from '@prisma/client';
 import { PrismaService } from '../prisma.service.js';
+import { withSupplierBalances } from '../common/balances.js';
 import { AuditService } from '../audit/audit.module.js';
 import { CurrentUser, RequirePermissions, type AuthUser } from '../common/decorators.js';
 import { dayOf } from '../common/dates.js';
@@ -211,14 +212,8 @@ class PurchasingController {
   /** What we owe each supplier (positive) or what they owe us (negative). */
   @Get('suppliers/balances') @RequirePermissions('PURCHASE_MANAGE')
   async balances() {
-    const [suppliers, sums] = await Promise.all([
-      this.prisma.supplier.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }),
-      this.prisma.supplierLedger.groupBy({ by: ['supplierId'], _sum: { amount: true } }),
-    ]);
-    return suppliers.map((s) => ({
-      id: s.id, name: s.name, type: s.type,
-      balance: s.openingBalance.plus(sums.find((x) => x.supplierId === s.id)?._sum.amount ?? 0),
-    }));
+    const suppliers = await withSupplierBalances(this.prisma, await this.prisma.supplier.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } }));
+    return suppliers.map((s) => ({ id: s.id, name: s.name, type: s.type, balance: s.balance }));
   }
 
   @Get('suppliers/:id/ledger') @RequirePermissions('PURCHASE_MANAGE')

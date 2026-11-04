@@ -4,6 +4,11 @@ Rice and bottle distribution management. See [distribution-app-plan.md](distribu
 
 - `apps/api`: NestJS + Prisma + PostgreSQL
 - `apps/web`: Next.js (client-rendered admin UI)
+- `packages/shared`: the rules and words both apps use — selling rules (rates, credit limit, paid default,
+  one business line per bill), permissions with their labels, payment methods and other labels,
+  document number formats, money and date formatting. Change these once, here; the API and the web
+  app (including offline billing) pick it up. Both apps build it first (`pnpm build` / `pnpm dev` do
+  this), and `cd packages/shared && pnpm test` runs its unit tests.
 
 ## Run locally (Windows/macOS/Linux, needs Node 22+, pnpm, Docker)
 

@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service.js';
 import { RequirePermissions } from '../common/decorators.js';
 import { dayOf } from '../common/dates.js';
+import { overLimit, withCustomerBalances, withSupplierBalances } from '../common/balances.js';
 
 const D = Prisma.Decimal;
 type Dec = Prisma.Decimal;
@@ -22,7 +23,7 @@ class DashboardController {
     const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
     const from = weekStart < monthStart ? weekStart : monthStart;
 
-    const [items, sales, expenses, receipts, customers, custLedger, suppliers, suppLedger, recent, damaged] = await Promise.all([
+    const [items, sales, expenses, receipts, customerRows, supplierRows, recent, damaged] = await Promise.all([
       this.prisma.saleItem.findMany({
         where: { sale: { status: 'ACTIVE', date: { gte: from, lte: today } } },
         select: { qtyBase: true, unitCostBase: true, sale: { select: { date: true } } },
@@ -34,9 +35,7 @@ class DashboardController {
       this.prisma.expense.findMany({ where: { status: 'ACTIVE', date: { gte: from, lte: today } }, select: { date: true, amount: true } }),
       this.prisma.payment.findMany({ where: { status: 'ACTIVE', date: { gte: from, lte: today }, saleId: null }, select: { date: true, amount: true } }),
       this.prisma.customer.findMany({ select: { id: true, name: true, shopName: true, area: true, openingBalance: true, creditLimit: true } }),
-      this.prisma.customerLedger.groupBy({ by: ['customerId'], _sum: { amount: true } }),
-      this.prisma.supplier.findMany({ select: { openingBalance: true } }),
-      this.prisma.supplierLedger.groupBy({ by: ['supplierId'], _sum: { amount: true } }),
+      this.prisma.supplier.findMany({ select: { id: true, openingBalance: true } }),
       this.prisma.sale.findMany({
         where: { status: 'ACTIVE' }, orderBy: { createdAt: 'desc' }, take: 8,
         select: { id: true, billNo: true, date: true, net: true, paidNow: true, businessLine: true, customer: { select: { name: true } } },
@@ -79,16 +78,14 @@ class DashboardController {
     }
     for (const r of receipts) if (iso(r.date) === todayKey) t.receipts = t.receipts.plus(r.amount);
 
-    const moved = new Map(custLedger.map((l) => [l.customerId, l._sum.amount ?? ZERO()]));
-    const owing = customers
-      .map((c) => ({ ...c, balance: c.openingBalance.plus(moved.get(c.id) ?? ZERO()) }))
-      .filter((c) => c.balance.gt(0));
+    const [customers, suppliers] = await Promise.all([withCustomerBalances(this.prisma, customerRows), withSupplierBalances(this.prisma, supplierRows)]);
+    const owing = customers.filter((c) => c.balance.gt(0));
     const receivable = owing.reduce((s: Dec, c) => s.plus(c.balance), ZERO());
     const topDebtors = [...owing].sort((a, b) => b.balance.comparedTo(a.balance)).slice(0, 6).map((c) => ({
-      id: c.id, name: c.name, shopName: c.shopName, area: c.area, balance: c.balance, overLimit: !!c.creditLimit && c.balance.gt(c.creditLimit),
+      id: c.id, name: c.name, shopName: c.shopName, area: c.area, balance: c.balance, overLimit: overLimit(c.balance, c.creditLimit),
     }));
 
-    const payable = suppliers.reduce((s: Dec, x) => s.plus(x.openingBalance), ZERO()).plus(suppLedger.reduce((s: Dec, l) => s.plus(l._sum.amount ?? ZERO()), ZERO()));
+    const payable = suppliers.reduce((s: Dec, x) => s.plus(x.balance), ZERO());
 
     return {
       today: { ...t, grossProfit: t.netSales.minus(t.cost), netProfit: t.netSales.minus(t.cost).minus(t.expenses) },

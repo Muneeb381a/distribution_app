@@ -8,6 +8,7 @@ import { CurrentUser, RequirePermissions, type AuthUser } from '../common/decora
 import { dayOf } from '../common/dates.js';
 import { StockService } from '../stock/stock.service.js';
 import { PaymentDto, SaleDto, SalesService } from './sales.service.js';
+import { overLimit, withCustomerBalances } from '../common/balances.js';
 
 
 class PriceDto {
@@ -124,16 +125,13 @@ class SalesController {
   /** Outstanding balances, highest first, flagging customers over their credit limit. */
   @Get('khata/balances') @RequirePermissions('PAYMENT_RECORD')
   async balances(@Query('area') area?: string) {
-    const [customers, sums] = await Promise.all([
-      this.prisma.customer.findMany({ where: { isActive: true, area }, orderBy: { name: 'asc' } }),
-      this.prisma.customerLedger.groupBy({ by: ['customerId'], _sum: { amount: true } }),
-    ]);
+    const customers = await withCustomerBalances(this.prisma, await this.prisma.customer.findMany({ where: { isActive: true, area }, orderBy: { name: 'asc' } }));
     return customers
       .map((c) => {
-        const balance = c.openingBalance.plus(sums.find((s) => s.customerId === c.id)?._sum.amount ?? 0);
+        const balance = c.balance;
         return {
           id: c.id, name: c.name, shopName: c.shopName, area: c.area, phone: c.phone, type: c.type,
-          creditLimit: c.creditLimit, balance, overLimit: !!c.creditLimit && balance.gt(c.creditLimit),
+          creditLimit: c.creditLimit, balance, overLimit: overLimit(balance, c.creditLimit),
         };
       })
       .sort((a, b) => b.balance.comparedTo(a.balance));

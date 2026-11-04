@@ -6,17 +6,16 @@ import { PrismaService } from '../prisma.service.js';
 import { AuditService } from '../audit/audit.module.js';
 import { CurrentUser, RequirePermissions, type AuthUser } from '../common/decorators.js';
 import { SalesModule } from '../sales/sales.module.js';
+import { withCustomerBalances } from '../common/balances.js';
 import { PaymentDto, SaleDto, SalesService } from '../sales/sales.service.js';
 
-/** Bill numbers printed offline: BTL-D3-000012 / RIC-D3-000012; receipts RCP-D3-000012. */
-const BILL_NO = /^(BTL|RIC)-D\d{1,4}-\d{6}$/;
-const RECEIPT_NO = /^RCP-D\d{1,4}-\d{6}$/;
+import { OFFLINE_BILL_NO as BILL_NO, OFFLINE_DOC_NO, OFFLINE_RECEIPT_NO as RECEIPT_NO } from '@dist/shared';
 
 class SyncOpDto {
   @IsEnum(['SALE', 'PAYMENT']) kind: 'SALE' | 'PAYMENT';
   /** Also the bill's / payment's clientId: replays are recognised and not created twice. */
   @IsUUID() clientId: string;
-  @Matches(/^(BTL|RIC|RCP)-D\d{1,4}-\d{6}$/) number: string;
+  @Matches(OFFLINE_DOC_NO) number: string;
   /** When the device saved it, for the record. */
   @IsOptional() @IsISO8601() savedAt?: string;
   @IsOptional() @ValidateNested() @Type(() => SaleDto) sale?: SaleDto;
@@ -52,7 +51,7 @@ class SyncController {
 
   @Get('snapshot') @RequirePermissions('SALE_CREATE')
   async snapshot() {
-    const [products, prices, locations, salesmen, customers, rates, ledger, stock, empties] = await Promise.all([
+    const [products, prices, locations, salesmen, customerRows, rates, stock, empties] = await Promise.all([
       this.prisma.product.findMany({
         where: { isActive: true },
         include: { units: true, category: { select: { name: true, businessLine: { select: { code: true } } } } },
@@ -67,18 +66,17 @@ class SyncController {
         orderBy: { name: 'asc' },
       }),
       this.prisma.customerRate.findMany(),
-      this.prisma.customerLedger.groupBy({ by: ['customerId'], _sum: { amount: true } }),
       this.prisma.stockMovement.groupBy({ by: ['productId', 'locationId'], where: { status: 'OK' }, _sum: { qtyBase: true } }),
       this.prisma.emptiesLedger.groupBy({ by: ['customerId', 'productId'], _sum: { qtyOut: true, qtyIn: true } }),
     ]);
-    const sums = new Map(ledger.map((l) => [l.customerId, l._sum.amount ?? new Prisma.Decimal(0)]));
+    const customers = await withCustomerBalances(this.prisma, customerRows);
     return {
       at: new Date().toISOString(),
       products,
       prices,
       locations,
       salesmen,
-      customers: customers.map(({ openingBalance, ...c }) => ({ ...c, balance: openingBalance.plus(sums.get(c.id) ?? 0) })),
+      customers: customers.map(({ openingBalance: _ob, ...c }) => c),
       rates,
       stock: stock.map((s) => ({ productId: s.productId, locationId: s.locationId, qtyBase: s._sum.qtyBase ?? 0 })),
       empties: empties
