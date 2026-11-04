@@ -1,13 +1,17 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import Combobox from '@/components/Combobox';
+import { BusyButton, useToast } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
 import { api, can, useUser } from '@/lib/api';
-import { productLabel, useLookups, type ProductOpt } from '@/lib/lookups';
+import { customerOptions, productOptions, useLookups, type ProductOpt } from '@/lib/lookups';
 
-interface Customer { id: string; name: string; shopName: string | null; area: string | null; type: 'CASH' | 'CREDIT'; creditLimit: string | null }
+interface Customer { id: string; name: string; shopName: string | null; area: string | null; phone: string | null; type: 'CASH' | 'CREDIT'; creditLimit: string | null }
+interface LastBill { id: string; billNo: string; date: string; net: string; rates: Record<string, string> }
+interface Saved { id: string; billNo: string; net: string }
 interface Line { productId: string; unitName: string; qty: string; rate: string; reason: string }
 interface Collected { productId: string; qty: string }
 interface Preview {
@@ -24,12 +28,17 @@ const money = (n: string | number) => Number(n).toLocaleString('en-PK');
 const METHODS = [['CASH', 'Cash'], ['BANK', 'Bank'], ['EASYPAISA', 'Easypaisa'], ['JAZZCASH', 'JazzCash']];
 
 export default function NewSalePage() {
-  const router = useRouter();
+  const search = useSearchParams();
   const user = useUser();
+  const toast = useToast();
   const { products, locations, error: lookupError } = useLookups();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [salesmen, setSalesmen] = useState<{ id: string; name: string }[]>([]);
-  const [head, setHead] = useState({ saleType: 'COUNTER', customerId: '', locationId: '', salesmanId: '', paidNow: '', method: 'CASH', note: '' });
+  const [head, setHead] = useState({ saleType: 'COUNTER', customerId: search.get('customer') ?? '', locationId: '', salesmanId: '', paidNow: '', method: 'CASH', note: '' });
+  const [lastBill, setLastBill] = useState<LastBill | null>(null);
+  const [saved, setSaved] = useState<Saved | null>(null);
+  const [focusTarget, setFocusTarget] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const [items, setItems] = useState<Line[]>([blank()]);
   const [returns, setReturns] = useState<Line[]>([]);
   const [collected, setCollected] = useState<Collected[]>([]);
@@ -46,6 +55,31 @@ export default function NewSalePage() {
     api<{ id: string; name: string }[]>('/employees/options').then(setSalesmen).catch(() => {});
   }, []);
 
+  // Last bill of the chosen customer, for the "last rate" hints.
+  useEffect(() => {
+    if (!head.customerId) return;
+    let stale = false;
+    api<{ id: string }[]>(`/sales?customerId=${head.customerId}&status=ACTIVE&limit=1`)
+      .then(async ([b]) => {
+        if (!b) return null;
+        const full = await api<{ id: string; billNo: string; date: string; net: string; items: { productId: string; unitName: string; rate: string }[] }>(`/sales/${b.id}`);
+        return { id: full.id, billNo: full.billNo, date: full.date, net: full.net, rates: Object.fromEntries(full.items.map((i) => [`${i.productId}|${i.unitName}`, i.rate])) };
+      })
+      .then((lb) => { if (!stale) setLastBill(lb); })
+      .catch(() => { if (!stale) setLastBill(null); });
+    return () => { stale = true; };
+  }, [head.customerId]);
+
+  // Move focus after the line list re-renders (new line added, product picked…).
+  useEffect(() => {
+    if (!focusTarget) return;
+    formRef.current?.querySelector<HTMLElement>(focusTarget)?.focus();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFocusTarget(null);
+  }, [focusTarget, items, returns]);
+
+  const customerOpts = useMemo(() => customerOptions(customers), [customers]);
+  const productOpts = useMemo(() => productOptions(products), [products]);
   const prod = (id: string) => products.find((p) => p.id === id);
   const customer = customers.find((c) => c.id === head.customerId);
   const delivery = head.saleType === 'DELIVERY';
@@ -95,14 +129,47 @@ export default function NewSalePage() {
     setError('');
     setBusy(true);
     try {
-      const bill = await api<{ id: string }>('/sales', { method: 'POST', json: { ...body, clientId, overrideCredit: override || undefined } });
+      const bill = await api<Saved>('/sales', { method: 'POST', json: { ...body, clientId, overrideCredit: override || undefined } });
       setClientId(crypto.randomUUID());
-      router.push(`/sales/${bill.id}`);
+      setSaved({ id: bill.id, billNo: bill.billNo, net: bill.net ?? preview?.net ?? '0' });
+      toast.success(`Bill ${bill.billNo ?? ''} saved`);
     } catch (err) {
-      setError((err as Error).message);
+      toast.error((err as Error).message);
+    } finally {
       setBusy(false);
     }
   }
+
+  /** Start the next bill: keep where we sell from and the salesman, clear the rest. */
+  function newBill() {
+    setSaved(null);
+    setItems([blank()]);
+    setReturns([]);
+    setCollected([]);
+    setOverride(false);
+    setPreview(null);
+    setLastBill(null);
+    setHead({ ...head, customerId: '', paidNow: '', method: 'CASH', note: '' });
+    setFocusTarget('[data-field="customer"] input[role="combobox"]');
+  }
+
+  const lineSel = (kind: string, i: number, what: 'product' | 'qty') =>
+    `[data-line="${kind}-${i}"] ${what === 'product' ? 'input[role="combobox"]' : 'input[aria-label="Quantity"]'}`;
+
+  /** Enter in qty / rate: go to the next line, adding one at the end. */
+  const nextLine = (e: React.KeyboardEvent, list: Line[], set: typeof setItems, kind: string, i: number) => {
+    if (e.key !== 'Enter' || e.ctrlKey || e.metaKey) return;
+    e.preventDefault();
+    if (i === list.length - 1) set([...list, blank()]);
+    setFocusTarget(lineSel(kind, i + 1, 'product'));
+  };
+
+  const onFormKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      if (canSave) formRef.current?.requestSubmit();
+    }
+  };
 
   const blocked = preview?.credit.blocked;
   const canOverride = can(user, 'CREDIT_OVERRIDE');
@@ -116,19 +183,26 @@ export default function NewSalePage() {
   const lineRow = (l: Line, i: number, list: Line[], set: typeof setItems, isReturn: boolean, priced: Priced[]) => {
     const p: ProductOpt | undefined = prod(l.productId);
     const pr = priced[i];
+    const kind = isReturn ? 'returns' : 'items';
+    const last = !isReturn && l.productId ? lastBill?.rates[`${l.productId}|${l.unitName}`] : undefined;
     return (
-      <div className={`line${isReturn ? ' ret' : ''}`} key={i}>
-        <select aria-label="Product" value={l.productId} onChange={(e) => setLine(set, list, i, pick(e.target.value))}>
-          <option value="">Select product…</option>
-          {products.map((x) => <option key={x.id} value={x.id}>{productLabel(x)}</option>)}
-        </select>
+      <div className={`line${isReturn ? ' ret' : ''}`} key={i} data-line={`${kind}-${i}`}>
+        <div className="line-product">
+          <Combobox
+            ariaLabel="Product" placeholder="Type product name…" options={productOpts} value={l.productId} recentKey="product" compact
+            onChange={(v) => setLine(set, list, i, pick(v))}
+            onPicked={() => setFocusTarget(lineSel(kind, i, 'qty'))}
+          />
+          {last && <span className="line-hint">Last bill: {money(last)} / {l.unitName.toLowerCase()}</span>}
+        </div>
         <select aria-label="Unit" value={l.unitName} onChange={(e) => setLine(set, list, i, { unitName: e.target.value, rate: '' })} disabled={!p}>
           {p?.units.map((u) => <option key={u.unitName} value={u.unitName}>{u.unitName.toLowerCase()}</option>)}
         </select>
-        <input aria-label="Quantity" type="number" step="any" min="0" placeholder="0" value={l.qty} onChange={(e) => setLine(set, list, i, { qty: e.target.value })} />
+        <input aria-label="Quantity" type="number" step="any" min="0" placeholder="0" inputMode="decimal" value={l.qty} onChange={(e) => setLine(set, list, i, { qty: e.target.value })} onKeyDown={(e) => nextLine(e, list, set, kind, i)} />
         <input
           aria-label="Rate" type="number" step="any" min="0" disabled={!can(user, 'RATE_EDIT')} value={l.rate}
           placeholder={pr?.rate ? String(Number(pr.rate)) : 'rate'} onChange={(e) => setLine(set, list, i, { rate: e.target.value })}
+          onKeyDown={(e) => nextLine(e, list, set, kind, i)}
         />
         {isReturn && (
           <select aria-label="Reason" value={l.reason} onChange={(e) => setLine(set, list, i, { reason: e.target.value })}>
@@ -137,7 +211,7 @@ export default function NewSalePage() {
           </select>
         )}
         <div className={`line-amt${isReturn ? ' neg' : ''}`}>{pr ? `${isReturn ? '-' : ''}${money(pr.amount)}` : '—'}</div>
-        <button type="button" className="icon-btn" aria-label="Remove line" onClick={() => set(list.filter((_, j) => j !== i))}>×</button>
+        <button type="button" className="icon-btn" aria-label="Remove line" onClick={() => set(list.filter((_, j) => j !== i))}><Icon name="x" /></button>
       </div>
     );
   };
@@ -153,13 +227,29 @@ export default function NewSalePage() {
     <>
       <div className="page-head">
         <div>
-          <p className="no-print" style={{ marginBottom: 6 }}><Link href="/sales">← Back to sales</Link></p>
+          <Link className="back" href="/sales"><Icon name="chevronLeft" />Sales</Link>
           <h1>New bill</h1>
         </div>
+        <p className="kbd-help"><kbd>Enter</kbd> next line · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> save</p>
       </div>
       {(error || lookupError) && <p className="error">{error || lookupError}</p>}
 
-      <form onSubmit={save} className="pos">
+      {saved && (
+        <div className="modal-scrim">
+          <div className="modal success" role="dialog" aria-modal="true" aria-labelledby="saved-title">
+            <div className="modal-head"><span className="modal-icon ok"><Icon name="check" /></span><h2 id="saved-title">Bill {saved.billNo} saved</h2></div>
+            <p className="modal-body">Total <b>Rs {money(saved.net)}</b>. Print it now or start the next bill.</p>
+            <div className="success-actions">
+              <Link className="btn primary" href={`/sales/${saved.id}?print=thermal`}><Icon name="print" />Print thermal</Link>
+              <Link className="btn" href={`/sales/${saved.id}?print=a4`}><Icon name="file" />A4 / PDF</Link>
+              <Link className="btn" href={`/sales/${saved.id}`}>View bill</Link>
+              <button type="button" autoFocus onClick={newBill}><Icon name="plus" />New bill</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <form onSubmit={save} className="pos" ref={formRef} onKeyDown={onFormKey}>
         <div className="pos-main">
           <section className="card">
             <div className="step"><span className="step-no">1</span><h2>Sale details</h2></div>
@@ -175,12 +265,15 @@ export default function NewSalePage() {
                   {places.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                 </select>
               </label>
-              <label>Customer
-                <select required={delivery} value={head.customerId} onChange={(e) => setHead({ ...head, customerId: e.target.value })}>
-                  <option value="">{delivery ? 'Select…' : 'Walk-in (cash)'}</option>
-                  {customers.map((c) => <option key={c.id} value={c.id}>{c.name}{c.shopName ? ` · ${c.shopName}` : ''}{c.type === 'CREDIT' ? ' (udhaar)' : ''}</option>)}
-                </select>
-              </label>
+              <div className="field" data-field="customer">
+                <label htmlFor="bill-customer">Customer</label>
+                <Combobox
+                  id="bill-customer" options={customerOpts} value={head.customerId} recentKey="customer" required={delivery}
+                  emptyLabel={delivery ? undefined : 'Walk-in (cash)'} placeholder={delivery ? 'Search name, shop, phone…' : 'Walk-in (cash) — or search…'}
+                  onChange={(v) => { setHead({ ...head, customerId: v }); if (!v) setLastBill(null); }}
+                  onPicked={() => setFocusTarget(lineSel('items', 0, 'product'))}
+                />
+              </div>
               <label>Salesman
                 <select required={delivery} value={head.salesmanId} onChange={(e) => setHead({ ...head, salesmanId: e.target.value })}>
                   <option value="">{delivery ? 'Select…' : 'None'}</option>
@@ -197,6 +290,9 @@ export default function NewSalePage() {
                 </div>
                 <span className={`badge ${customer.type === 'CREDIT' ? 'amber' : 'green'}`}>{customer.type === 'CREDIT' ? 'Udhaar customer' : 'Cash customer'}</span>
                 {preview && <span className="badge">Owes Rs {money(preview.previousBalance)}</span>}
+                {lastBill && (
+                  <span className="last-bill">Last bill <Link href={`/sales/${lastBill.id}`}>{lastBill.billNo}</Link> · {new Date(lastBill.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · Rs {money(lastBill.net)}</span>
+                )}
               </div>
             )}
           </section>
@@ -205,7 +301,7 @@ export default function NewSalePage() {
             <div className="step"><span className="step-no">2</span><h2>Items</h2></div>
             <div className="line head"><span>Product</span><span>Unit</span><span>Qty</span><span>Rate</span><span className="r">Amount</span><span /></div>
             {items.map((l, i) => lineRow(l, i, items, setItems, false, itemPrices))}
-            <button type="button" className="add-line" onClick={() => setItems([...items, blank()])}><Icon name="plus" />Add another item</button>
+            <button type="button" className="add-line" onClick={() => { setItems([...items, blank()]); setFocusTarget(lineSel('items', items.length, 'product')); }}><Icon name="plus" />Add another item</button>
           </section>
 
           <section className="card">
@@ -216,7 +312,7 @@ export default function NewSalePage() {
               <div className="line head ret"><span>Product</span><span>Unit</span><span>Qty</span><span>Rate</span><span>Reason</span><span className="r">Credit</span><span /></div>
             )}
             {returns.map((l, i) => lineRow(l, i, returns, setReturns, true, returnPrices))}
-            <button type="button" className="add-line" onClick={() => setReturns([...returns, blank()])}><Icon name="plus" />Add a return</button>
+            <button type="button" className="add-line" onClick={() => { setReturns([...returns, blank()]); setFocusTarget(lineSel('returns', returns.length, 'product')); }}><Icon name="plus" />Add a return</button>
           </section>
 
           {customer && returnable.length > 0 && (
@@ -224,12 +320,12 @@ export default function NewSalePage() {
               <div className="step"><span className="step-no alt">+</span><h2>Empties collected</h2></div>
               {collected.map((c, i) => (
                 <div className="line emp" key={i}>
-                  <select aria-label="Product" value={c.productId} onChange={(e) => setCollected(collected.map((x, j) => (j === i ? { ...x, productId: e.target.value } : x)))}>
-                    <option value="">Select product…</option>
-                    {returnable.map((x) => <option key={x.id} value={x.id}>{productLabel(x)}</option>)}
-                  </select>
+                  <Combobox
+                    ariaLabel="Product" placeholder="Returnable product…" options={productOptions(returnable)} value={c.productId} compact
+                    onChange={(v) => setCollected(collected.map((x, j) => (j === i ? { ...x, productId: v } : x)))}
+                  />
                   <input aria-label="Empty bottles" type="number" min="1" step="1" placeholder="Empty bottles" value={c.qty} onChange={(e) => setCollected(collected.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)))} />
-                  <button type="button" className="icon-btn" aria-label="Remove" onClick={() => setCollected(collected.filter((_, j) => j !== i))}>×</button>
+                  <button type="button" className="icon-btn" aria-label="Remove" onClick={() => setCollected(collected.filter((_, j) => j !== i))}><Icon name="x" /></button>
                 </div>
               ))}
               <button type="button" className="add-line" onClick={() => setCollected([...collected, { productId: '', qty: '' }])}><Icon name="plus" />Add empties</button>
@@ -292,7 +388,7 @@ export default function NewSalePage() {
             <label className="field" style={{ marginTop: 14 }}>Note
               <input value={head.note} placeholder="Optional" onChange={(e) => setHead({ ...head, note: e.target.value })} />
             </label>
-            <button className="save-btn" disabled={!canSave}>{busy ? 'Saving…' : preview ? `Save bill · Rs ${money(preview.net)}` : 'Save bill'}</button>
+            <BusyButton className="save-btn" busy={busy} disabled={!canSave} title="Ctrl+Enter">{busy ? 'Saving…' : preview ? `Save bill · Rs ${money(preview.net)}` : 'Save bill'}</BusyButton>
           </div>
         </aside>
       </form>

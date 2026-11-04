@@ -29,6 +29,8 @@ interface Props {
   id?: string;
   /** Called after a choice is made with the keyboard (Enter) — e.g. move to the next field. */
   onPicked?: () => void;
+  /** Show only the label (not the second line) in the closed box. */
+  compact?: boolean;
 }
 
 export interface ComboHandle { focus: () => void }
@@ -61,7 +63,7 @@ const splitWords = (q: string) => norm(q).split(/\s+/).filter(Boolean);
  * Handles thousands of options (only the first matches are rendered).
  */
 const Combobox = forwardRef<ComboHandle, Props>(function Combobox(
-  { options, value, onChange, placeholder = 'Search…', emptyLabel, recentKey, required, disabled, ariaLabel, id, onPicked },
+  { options, value, onChange, placeholder = 'Search…', emptyLabel, recentKey, required, disabled, ariaLabel, id, onPicked, compact },
   ref,
 ) {
   const [open, setOpen] = useState(false);
@@ -140,7 +142,7 @@ const Combobox = forwardRef<ComboHandle, Props>(function Combobox(
     else if (e.key === 'Tab') { if (open && q && shown[active]) pick(shown[active]); else close(); }
   }
 
-  const display = open ? q : selected ? selected.label + (selected.sub ? ` · ${selected.sub}` : '') : '';
+  const display = open ? q : selected ? selected.label + (selected.sub && !compact ? ` · ${selected.sub}` : '') : '';
   const ph = open ? (selected ? selected.label : placeholder) : value === '' && emptyLabel ? emptyLabel : placeholder;
 
   return (

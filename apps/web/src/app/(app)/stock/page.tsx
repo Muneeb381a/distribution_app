@@ -1,8 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import Combobox from '@/components/Combobox';
+import { Empty, SkeletonRows, useToast } from '@/components/Feedback';
+import { LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
-import { formatQty, productLabel, useLookups, type ProductOpt } from '@/lib/lookups';
+import { formatQty, productLabel, productOptions, useLookups, type ProductOpt } from '@/lib/lookups';
 
 interface Row {
   productId: string; productName: string; size: string | null; line: string; baseUnit: string;
@@ -30,11 +33,11 @@ function UnitSelect({ product, value, onChange }: { product?: ProductOpt; value:
 export default function StockPage() {
   const user = useUser();
   const { products, locations, error: lookupError } = useLookups();
-  const [rows, setRows] = useState<Row[]>([]);
+  const [rows, setRows] = useState<Row[] | null>(null);
+  const toast = useToast();
   const [filter, setFilter] = useState({ locationId: '', line: '', search: '' });
   const [transfer, setTransfer] = useState({ from: '', to: '', lines: [{ ...emptyLine }] });
   const [adjust, setAdjust] = useState({ locationId: '', ...emptyLine, kind: 'MARK_DAMAGED', note: '' });
-  const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
 
   const load = useCallback(() => {
@@ -47,21 +50,24 @@ export default function StockPage() {
     load();
   }, [load]);
 
+  const productOpts = useMemo(() => productOptions(products), [products]);
+  type Key = 'product' | 'location' | 'ok' | 'damaged' | 'value';
+  const { sorted, sort, toggle } = useSort<Row, Key>(rows ?? [], (r, k) =>
+    k === 'product' ? productLabel({ name: r.productName, size: r.size }) : k === 'location' ? r.locationName : k === 'ok' ? r.ok : k === 'damaged' ? r.damaged : r.value);
+  const { page, loadMore } = usePaged(sorted, 50);
   const prod = (id: string) => products.find((p) => p.id === id);
   const setLine = (i: number, patch: Partial<Line>) =>
     setTransfer({ ...transfer, lines: transfer.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) });
   const pickProduct = (id: string) => ({ productId: id, unitName: prod(id)?.units[0]?.unitName ?? '' });
 
   async function run(path: string, json: unknown, done: string) {
-    setError('');
-    setMsg('');
     try {
       await api(path, { method: 'POST', json });
-      setMsg(done);
+      toast.success(done);
       await load();
       return true;
     } catch (e) {
-      setError((e as Error).message);
+      toast.error((e as Error).message);
       return false;
     }
   }
@@ -82,13 +88,12 @@ export default function StockPage() {
     if (ok) setAdjust({ ...adjust, qty: '', note: '' });
   }
 
-  const showCost = rows.some((r) => 'latestUnitCost' in r);
+  const showCost = !!rows?.some((r) => 'latestUnitCost' in r);
 
   return (
     <>
-      <div className="page-head"><div><h1>Stock</h1><p>{rows.length} product / location rows</p></div></div>
+      <div className="page-head"><div><h1>Stock</h1><p>{rows ? `${rows.length} product / location rows` : 'Loading…'}</p></div></div>
       {(error || lookupError) && <p className="error">{error || lookupError}</p>}
-      {msg && <p className="ok">{msg}</p>}
       <div className="card form">
         <label>Location
           <select value={filter.locationId} onChange={(e) => setFilter({ ...filter, locationId: e.target.value })}>
@@ -105,15 +110,19 @@ export default function StockPage() {
         </label>
         <label>Search<input value={filter.search} onChange={(e) => setFilter({ ...filter, search: e.target.value })} /></label>
       </div>
-      <table>
+      <table className="sticky-head">
         <thead>
           <tr>
-            <th>Product</th><th>Location</th><th className="num">Saleable</th><th className="num">Damaged</th>
-            {showCost && <><th className="num">Cost / base unit</th><th className="num">Value</th></>}
+            <SortTh k="product" sort={sort} toggle={toggle}>Product</SortTh>
+            <SortTh k="location" sort={sort} toggle={toggle}>Location</SortTh>
+            <SortTh k="ok" sort={sort} toggle={toggle} num>Saleable</SortTh>
+            <SortTh k="damaged" sort={sort} toggle={toggle} num>Damaged</SortTh>
+            {showCost && <><th className="num">Cost / base unit</th><SortTh k="value" sort={sort} toggle={toggle} num>Value</SortTh></>}
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {!rows && <SkeletonRows cols={4} />}
+          {page.map((r) => (
             <tr key={`${r.productId}|${r.locationId}`}>
               <td><strong>{productLabel({ name: r.productName, size: r.size })}</strong></td>
               <td><span className="badge">{r.locationName}</span></td>
@@ -127,9 +136,12 @@ export default function StockPage() {
               )}
             </tr>
           ))}
-          {!rows.length && <tr><td colSpan={showCost ? 6 : 4} className="empty">No stock yet. Record a purchase or import opening stock.</td></tr>}
+          {rows && !rows.length && (
+            <tr><td colSpan={showCost ? 6 : 4}><Empty icon="stock" title={filter.search || filter.locationId || filter.line ? 'Nothing matches these filters' : 'No stock yet'} text="Record a purchase or import opening stock." action={<a className="btn primary" href="/purchases">Record a purchase</a>} /></td></tr>
+          )}
         </tbody>
       </table>
+      <LoadMore shown={page.length} total={sorted.length} onMore={loadMore} />
 
       {can(user, 'STOCK_TRANSFER') && (
         <>
@@ -147,12 +159,10 @@ export default function StockPage() {
             </div>
             {transfer.lines.map((l, i) => (
               <div className="form" key={i} style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--border)' }}>
-                <label>Product
-                  <select required value={l.productId} onChange={(e) => setLine(i, pickProduct(e.target.value))}>
-                    <option value="">—</option>
-                    {products.map((p) => <option key={p.id} value={p.id}>{productLabel(p)}</option>)}
-                  </select>
-                </label>
+                <div className="field">
+                  <label htmlFor={`transfer-product-${i}`}>Product</label>
+                  <Combobox id={`transfer-product-${i}`} required compact options={productOpts} value={l.productId} recentKey="product" placeholder="Type product name…" onChange={(v) => setLine(i, pickProduct(v))} />
+                </div>
                 <label>Unit<UnitSelect product={prod(l.productId)} value={l.unitName} onChange={(v) => setLine(i, { unitName: v })} /></label>
                 <label>Qty<input type="number" step="any" min="0" required value={l.qty} onChange={(e) => setLine(i, { qty: e.target.value })} /></label>
                 {transfer.lines.length > 1 && (
@@ -178,12 +188,10 @@ export default function StockPage() {
                 {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
             </label>
-            <label>Product
-              <select required value={adjust.productId} onChange={(e) => setAdjust({ ...adjust, ...pickProduct(e.target.value) })}>
-                <option value="">—</option>
-                {products.map((p) => <option key={p.id} value={p.id}>{productLabel(p)}</option>)}
-              </select>
-            </label>
+            <div className="field">
+              <label htmlFor="adjust-product">Product</label>
+              <Combobox id="adjust-product" required compact options={productOpts} value={adjust.productId} recentKey="product" placeholder="Type product name…" onChange={(v) => setAdjust({ ...adjust, ...pickProduct(v) })} />
+            </div>
             <label>Unit<UnitSelect product={prod(adjust.productId)} value={adjust.unitName} onChange={(v) => setAdjust({ ...adjust, unitName: v })} /></label>
             <label>Qty<input type="number" step="any" min="0" required value={adjust.qty} onChange={(e) => setAdjust({ ...adjust, qty: e.target.value })} /></label>
             <label>What

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useConfirm, useToast } from '@/components/Feedback';
 import { api } from '@/lib/api';
 
 interface Expense { id: string; date: string; category: string; businessLine: string | null; amount: string; note: string | null; source: string | null; status: string }
@@ -14,6 +15,8 @@ export default function ExpensesPage() {
   const [range, setRange] = useState({ from: monthStart(), to: today() });
   const [form, setForm] = useState({ date: today(), category: '', businessLine: '', amount: '', note: '' });
   const [error, setError] = useState('');
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const load = useCallback(
     () => api<Expense[]>(`/expenses?from=${range.from}&to=${range.to}`).then(setRows).catch((e) => setError(e.message)),
@@ -35,19 +38,21 @@ export default function ExpensesPage() {
         json: { date: form.date, category: form.category, businessLine: form.businessLine || undefined, amount: Number(form.amount), note: form.note || undefined },
       });
       setForm({ ...form, amount: '', note: '' });
+      toast.success(`Expense of Rs ${Number(form.amount).toLocaleString()} added`);
       await load();
     } catch (err) {
-      setError((err as Error).message);
+      toast.error((err as Error).message);
     }
   }
 
   async function cancel(id: string) {
-    if (!confirm('Cancel this expense?')) return;
+    if (!(await confirm({ title: 'Cancel this expense?', body: <p>It stays in the list as cancelled and no longer counts in reports.</p>, confirmLabel: 'Cancel expense', cancelLabel: 'Keep', danger: true }))) return;
     try {
       await api(`/expenses/${id}/cancel`, { method: 'POST', json: {} });
+      toast.success('Expense cancelled');
       await load();
     } catch (err) {
-      setError((err as Error).message);
+      toast.error((err as Error).message);
     }
   }
 
