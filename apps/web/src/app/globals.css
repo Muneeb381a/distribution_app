@@ -816,6 +816,12 @@ table.rates td { vertical-align: middle; }
 .diff .hd { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); background: var(--surface-2); }
 .code { font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size: 12px; }
 
+tr.day-row td { background: var(--surface-2) !important; font-weight: 700; font-size: 12.5px; padding-top: 9px; padding-bottom: 9px; }
+tr.detail-row td { background: var(--surface-2) !important; padding: 14px 16px 18px; white-space: normal; }
+tr.row-link.open td { background: var(--surface-hover); }
+.chev { display: inline-grid; color: var(--faint); }
+.chev svg { width: 16px; height: 16px; }
+
 /* outbox */
 .outbox-list td { vertical-align: top; }
 
@@ -880,6 +886,8 @@ table.rates td { vertical-align: middle; }
   .alert-cols { grid-template-columns: 1fr; gap: 18px; }
   .grid2 { grid-template-columns: 1fr; }
   .diff { grid-template-columns: 90px 1fr 1fr; font-size: 12px; }
+  .audit-table .uname { display: none; }
+  .audit-table th, .audit-table td { padding-left: 10px; padding-right: 10px; }
 }
 @media (max-width: 560px) {
   .stats, .mini-stats { grid-template-columns: 1fr 1fr; gap: 10px; }

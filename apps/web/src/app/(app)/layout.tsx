@@ -45,6 +45,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
       { href: '/employees', label: 'Employees', icon: 'employees', permission: 'USER_MANAGE' },
       { href: '/users', label: 'Users & roles', icon: 'users', permission: 'USER_MANAGE' },
       { href: '/import', label: 'Import', icon: 'import', permission: 'IMPORT_DATA' },
+      { href: '/audit', label: 'Audit log', icon: 'history', permission: 'AUDIT_VIEW' },
     ],
   },
 ];
