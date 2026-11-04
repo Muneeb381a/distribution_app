@@ -31,3 +31,23 @@ export function formatQty(qtyBase: string | number, units: { unitName: string; f
   }
   return `${q}${baseUnit === 'KG' ? ' kg' : ''}`;
 }
+
+/** Combobox options for products. */
+export const productOptions = (products: ProductOpt[]) =>
+  products.map((p) => ({
+    value: p.id,
+    label: productLabel(p),
+    sub: p.category.businessLine.code === 'RICE' ? 'Rice' : 'Bottles',
+  }));
+
+export interface CustomerOpt { id: string; name: string; shopName: string | null; area: string | null; phone?: string | null; type: 'CASH' | 'CREDIT' }
+
+/** Combobox options for customers: search by name, shop, area or phone. */
+export const customerOptions = (customers: CustomerOpt[]) =>
+  customers.map((c) => ({
+    value: c.id,
+    label: c.name,
+    sub: [c.shopName, c.area].filter(Boolean).join(' · ') || undefined,
+    keywords: c.phone ?? undefined,
+    tag: c.type === 'CREDIT' ? 'Udhaar' : undefined,
+  }));

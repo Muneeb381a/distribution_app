@@ -2,10 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Suspense, useEffect, useState, type ReactNode } from 'react';
+import { Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { FeedbackProvider } from '@/components/Feedback';
 import { Icon, type IconName } from '@/components/Icon';
 import TopBar from '@/components/TopBar';
 import { api, can, updateUser, useUser, type SessionUser } from '@/lib/api';
+import { PageTitleCtx } from '@/lib/pageTitle';
 
 interface NavItem { href: string; label: string; icon: IconName; permission: string | null }
 
@@ -47,7 +49,32 @@ const NAV: { title: string; items: NavItem[] }[] = [
   },
 ];
 
-function NavLinks({ user, onNavigate }: { user: SessionUser; onNavigate: () => void }) {
+/** Detail pages that are not in the menu: [pattern, title, parent href]. */
+const DETAIL: [RegExp, string][] = [
+  [/^\/sales\/new$/, 'New bill'],
+  [/^\/sales\/[^/]+$/, 'Bill'],
+  [/^\/khata\/[^/]+$/, 'Customer khata'],
+  [/^\/customers\/[^/]+$/, 'Customer rates'],
+  [/^\/suppliers\/[^/]+$/, 'Supplier ledger'],
+  [/^\/receipts\/[^/]+$/, 'Receipt'],
+  [/^\/payroll\/[^/]+$/, 'Salary slip'],
+];
+const RECEIPT_PARENT = NAV[1].items[1];
+
+export interface Crumb { label: string; href?: string }
+
+/** Breadcrumb for a path: section › page › detail. */
+function crumbsFor(pathname: string, detail?: string): Crumb[] {
+  const all = NAV.flatMap((g) => g.items.map((i) => ({ ...i, group: g.title })));
+  const item = pathname.startsWith('/receipts') ? { ...RECEIPT_PARENT, group: 'Selling' } : all.find((n) => pathname === n.href || pathname.startsWith(`${n.href}/`));
+  if (!item) return [{ label: detail ?? 'Distribution' }];
+  const sub = DETAIL.find(([re]) => re.test(pathname))?.[1];
+  const out: Crumb[] = [{ label: item.group }, { label: item.label, href: sub ? item.href : undefined }];
+  if (sub) out.push({ label: detail ?? sub });
+  return out;
+}
+
+function NavLinks({ user, onNavigate, collapsed }: { user: SessionUser; onNavigate: () => void; collapsed: boolean }) {
   const pathname = usePathname();
   return (
     <>
@@ -58,9 +85,14 @@ function NavLinks({ user, onNavigate }: { user: SessionUser; onNavigate: () => v
           <div className="nav-group" key={g.title}>
             <div className="nav-title">{g.title}</div>
             {items.map((n) => (
-              <Link key={n.href} href={n.href} onClick={onNavigate} className={`nav-link${pathname.startsWith(n.href) ? ' active' : ''}`}>
+              <Link
+                key={n.href} href={n.href} onClick={onNavigate}
+                className={`nav-link${active(pathname, n.href) ? ' active' : ''}`}
+                aria-current={active(pathname, n.href) ? 'page' : undefined}
+                title={collapsed ? n.label : undefined}
+              >
                 <Icon name={n.icon} />
-                {n.label}
+                <span className="nav-label">{n.label}</span>
               </Link>
             ))}
           </div>
@@ -70,16 +102,42 @@ function NavLinks({ user, onNavigate }: { user: SessionUser; onNavigate: () => v
   );
 }
 
+const active = (pathname: string, href: string) =>
+  pathname === href || pathname.startsWith(`${href}/`) || (href === '/khata' && pathname.startsWith('/receipts'));
+
+const SIDEBAR_KEY = 'dist.sidebar';
+
+/** Top bar with the breadcrumb; also names the browser tab. */
+function TitledTopBar({ user, onMenu, detail }: { user: SessionUser; onMenu: () => void; detail: { path: string; title: string } | null }) {
+  const pathname = usePathname();
+  const crumbs = useMemo(() => crumbsFor(pathname, detail?.path === pathname ? detail.title : undefined), [pathname, detail]);
+  useEffect(() => {
+    document.title = `${crumbs[crumbs.length - 1].label} · Distribution`;
+  }, [crumbs]);
+  return <TopBar user={user} onMenu={onMenu} crumbs={crumbs} />;
+}
+
 export default function AppLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const user = useUser();
   const [open, setOpen] = useState(false);
   const [ready, setReady] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [detail, setDetail] = useState<{ path: string; title: string } | null>(null);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setReady(true);
+    try { setCollapsed(localStorage.getItem(SIDEBAR_KEY) === 'collapsed'); } catch { /* ignore */ }
   }, []);
+
+  const toggleSidebar = () => {
+    setCollapsed((c) => {
+      try { localStorage.setItem(SIDEBAR_KEY, c ? 'open' : 'collapsed'); } catch { /* ignore */ }
+      return !c;
+    });
+  };
+
   useEffect(() => {
     if (ready && !user) router.replace('/login');
   }, [ready, user, router]);
@@ -101,21 +159,32 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   if (!user) return null;
 
   return (
-    <div className="shell">
-      <div className={`scrim${open ? ' open' : ''}`} onClick={() => setOpen(false)} />
-      <nav className={`sidebar${open ? ' open' : ''}`}>
-        <div className="brand">
-          <span className="logo"><Icon name="products" /></span>
-          <span>Distribution<small>Rice &amp; Beverages</small></span>
+    <FeedbackProvider>
+      <PageTitleCtx.Provider value={setDetail}>
+        <div className={`shell${collapsed ? ' collapsed' : ''}`}>
+          <a href="#main" className="skip-link">Skip to content</a>
+          <div className={`scrim${open ? ' open' : ''}`} onClick={() => setOpen(false)} />
+          <nav className={`sidebar${open ? ' open' : ''}`} aria-label="Main menu">
+            <div className="brand">
+              <span className="logo"><Icon name="products" /></span>
+              <span className="brand-text">Distribution<small>Rice &amp; Beverages</small></span>
+            </div>
+            <Suspense fallback={null}>
+              <NavLinks user={user} onNavigate={() => setOpen(false)} collapsed={collapsed} />
+            </Suspense>
+            <button className="collapse-btn" onClick={toggleSidebar} aria-label={collapsed ? 'Expand menu' : 'Collapse menu'} title={collapsed ? 'Expand menu' : 'Collapse menu'}>
+              <Icon name={collapsed ? 'chevronRight' : 'chevronLeft'} />
+              <span className="nav-label">Collapse</span>
+            </button>
+          </nav>
+          <div className="main">
+            <Suspense fallback={<header className="topbar" />}>
+              <TitledTopBar user={user} onMenu={() => setOpen(true)} detail={detail} />
+            </Suspense>
+            <main className="content" id="main" tabIndex={-1}>{children}</main>
+          </div>
         </div>
-        <Suspense fallback={null}>
-          <NavLinks user={user} onNavigate={() => setOpen(false)} />
-        </Suspense>
-      </nav>
-      <div className="main">
-        <TopBar user={user} onMenu={() => setOpen(true)} />
-        <main className="content">{children}</main>
-      </div>
-    </div>
+      </PageTitleCtx.Provider>
+    </FeedbackProvider>
   );
 }

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
@@ -7,7 +8,7 @@ import { api, clearSession, type SessionUser } from '@/lib/api';
 
 interface Hit { group: string; title: string; sub: string; href: string }
 
-export default function TopBar({ user, onMenu }: { user: SessionUser; onMenu: () => void }) {
+export default function TopBar({ user, onMenu, crumbs }: { user: SessionUser; onMenu: () => void; crumbs: { label: string; href?: string }[] }) {
   const router = useRouter();
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<Hit[]>([]);
@@ -66,6 +67,15 @@ export default function TopBar({ user, onMenu }: { user: SessionUser; onMenu: ()
   return (
     <header className="topbar">
       <button className="menu-btn" aria-label="Open menu" onClick={onMenu}><Icon name="menu" /></button>
+      <nav className="crumbs" aria-label="Breadcrumb">
+        <ol>
+          {crumbs.map((c, i) => (
+            <li key={i} aria-current={i === crumbs.length - 1 ? 'page' : undefined}>
+              {c.href ? <Link href={c.href}>{c.label}</Link> : <span>{c.label}</span>}
+            </li>
+          ))}
+        </ol>
+      </nav>
       <div className="search" ref={box}>
         <Icon name="search" />
         <input

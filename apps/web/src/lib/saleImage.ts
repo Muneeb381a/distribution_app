@@ -100,7 +100,7 @@ function header(p: Pen, no: string, when: string, status: string) {
 }
 
 export async function renderBillImage(b: BillData, urduFamily: string): Promise<string> {
-  await document.fonts.load(`24px ${urduFamily}`, 'ڈسٹری بیوشن');
+  await document.fonts.load(`24px ${urduFamily}`, 'ڈسٹری بیوشن').catch(() => []); // a missing local fallback font must not stop the print
   const p = makePen(urduFamily);
   header(p, b.billNo, b.createdAt, b.status);
 
@@ -161,7 +161,7 @@ export async function renderBillImage(b: BillData, urduFamily: string): Promise<
 }
 
 export async function renderReceiptImage(r: ReceiptData, urduFamily: string): Promise<string> {
-  await document.fonts.load(`24px ${urduFamily}`, 'ڈسٹری بیوشن');
+  await document.fonts.load(`24px ${urduFamily}`, 'ڈسٹری بیوشن').catch(() => []); // a missing local fallback font must not stop the print
   const p = makePen(urduFamily);
   header(p, `Receipt ${r.receiptNo}`, r.createdAt, r.status);
   p.latin(r.customer.name, 24, PAD, 'left', true);
