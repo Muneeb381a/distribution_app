@@ -6,11 +6,12 @@ import { Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { FeedbackProvider } from '@/components/Feedback';
 import { Icon, type IconName } from '@/components/Icon';
 import TopBar from '@/components/TopBar';
+import type { Permission } from '@dist/shared';
 import { api, can, updateUser, useUser, type SessionUser } from '@/lib/api';
 import { startSync, useSyncState } from '@/lib/offline';
 import { PageTitleCtx } from '@/lib/pageTitle';
 
-interface NavItem { href: string; label: string; icon: IconName; permission: string | null }
+interface NavItem { href: string; label: string; icon: IconName; permission: Permission | null }
 
 const NAV: { title: string; items: NavItem[] }[] = [
   { title: 'Overview', items: [{ href: '/dashboard', label: 'Dashboard', icon: 'dashboard', permission: null }] },

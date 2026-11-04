@@ -1,6 +1,8 @@
 // Draws bills and receipts as images for 80 mm thermal printers. Thermal printers cannot shape Urdu
 // (Nastaliq) text themselves, so everything is printed as a picture.
 
+import { money } from '@dist/shared';
+
 export interface BillData {
   billNo: string;
   date: string;
@@ -35,7 +37,6 @@ export interface ReceiptData {
 
 const WIDTH = 576; // 80 mm at 203 dpi
 const PAD = 16;
-const money = (n: string | number) => Number(n).toLocaleString('en-PK');
 const label = (p: { name: string; size: string | null }) => (p.size ? `${p.name} ${p.size}` : p.name);
 
 type Pen = ReturnType<typeof makePen>;

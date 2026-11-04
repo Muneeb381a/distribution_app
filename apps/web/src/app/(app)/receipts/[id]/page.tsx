@@ -11,10 +11,10 @@ import { api, can, useUser } from '@/lib/api';
 import { urdu } from '@/lib/fonts';
 import { usePageTitle } from '@/lib/pageTitle';
 import { renderReceiptImage, type ReceiptData } from '@/lib/saleImage';
+import { money } from '@dist/shared';
 
 type Receipt = ReceiptData & { id: string; customerId: string; saleId: string | null; sale: { billNo: string } | null; customer: ReceiptData['customer'] & { phone: string | null } };
 
-const money = (n: string | number) => Number(n).toLocaleString('en-PK');
 
 export default function ReceiptPage() {
   const { id } = useParams<{ id: string }>();

@@ -8,6 +8,7 @@ import { Icon } from '@/components/Icon';
 import { rowLink } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
 import { usePageTitle } from '@/lib/pageTitle';
+import { CUSTOMER_LEDGER_LABEL, money, PAYMENT_METHODS } from '@dist/shared';
 
 interface Ledger {
   customer: { id: string; name: string; shopName: string | null; type: string; creditLimit: string | null };
@@ -18,9 +19,7 @@ interface Ledger {
 }
 interface CustomerInfo { phone: string | null; area: string | null; address: string | null }
 
-const LABEL: Record<string, string> = { SALE: 'Bill', PAYMENT: 'Payment', SALE_CANCEL: 'Bill cancelled', PAYMENT_CANCEL: 'Payment cancelled' };
-const METHODS: [string, string][] = [['CASH', 'Cash'], ['BANK', 'Bank'], ['EASYPAISA', 'Easypaisa'], ['JAZZCASH', 'JazzCash']];
-const money = (n: string | number) => Number(n).toLocaleString('en-PK');
+const METHODS = PAYMENT_METHODS.map((m) => [m.value, m.label] as const);
 const PAGE = 50;
 
 export default function CustomerKhataPage() {
@@ -141,7 +140,7 @@ export default function CustomerKhataPage() {
                   return (
                     <tr key={e.id} {...rowLink(() => router.push(href(e)))} className={`row-link${e.refType.endsWith('CANCEL') ? ' cancel' : ''}`}>
                       <td>{new Date(e.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-                      <td>{LABEL[e.refType] ?? e.refType}</td>
+                      <td>{CUSTOMER_LEDGER_LABEL[e.refType] ?? e.refType}</td>
                       <td><Link href={href(e)}>{e.note}</Link></td>
                       <td className="num amt-debit">{amt > 0 ? money(amt) : ''}</td>
                       <td className="num amt-credit">{amt < 0 ? money(-amt) : ''}</td>

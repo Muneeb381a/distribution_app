@@ -4,6 +4,10 @@
 // without the server, device-prefixed numbers, and a sync loop. Everything lives in IndexedDB on this PC.
 
 import { useSyncExternalStore } from 'react';
+import {
+  billPrefix, checkHasLines, checkOneLine, checkPayment, checkSaleHead, chooseRate, creditBlock, DOC_PREFIX, defaultPaid,
+  emptiesGiven, localDay, offlineNumber, round2, shortageText, type DocPrefix,
+} from '@dist/shared';
 import { api, ApiError, getUser } from './api';
 import type { BillData, ReceiptData } from './saleImage';
 
@@ -155,10 +159,10 @@ export async function ensureDevice(): Promise<string | null> {
 }
 
 /** BTL-D2-000014: device prefix plus a counter per document kind, kept on this PC. */
-function nextNumber(kind: 'BTL' | 'RIC' | 'RCP', prefix: string) {
+function nextNumber(kind: DocPrefix, prefix: string) {
   const n = Number(localStorage.getItem(counterKey(kind)) ?? '0') + 1;
   localStorage.setItem(counterKey(kind), String(n));
-  return `${kind}-${prefix}-${String(n).padStart(6, '0')}`;
+  return offlineNumber(kind, prefix, n);
 }
 
 /* ---------------------------------------------------------------- snapshot */
@@ -292,7 +296,6 @@ export function startSync() {
 
 /* ---------------------------------------------------------- local preview */
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
 const fmt = (n: number) => String(round2(n));
 const factor = (p: SnapProduct, unit: string) => Number(p.units.find((u) => u.unitName === unit)?.factorToBase ?? NaN);
 
@@ -316,11 +319,11 @@ async function adjusted(s: Snapshot) {
  * computed from the snapshot. Throws Error with the server's wording when the bill is not valid.
  */
 export async function previewOffline(s: Snapshot, b: SaleBody, perms: string[]): Promise<Preview> {
-  if (!b.items.length && !b.returns.length) throw new Error('Add at least one item or return');
+  // The same rules as the server (@dist/shared sale-rules); only the data comes from the snapshot.
+  checkHasLines(b.items.length, b.returns.length);
   const loc = s.locations.find((l) => l.id === b.locationId);
   if (!loc) throw new Error('Unknown or inactive location');
-  if (b.saleType === 'DELIVERY' && !b.salesmanId) throw new Error('A delivery needs a salesman');
-  if (b.saleType === 'DELIVERY' && !b.customerId) throw new Error('A delivery needs a customer');
+  checkSaleHead(b);
   const customer = b.customerId ? s.customers.find((c) => c.id === b.customerId) : undefined;
   if (b.customerId && !customer) throw new Error('Unknown or inactive customer');
   const adj = await adjusted(s);
@@ -332,43 +335,27 @@ export async function previewOffline(s: Snapshot, b: SaleBody, perms: string[]):
     if (!f) throw new Error(`${p.name} has no unit ${l.unitName}`);
     const fixed = customer && s.rates.find((r) => r.customerId === customer.id && r.productId === p.id && r.unitName === l.unitName)?.rate;
     const list = s.prices.find((r) => r.productId === p.id && r.unitName === l.unitName)?.rate;
-    const standard = fixed ?? list;
-    let rate: number;
-    if (l.rate == null) {
-      if (!standard) throw new Error(`No rate is set for ${p.name} (${l.unitName}); ${perms.includes('RATE_EDIT') ? 'enter one' : 'ask someone who can set rates'}`);
-      rate = Number(standard);
-    } else {
-      rate = l.rate;
-      if ((!standard || rate !== Number(standard)) && !perms.includes('RATE_EDIT')) throw new Error(`You are not allowed to change the rate of ${p.name}`);
-    }
+    const rate = Number(chooseRate({ productName: p.name, unitName: l.unitName, fixed: fixed ?? null, list: list ?? null, entered: l.rate ?? null, canEditRate: perms.includes('RATE_EDIT') }));
     return { p, qtyBase: l.qty * f, rate, amount: round2(l.qty * rate) };
   };
   const items = b.items.map(resolve);
   const returns = b.returns.map(resolve);
-  const lines = new Set([...items, ...returns].map((l) => l.p.category.businessLine.code));
-  if (lines.size > 1) throw new Error('A bill can hold bottles or rice, not both. Make two bills.');
-  const businessLine = [...lines][0];
+  const businessLine = checkOneLine([...items, ...returns].map((l) => l.p.category.businessLine.code));
 
   const gross = round2(items.reduce((x, l) => x + l.amount, 0));
   const returnsCredit = round2(returns.reduce((x, l) => x + l.amount, 0));
   const net = round2(gross - returnsCredit);
-  const cashLike = !customer || customer.type === 'CASH';
-  const paid = b.paidNow ?? (cashLike ? Math.max(net, 0) : 0);
-  if (net < 0 && paid > 0) throw new Error('A bill that credits the customer cannot also take payment');
-  if (!customer && paid !== net) throw new Error('A sale without a customer must be paid in full');
+  const paid = b.paidNow ?? defaultPaid(customer, net);
+  checkPayment({ hasCustomer: !!customer, net, paid });
   const previousBalance = customer ? round2(adj.balance.get(customer.id) ?? 0) : 0;
   const newBalance = round2(previousBalance + net - paid);
 
-  let blocked: string | null = null;
-  if (customer && net - paid > 0) {
-    if (customer.type === 'CASH') blocked = 'CASH_CUSTOMER_UNPAID: a cash customer must pay in full';
-    else if (customer.creditLimit && newBalance > Number(customer.creditLimit)) blocked = `CREDIT_LIMIT_EXCEEDED: balance would be ${newBalance} against a limit of ${Number(customer.creditLimit)}`;
-  }
+  const blocked = creditBlock({ customer: customer ?? null, net, paid, newBalance });
 
   const empties: Preview['empties'] = [];
   if (customer) {
     const given = new Map<string, number>();
-    for (const l of items) if (l.p.returnableEmpty) given.set(l.p.id, (given.get(l.p.id) ?? 0) + Math.round(l.qtyBase));
+    for (const l of items) if (l.p.returnableEmpty) given.set(l.p.id, (given.get(l.p.id) ?? 0) + emptiesGiven(l.qtyBase));
     const collected = new Map<string, number>();
     for (const c of b.emptiesCollected) collected.set(c.productId, (collected.get(c.productId) ?? 0) + c.qty);
     for (const pid of new Set([...given.keys(), ...collected.keys()])) {
@@ -383,7 +370,7 @@ export async function previewOffline(s: Snapshot, b: SaleBody, perms: string[]):
   const shortages: string[] = [];
   for (const [pid, qty] of need) {
     const have = adj.stock.get(`${pid}|${b.locationId}`) ?? 0;
-    if (have < qty) shortages.push(`${s.products.find((x) => x.id === pid)?.name}: have ${have}, need ${qty}`);
+    if (have < qty) shortages.push(shortageText(s.products.find((x) => x.id === pid)?.name ?? '', have, qty));
   }
 
   return {
@@ -405,7 +392,7 @@ export async function previewOffline(s: Snapshot, b: SaleBody, perms: string[]):
 export async function saveSaleOffline(s: Snapshot, b: SaleBody, p: Preview, clientId: string, salesmanName: string | null): Promise<OutboxOp> {
   const prefix = localStorage.getItem(PREFIX_KEY);
   if (!prefix) throw new Error('This PC has no device number yet. Connect once to set it up, then bills can be made offline.');
-  const number = nextNumber(p.businessLine === 'BOTTLES' ? 'BTL' : 'RIC', prefix);
+  const number = nextNumber(billPrefix(p.businessLine), prefix);
   const now = new Date();
   const customer = b.customerId ? s.customers.find((c) => c.id === b.customerId) : undefined;
   const prod = (id: string) => s.products.find((x) => x.id === id)!;
@@ -442,7 +429,7 @@ export async function savePaymentOffline(s: Snapshot, body: PaymentBody, clientI
   const adj = await adjusted(s);
   const before = round2(adj.balance.get(customer.id) ?? 0);
   const now = new Date();
-  const number = nextNumber('RCP', prefix);
+  const number = nextNumber(DOC_PREFIX.RECEIPT, prefix);
   const op: OutboxOp = {
     clientId, kind: 'PAYMENT', number, savedAt: now.toISOString(), status: 'pending', attempts: 0,
     payment: { ...body, date: localDay(now) }, customerId: customer.id, balanceDelta: -body.amount, stockUsed: [], emptiesDelta: [],
@@ -458,4 +445,3 @@ export async function savePaymentOffline(s: Snapshot, body: PaymentBody, clientI
   return op;
 }
 
-const localDay = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);

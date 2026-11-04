@@ -11,6 +11,7 @@ import { api, can, useUser } from '@/lib/api';
 import { urdu } from '@/lib/fonts';
 import { usePageTitle } from '@/lib/pageTitle';
 import { renderBillImage, type BillData } from '@/lib/saleImage';
+import { money } from '@dist/shared';
 
 type Bill = BillData & {
   id: string;
@@ -20,7 +21,6 @@ type Bill = BillData & {
   payments: { id: string; receiptNo: string; amount: string; method: string; status: string }[];
 };
 
-const money = (n: string | number) => Number(n).toLocaleString('en-PK');
 const label = (p: { name: string; size: string | null }) => (p.size ? `${p.name} (${p.size})` : p.name);
 
 export default function BillPage() {

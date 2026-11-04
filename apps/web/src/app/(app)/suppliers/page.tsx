@@ -1,7 +1,9 @@
 'use client';
 
 import Link from 'next/link';
+import { Badge } from '@/components/Badge';
 import CrudPage from '@/components/CrudPage';
+import { money, SUPPLIER_TYPES } from '@dist/shared';
 
 interface Supplier { id: string; name: string; phone: string | null; type: string; openingBalance: string }
 
@@ -15,18 +17,14 @@ export default function SuppliersPage() {
       fields={[
         { name: 'name', label: 'Name', required: true },
         { name: 'phone', label: 'Phone' },
-        { name: 'type', label: 'Type', type: 'select', options: [
-          { value: 'BEVERAGE', label: 'Beverage distributor' },
-          { value: 'RICE_MILL', label: 'Rice mill' },
-          { value: 'OTHER', label: 'Other' },
-        ] },
+        { name: 'type', label: 'Type', type: 'select', options: SUPPLIER_TYPES.map(({ value, label }) => ({ value, label })) },
         { name: 'openingBalance', label: 'Opening balance (we owe)', type: 'number' },
       ]}
       columns={[
         { header: 'Name', render: (r) => <b>{r.name}</b>, value: (r) => r.name },
         { header: 'Phone', render: (r) => r.phone ?? '' },
-        { header: 'Type', render: (r) => <span className="badge blue">{r.type.charAt(0) + r.type.slice(1).toLowerCase()}</span> },
-        { header: 'Opening balance', num: true, value: (r) => r.openingBalance, render: (r) => Number(r.openingBalance).toLocaleString() },
+        { header: 'Type', value: (r) => r.type, render: (r) => <Badge tone="blue">{SUPPLIER_TYPES.find((t) => t.value === r.type)?.label ?? r.type}</Badge> },
+        { header: 'Opening balance', num: true, value: (r) => r.openingBalance, render: (r) => money(r.openingBalance) },
       ]}
       extraRowActions={(r) => <Link href={`/suppliers/${r.id}`}>Ledger</Link>}
     />

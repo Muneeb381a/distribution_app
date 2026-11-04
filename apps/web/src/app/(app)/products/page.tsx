@@ -5,6 +5,7 @@ import { BusyButton, Empty, SkeletonRows, useConfirm, usePrompt, useToast } from
 import { Icon } from '@/components/Icon';
 import { LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
+import { money } from '@dist/shared';
 
 type Line = 'BOTTLES' | 'RICE';
 interface Category { id: string; name: string; parentId: string | null; businessLine: { code: Line } }
@@ -19,7 +20,6 @@ interface Price { productId: string; unitName: string; rate: string }
 
 const EMPTY = { name: '', brand: '', size: '', categoryId: '', packSize: '6', bagKg: '', returnableEmpty: true };
 type Form = typeof EMPTY;
-const money = (n: string | number) => Number(n).toLocaleString('en-PK', { maximumFractionDigits: 2 });
 const unitLabel = (u: string) => u.toLowerCase();
 
 /** Units sent to the API for a bottle or rice product. */

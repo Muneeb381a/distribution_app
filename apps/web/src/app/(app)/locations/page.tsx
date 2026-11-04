@@ -1,10 +1,12 @@
 'use client';
 
+import { Badge } from '@/components/Badge';
 import CrudPage from '@/components/CrudPage';
+import { LOCATION_TYPES } from '@dist/shared';
 
 interface Location { id: string; name: string; type: string; isActive: boolean }
 
-const TYPE: Record<string, [string, string]> = { GODOWN: ['Godown', 'blue'], SHOP: ['Shop', 'green'], VEHICLE: ['Vehicle', 'amber'] };
+const TYPE = Object.fromEntries(LOCATION_TYPES.map((t) => [t.value, t]));
 
 export default function LocationsPage() {
   return (
@@ -15,15 +17,11 @@ export default function LocationsPage() {
       icon="locations"
       fields={[
         { name: 'name', label: 'Name', required: true },
-        { name: 'type', label: 'Type', type: 'select', required: true, options: [
-          { value: 'GODOWN', label: 'Godown' },
-          { value: 'SHOP', label: 'Shop' },
-          { value: 'VEHICLE', label: 'Vehicle' },
-        ] },
+        { name: 'type', label: 'Type', type: 'select', required: true, options: LOCATION_TYPES.map(({ value, label }) => ({ value, label })) },
       ]}
       columns={[
         { header: 'Name', render: (r) => <b>{r.name}</b>, value: (r) => r.name },
-        { header: 'Type', render: (r) => <span className={`badge ${TYPE[r.type]?.[1] ?? ''}`}>{TYPE[r.type]?.[0] ?? r.type}</span>, value: (r) => r.type },
+        { header: 'Type', render: (r) => <Badge tone={TYPE[r.type]?.tone}>{TYPE[r.type]?.label ?? r.type}</Badge>, value: (r) => r.type },
       ]}
     />
   );

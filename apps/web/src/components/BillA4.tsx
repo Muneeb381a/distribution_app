@@ -1,7 +1,7 @@
 import { urdu } from '@/lib/fonts';
 import type { BillData, ReceiptData } from '@/lib/saleImage';
+import { money } from '@dist/shared';
 
-const money = (n: string | number) => Number(n).toLocaleString('en-PK');
 const name = (p: { name: string; size: string | null }) => (p.size ? `${p.name} (${p.size})` : p.name);
 
 function Row({ en, ur, value, bold }: { en: string; ur: string; value: string; bold?: boolean }) {

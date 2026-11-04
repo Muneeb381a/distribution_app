@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { api } from '@/lib/api';
 import { usePageTitle } from '@/lib/pageTitle';
+import { money, monthName } from '@dist/shared';
 
 interface Slip {
   month: string; base: string; commission: string; absenceDeduction: string; gross: string; advances: string; carryIn: string;
@@ -20,8 +21,6 @@ function attendanceText(a: Record<string, number>) {
   const parts = Object.entries(a).filter(([, v]) => Number(v) > 0).map(([k, v]) => `${v} ${ATT[k.toLowerCase()] ?? k.toLowerCase()}`);
   return parts.length ? parts.join(' · ') : 'Not marked';
 }
-const n = (v: string | number) => Number(v).toLocaleString('en-PK');
-const monthName = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 
 export default function SalarySlipPage() {
   const { id } = useParams<{ id: string }>();
@@ -67,19 +66,19 @@ export default function SalarySlipPage() {
           <table className="slip-table">
             <thead><tr><th>Earnings &amp; deductions</th><th className="num">Rs</th></tr></thead>
             <tbody>
-              {row(slip.employee.type === 'DAILY' ? 'Wages for days worked' : 'Salary', n(slip.base))}
-              {Number(slip.commission) > 0 && row(`Commission (${Number(slip.details?.commissionPercent ?? 0)}% of ${n(slip.details?.salesNet ?? '0')})`, n(slip.commission))}
-              {Number(slip.absenceDeduction) > 0 && row('Absence deduction', `-${n(slip.absenceDeduction)}`, 'minus')}
-              {row('Earned', n(slip.gross), 'subtotal')}
-              {slip.advanceItems.map((a) => row(`Advance ${a.date.slice(0, 10)}${a.note ? ` (${a.note})` : ''}`, `-${n(a.amount)}`, 'minus'))}
-              {Number(slip.carryIn) > 0 && row('Advances carried from last month', `-${n(slip.carryIn)}`, 'minus')}
+              {row(slip.employee.type === 'DAILY' ? 'Wages for days worked' : 'Salary', money(slip.base))}
+              {Number(slip.commission) > 0 && row(`Commission (${Number(slip.details?.commissionPercent ?? 0)}% of ${money(slip.details?.salesNet ?? '0')})`, money(slip.commission))}
+              {Number(slip.absenceDeduction) > 0 && row('Absence deduction', `-${money(slip.absenceDeduction)}`, 'minus')}
+              {row('Earned', money(slip.gross), 'subtotal')}
+              {slip.advanceItems.map((a) => row(`Advance ${a.date.slice(0, 10)}${a.note ? ` (${a.note})` : ''}`, `-${money(a.amount)}`, 'minus'))}
+              {Number(slip.carryIn) > 0 && row('Advances carried from last month', `-${money(slip.carryIn)}`, 'minus')}
             </tbody>
           </table>
           <div className="slip-net">
             <span>Net paid</span>
-            <b>Rs {n(slip.netPaid)}</b>
+            <b>Rs {money(slip.netPaid)}</b>
           </div>
-          {Number(slip.carryOut) > 0 && <p className="muted" style={{ margin: '10px 0 0' }}>Rs {n(slip.carryOut)} of advances is carried to next month.</p>}
+          {Number(slip.carryOut) > 0 && <p className="muted" style={{ margin: '10px 0 0' }}>Rs {money(slip.carryOut)} of advances is carried to next month.</p>}
           <footer className="slip-sign">
             <span>Employee signature</span>
             <span>Authorised by</span>

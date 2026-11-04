@@ -1,4 +1,5 @@
 import { useMemo, useSyncExternalStore } from 'react';
+import type { Permission } from '@dist/shared';
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3010';
 
@@ -83,4 +84,5 @@ export function useUser(): SessionUser | null {
   return useMemo(() => (raw ? (JSON.parse(raw) as SessionUser) : null), [raw]);
 }
 
-export const can = (user: SessionUser | null, permission: string) => !!user?.permissions.includes(permission);
+/** Typed against the shared permission list, so a misspelt permission is a compile error, not a hidden button. */
+export const can = (user: SessionUser | null, permission: Permission) => !!user?.permissions.includes(permission);

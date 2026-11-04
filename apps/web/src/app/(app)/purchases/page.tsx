@@ -4,10 +4,12 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import Combobox from '@/components/Combobox';
 import { BusyButton, Empty, SkeletonRows, useConfirm, useToast } from '@/components/Feedback';
+import { DueBadge } from '@/components/Badge';
 import { Icon } from '@/components/Icon';
 import { LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import { api } from '@/lib/api';
 import { productOptions, useLookups } from '@/lib/lookups';
+import { localDay, money } from '@dist/shared';
 
 interface Purchase {
   id: string; purchaseNo: string; date: string; total: string; paidNow: string; status: string;
@@ -15,14 +17,13 @@ interface Purchase {
 }
 interface Line { productId: string; unitName: string; qty: string; unitPrice: string }
 const emptyLine: Line = { productId: '', unitName: '', qty: '', unitPrice: '' };
-const today = () => new Date().toISOString().slice(0, 10);
 
 export default function PurchasesPage() {
   const { products, locations, suppliers, error: lookupError } = useLookups();
   const [list, setList] = useState<Purchase[] | null>(null);
   const toast = useToast();
   const confirm = useConfirm();
-  const [head, setHead] = useState({ supplierId: '', locationId: '', date: today(), paidNow: '', note: '' });
+  const [head, setHead] = useState({ supplierId: '', locationId: '', date: localDay(), paidNow: '', note: '' });
   const [lines, setLines] = useState<Line[]>([{ ...emptyLine }]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -61,7 +62,7 @@ export default function PurchasesPage() {
       });
       setLines([{ ...emptyLine }]);
       setHead({ ...head, paidNow: '', note: '' });
-      toast.success(`Purchase of Rs ${total.toLocaleString()} saved`);
+      toast.success(`Purchase of Rs ${money(total)} saved`);
       await load();
     } catch (err) {
       toast.error((err as Error).message);
@@ -113,7 +114,7 @@ export default function PurchasesPage() {
             </label>
             <label>Qty<input type="number" step="any" min="0" required value={l.qty} onChange={(e) => setLine(i, { qty: e.target.value })} /></label>
             <label>Price per unit<input type="number" step="any" min="0" required value={l.unitPrice} onChange={(e) => setLine(i, { unitPrice: e.target.value })} /></label>
-            <span className="badge" style={{ alignSelf: 'center' }}>= Rs {((Number(l.qty) || 0) * (Number(l.unitPrice) || 0)).toLocaleString()}</span>
+            <span className="badge" style={{ alignSelf: 'center' }}>= Rs {money((Number(l.qty) || 0) * (Number(l.unitPrice) || 0))}</span>
             {lines.length > 1 && <button type="button" className="secondary" onClick={() => setLines(lines.filter((_, j) => j !== i))}>Remove</button>}
           </div>
         ))}
@@ -121,7 +122,7 @@ export default function PurchasesPage() {
           <button type="button" className="secondary" onClick={() => setLines([...lines, { ...emptyLine }])}>+ Add item</button>
           <label>Paid now<input type="number" step="any" min="0" max={total} value={head.paidNow} onChange={(e) => setHead({ ...head, paidNow: e.target.value })} /></label>
           <label>Note<input value={head.note} onChange={(e) => setHead({ ...head, note: e.target.value })} /></label>
-          <strong style={{ fontSize: 18 }}>Total Rs {total.toLocaleString()}</strong>
+          <strong style={{ fontSize: 18 }}>Total Rs {money(total)}</strong>
           <BusyButton busy={busy}>{busy ? 'Saving…' : 'Save purchase'}</BusyButton>
         </div>
       </form>
@@ -146,9 +147,9 @@ export default function PurchasesPage() {
               <td>{p.date.slice(0, 10)}</td>
               <td>{p.supplier.name}</td>
               <td>{p.location.name}</td>
-              <td className="num"><strong>{Number(p.total).toLocaleString()}</strong></td>
-              <td className="num">{Number(p.paidNow).toLocaleString()}</td>
-              <td>{p.status === 'CANCELLED' ? <span className="badge red">Cancelled</span> : Number(p.total) > Number(p.paidNow) ? <span className="badge amber">Due {(Number(p.total) - Number(p.paidNow)).toLocaleString()}</span> : <span className="badge green">Paid</span>}</td>
+              <td className="num"><strong>{money(p.total)}</strong></td>
+              <td className="num">{money(p.paidNow)}</td>
+              <td><DueBadge status={p.status} total={p.total} paid={p.paidNow} word="Due" /></td>
               <td>{p.status === 'ACTIVE' && <button className="secondary" onClick={() => cancel(p)}>Cancel</button>}</td>
             </tr>
           ))}

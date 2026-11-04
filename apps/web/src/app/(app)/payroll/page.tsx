@@ -6,6 +6,7 @@ import { BusyButton, Empty, SkeletonRows, useConfirm, usePrompt, useToast } from
 import { Icon } from '@/components/Icon';
 import { LoadMore, usePaged } from '@/components/Table';
 import { api } from '@/lib/api';
+import { ATTENDANCE_STATUSES, localDay, monthName, rupees } from '@dist/shared';
 
 interface Option { id: string; name: string }
 interface Preview {
@@ -16,22 +17,16 @@ interface Preview {
 interface Advance { id: string; date: string; amount: string; note: string | null; payrollRunId: string | null; status: string; employee: { name: string } }
 interface Attendance { employeeId: string; date: string; status: string }
 
-const STATUSES: [string, string, string][] = [
-  ['PRESENT', 'Present', 'green'], ['ABSENT', 'Absent', 'red'], ['HALF_DAY', 'Half day', 'amber'], ['PAID_LEAVE', 'Paid leave', 'blue'], ['UNPAID_LEAVE', 'Unpaid leave', ''],
-];
-const iso = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
-const today = () => iso(new Date());
-const n = (v: string | number) => Number(v).toLocaleString('en-PK', { maximumFractionDigits: 0 });
-const monthName = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+const STATUSES = ATTENDANCE_STATUSES.map((s) => [s.value, s.label, s.tone] as const);
 
 export default function PayrollPage() {
-  const [month, setMonth] = useState(today().slice(0, 7));
+  const [month, setMonth] = useState(localDay().slice(0, 7));
   const [employees, setEmployees] = useState<Option[]>([]);
   const [previews, setPreviews] = useState<Preview[] | null>(null);
   const [advances, setAdvances] = useState<Advance[] | null>(null);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
-  const [adv, setAdv] = useState({ employeeId: '', amount: '', date: today(), note: '' });
-  const [attDate, setAttDate] = useState(today());
+  const [adv, setAdv] = useState({ employeeId: '', amount: '', date: localDay(), note: '' });
+  const [attDate, setAttDate] = useState(localDay());
   const [att, setAtt] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -93,7 +88,7 @@ export default function PayrollPage() {
   const run = async (p: Preview) => {
     const ok = await confirm({
       title: `Finalise ${p.employee.name} for ${monthName(month)}?`,
-      body: <p>Pay <b>Rs {n(p.netPaid)}</b>{Number(p.carryOut) ? <>, carry {n(p.carryOut)} to next month</> : null}. Advances are deducted and the salary is posted as an expense.</p>,
+      body: <p>Pay <b>Rs {rupees(p.netPaid)}</b>{Number(p.carryOut) ? <>, carry {rupees(p.carryOut)} to next month</> : null}. Advances are deducted and the salary is posted as an expense.</p>,
       confirmLabel: 'Finalise & pay',
     });
     if (!ok) return;
@@ -120,11 +115,11 @@ export default function PayrollPage() {
     return act('adv', async () => {
       await api('/advances', { method: 'POST', json: { employeeId: adv.employeeId, amount: Number(adv.amount), date: adv.date, note: adv.note || undefined } });
       setAdv({ ...adv, amount: '', note: '' });
-    }, `Advance of Rs ${n(adv.amount)} recorded for ${name}`);
+    }, `Advance of Rs ${rupees(adv.amount)} recorded for ${name}`);
   }
 
   async function cancelAdvance(a: Advance) {
-    if (!(await confirm({ title: 'Cancel this advance?', body: <p>Rs {n(a.amount)} to {a.employee.name} on {a.date.slice(0, 10)}.</p>, confirmLabel: 'Cancel advance', cancelLabel: 'Keep', danger: true }))) return;
+    if (!(await confirm({ title: 'Cancel this advance?', body: <p>Rs {rupees(a.amount)} to {a.employee.name} on {a.date.slice(0, 10)}.</p>, confirmLabel: 'Cancel advance', cancelLabel: 'Keep', danger: true }))) return;
     act(`a-${a.id}`, () => api(`/advances/${a.id}/cancel`, { method: 'POST', json: {} }), 'Advance cancelled');
   }
 
@@ -160,9 +155,9 @@ export default function PayrollPage() {
       {error && <p className="error">{error}</p>}
 
       <div className="stats">
-        <div className="stat"><span className="label"><span className="icon"><Icon name="payroll" /></span>Pay for {monthName(month)}</span><span className="value"><small>Rs</small>{n(totals.pay)}</span><span className="sub">{previews?.length ?? 0} employees</span></div>
-        <div className="stat"><span className="label"><span className="icon green"><Icon name="check" /></span>Finalised</span><span className="value">{totals.done} <small>of {previews?.length ?? 0}</small></span><span className="sub">Rs {n(totals.paid)} paid</span></div>
-        <div className="stat"><span className="label"><span className="icon amber"><Icon name="wallet" /></span>Advances to deduct</span><span className="value"><small>Rs</small>{n(totals.advances)}</span><span className="sub">{openAdvances.length} open advances</span></div>
+        <div className="stat"><span className="label"><span className="icon"><Icon name="payroll" /></span>Pay for {monthName(month)}</span><span className="value"><small>Rs</small>{rupees(totals.pay)}</span><span className="sub">{previews?.length ?? 0} employees</span></div>
+        <div className="stat"><span className="label"><span className="icon green"><Icon name="check" /></span>Finalised</span><span className="value">{totals.done} <small>of {previews?.length ?? 0}</small></span><span className="sub">Rs {rupees(totals.paid)} paid</span></div>
+        <div className="stat"><span className="label"><span className="icon amber"><Icon name="wallet" /></span>Advances to deduct</span><span className="value"><small>Rs</small>{rupees(totals.advances)}</span><span className="sub">{openAdvances.length} open advances</span></div>
       </div>
 
       <h2>Salary for {monthName(month)}</h2>
@@ -179,14 +174,14 @@ export default function PayrollPage() {
           {previews?.map((p) => (
             <tr key={p.employee.id}>
               <td><b>{p.employee.name}</b><div className="muted" style={{ fontSize: 12.5 }}>{p.employee.type === 'DAILY' ? 'Daily wage' : 'Monthly salary'}</div></td>
-              <td className="num">{n(p.base)}</td>
-              <td className="num">{Number(p.commission) ? n(p.commission) : <span className="muted">—</span>}</td>
-              <td className="num">{Number(p.absenceDeduction) ? <span className="amt-debit">-{n(p.absenceDeduction)}</span> : <span className="muted">—</span>}</td>
-              <td className="num">{n(p.gross)}</td>
-              <td className="num">{Number(p.advances) ? <span className="amt-debit">-{n(p.advances)}</span> : <span className="muted">—</span>}</td>
-              <td className="num">{Number(p.carryIn) ? <span className="amt-debit">-{n(p.carryIn)}</span> : <span className="muted">—</span>}</td>
-              <td className="num"><b>{n(p.netPaid)}</b></td>
-              <td className="num">{Number(p.carryOut) ? <span className="badge amber">{n(p.carryOut)}</span> : <span className="muted">—</span>}</td>
+              <td className="num">{rupees(p.base)}</td>
+              <td className="num">{Number(p.commission) ? rupees(p.commission) : <span className="muted">—</span>}</td>
+              <td className="num">{Number(p.absenceDeduction) ? <span className="amt-debit">-{rupees(p.absenceDeduction)}</span> : <span className="muted">—</span>}</td>
+              <td className="num">{rupees(p.gross)}</td>
+              <td className="num">{Number(p.advances) ? <span className="amt-debit">-{rupees(p.advances)}</span> : <span className="muted">—</span>}</td>
+              <td className="num">{Number(p.carryIn) ? <span className="amt-debit">-{rupees(p.carryIn)}</span> : <span className="muted">—</span>}</td>
+              <td className="num"><b>{rupees(p.netPaid)}</b></td>
+              <td className="num">{Number(p.carryOut) ? <span className="badge amber">{rupees(p.carryOut)}</span> : <span className="muted">—</span>}</td>
               <td>{p.alreadyRun ? <span className="badge green">Paid</span> : <span className="badge">Not finalised</span>}</td>
               <td>
                 <div className="row-actions">
@@ -213,7 +208,7 @@ export default function PayrollPage() {
           <div className="card-head">
             <h2>Attendance</h2>
             <div className="actions">
-              <input type="date" aria-label="Attendance date" value={attDate} max={today()} onChange={(e) => setAttDate(e.target.value)} style={{ minWidth: 0 }} />
+              <input type="date" aria-label="Attendance date" value={attDate} max={localDay()} onChange={(e) => setAttDate(e.target.value)} style={{ minWidth: 0 }} />
               <BusyButton busy={busy === 'att'} onClick={saveAttendance} disabled={!employees.length}>Save</BusyButton>
             </div>
           </div>
@@ -265,7 +260,7 @@ export default function PayrollPage() {
             <tr key={a.id} className={a.status === 'CANCELLED' ? 'inactive' : ''}>
               <td>{new Date(a.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
               <td>{a.employee.name}</td>
-              <td className="num"><b>{n(a.amount)}</b></td>
+              <td className="num"><b>{rupees(a.amount)}</b></td>
               <td className="muted">{a.note}</td>
               <td>{a.status === 'CANCELLED' ? <span className="badge">Cancelled</span> : a.payrollRunId ? <span className="badge green">Deducted</span> : <span className="badge amber">Waiting for payroll</span>}</td>
               <td>{a.status === 'ACTIVE' && !a.payrollRunId && <BusyButton className="secondary" busy={busy === `a-${a.id}`} onClick={() => cancelAdvance(a)}>Cancel</BusyButton>}</td>

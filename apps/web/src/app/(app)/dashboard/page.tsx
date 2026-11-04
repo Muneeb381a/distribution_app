@@ -6,14 +6,13 @@ import StackedColumns, { LINE_SERIES, type Point } from '@/components/Chart';
 import { Icon, type IconName } from '@/components/Icon';
 import { api, can, useUser } from '@/lib/api';
 import { formatQty, productLabel } from '@/lib/lookups';
+import { lineLabel, localDay, methodLabel, rupees } from '@dist/shared';
 
 interface ProfitRow { period: string; lines: Record<'BOTTLES' | 'RICE', { netSales: string }> }
 interface StockRow { productId: string; productName: string; size: string | null; line: string; baseUnit: string; units: { unitName: string; factorToBase: string }[]; locationId: string; locationName: string; ok: string; damaged: string }
 interface Collections { rows: { byMethod: Record<string, string>; total: string; count: number }[] }
 
-const iso = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
 const SERIES = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)'];
-const METHOD_LABEL: Record<string, string> = { CASH: 'Cash', BANK: 'Bank', EASYPAISA: 'Easypaisa', JAZZCASH: 'JazzCash' };
 /** Low stock: under 5 cartons for bottles, under 100 kg for rice. */
 function isLow(r: StockRow) {
   const q = Number(r.ok);
@@ -34,7 +33,6 @@ interface Summary {
   recentSales: { id: string; billNo: string; date: string; net: string; paidNow: string; businessLine: string; customer: string | null }[];
 }
 
-const n = (v: string | number) => Math.round(Number(v)).toLocaleString();
 
 function Stat({ label, value, sub, icon, tone = '', negative = false }: { label: string; value: string; sub?: string; icon: IconName; tone?: string; negative?: boolean }) {
   return (
@@ -72,9 +70,9 @@ export default function DashboardPage() {
     if (!allowed) return;
     api<Summary>('/dashboard/summary').then(setData).catch((e) => setError(e.message));
     const t = new Date();
-    const first = iso(new Date(t.getFullYear(), t.getMonth(), 1));
-    api<{ rows: ProfitRow[] }>(`/reports/profit?from=${first}&to=${iso(t)}&groupBy=day`).then((r) => setMonth(r.rows)).catch(() => setMonth([]));
-    api<Collections>(`/reports/collections?from=${iso(t)}&to=${iso(t)}`).then(setCollections).catch(() => setCollections({ rows: [] }));
+    const first = localDay(new Date(t.getFullYear(), t.getMonth(), 1));
+    api<{ rows: ProfitRow[] }>(`/reports/profit?from=${first}&to=${localDay(t)}&groupBy=day`).then((r) => setMonth(r.rows)).catch(() => setMonth([]));
+    api<Collections>(`/reports/collections?from=${localDay(t)}&to=${localDay(t)}`).then(setCollections).catch(() => setCollections({ rows: [] }));
     api<StockRow[]>('/stock').then(setStock).catch(() => setStock([]));
   }, [allowed]);
 
@@ -84,7 +82,7 @@ export default function DashboardPage() {
     const by = new Map(month.map((r) => [r.period, r]));
     return Array.from({ length: t.getDate() }, (_, i) => {
       const d = new Date(t.getFullYear(), t.getMonth(), i + 1);
-      const r = by.get(iso(d));
+      const r = by.get(localDay(d));
       return {
         label: String(i + 1),
         title: d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }),
@@ -126,10 +124,10 @@ export default function DashboardPage() {
       {data && (
         <>
           <div className="stats">
-            <Stat label="Sales today" value={n(data.today.netSales)} sub={`${data.today.bills} bill${data.today.bills === 1 ? '' : 's'}`} icon="sales" />
-            <Stat label="Cash received" value={n(Number(data.today.cashWithBills) + Number(data.today.receipts))} sub={`${n(data.today.receipts)} from old khata`} icon="wallet" tone="green" />
-            <Stat label="Udhaar given today" value={n(data.today.udhaar)} sub="unpaid part of today's bills" icon="khata" tone="amber" />
-            <Stat label="Profit today" value={n(data.today.netProfit)} sub={`after ${n(data.today.expenses)} expenses`} icon="trend" tone={Number(data.today.netProfit) < 0 ? 'red' : 'green'} negative={Number(data.today.netProfit) < 0} />
+            <Stat label="Sales today" value={rupees(data.today.netSales)} sub={`${data.today.bills} bill${data.today.bills === 1 ? '' : 's'}`} icon="sales" />
+            <Stat label="Cash received" value={rupees(Number(data.today.cashWithBills) + Number(data.today.receipts))} sub={`${rupees(data.today.receipts)} from old khata`} icon="wallet" tone="green" />
+            <Stat label="Udhaar given today" value={rupees(data.today.udhaar)} sub="unpaid part of today's bills" icon="khata" tone="amber" />
+            <Stat label="Profit today" value={rupees(data.today.netProfit)} sub={`after ${rupees(data.today.expenses)} expenses`} icon="trend" tone={Number(data.today.netProfit) < 0 ? 'red' : 'green'} negative={Number(data.today.netProfit) < 0} />
           </div>
 
           <div className="dash-grid">
@@ -137,33 +135,33 @@ export default function DashboardPage() {
               <div className="card-head"><h2>Sales this month</h2><Link href="/reports">Reports</Link></div>
               {!month ? <span className="skeleton" style={{ display: 'block', height: 250 }} />
                 : <StackedColumns data={monthChart} series={LINE_SERIES} caption="Net sales per day this month, bottles and rice" highlight={String(new Date().getDate())} />}
-              <p className="muted chart-note">Last 7 days: Rs {n(data.trend.reduce((s, t) => s + Number(t.sales), 0))} · {data.trend.reduce((s, t) => s + t.bills, 0)} bills</p>
+              <p className="muted chart-note">Last 7 days: Rs {rupees(data.trend.reduce((s, t) => s + Number(t.sales), 0))} · {data.trend.reduce((s, t) => s + t.bills, 0)} bills</p>
             </div>
 
             <div className="card">
               <div className="card-head"><h2>This month</h2></div>
               <ul className="list">
-                <li><span className="muted">Net sales</span><span className="amt">Rs {n(data.month.netSales)}</span></li>
-                <li><span className="muted">· Bottles</span><span className="amt">Rs {n(data.month.bottles)}</span></li>
-                <li><span className="muted">· Rice</span><span className="amt">Rs {n(data.month.rice)}</span></li>
-                <li><span className="muted">Gross profit</span><span className="amt">Rs {n(data.month.grossProfit)}</span></li>
-                <li><span className="muted">Expenses</span><span className="amt">Rs {n(data.month.expenses)}</span></li>
-                <li><strong>Net profit</strong><span className={`amt ${Number(data.month.netProfit) < 0 ? 'error' : 'ok'}`}>Rs {n(data.month.netProfit)}</span></li>
+                <li><span className="muted">Net sales</span><span className="amt">Rs {rupees(data.month.netSales)}</span></li>
+                <li><span className="muted">· Bottles</span><span className="amt">Rs {rupees(data.month.bottles)}</span></li>
+                <li><span className="muted">· Rice</span><span className="amt">Rs {rupees(data.month.rice)}</span></li>
+                <li><span className="muted">Gross profit</span><span className="amt">Rs {rupees(data.month.grossProfit)}</span></li>
+                <li><span className="muted">Expenses</span><span className="amt">Rs {rupees(data.month.expenses)}</span></li>
+                <li><strong>Net profit</strong><span className={`amt ${Number(data.month.netProfit) < 0 ? 'error' : 'ok'}`}>Rs {rupees(data.month.netProfit)}</span></li>
               </ul>
             </div>
           </div>
 
           <div className="stats" style={{ marginTop: 20 }}>
-            <Stat label="Customers owe us" value={n(data.khata.receivable)} sub={`${data.khata.customersOwing} customers${data.khata.overLimit ? ` · ${data.khata.overLimit} over limit` : ''}`} icon="customers" tone="amber" />
-            <Stat label="We owe suppliers" value={n(data.payable)} sub="open supplier balances" icon="suppliers" tone="red" />
+            <Stat label="Customers owe us" value={rupees(data.khata.receivable)} sub={`${data.khata.customersOwing} customers${data.khata.overLimit ? ` · ${data.khata.overLimit} over limit` : ''}`} icon="customers" tone="amber" />
+            <Stat label="We owe suppliers" value={rupees(data.payable)} sub="open supplier balances" icon="suppliers" tone="red" />
             <div className="stat">
               <div className="label"><span className="icon green"><Icon name="wallet" /></span>Collected today</div>
-              <div className="value"><small>Rs</small>{n(collectedTotal)}</div>
+              <div className="value"><small>Rs</small>{rupees(collectedTotal)}</div>
               <div className="method-bar" aria-hidden="true">
                 {byMethod.map(([m, v], i) => <span key={m} style={{ flex: v, background: SERIES[i % 4] }} />)}
               </div>
               <div className="sub method-list">
-                {byMethod.length ? byMethod.map(([m, v], i) => <span key={m}><i style={{ background: SERIES[i % 4] }} />{METHOD_LABEL[m] ?? m} {n(v)}</span>) : 'No receipts yet today'}
+                {byMethod.length ? byMethod.map(([m, v], i) => <span key={m}><i style={{ background: SERIES[i % 4] }} />{methodLabel(m)} {rupees(v)}</span>) : 'No receipts yet today'}
               </div>
             </div>
           </div>
@@ -214,11 +212,11 @@ export default function DashboardPage() {
                     <li key={s.id}>
                       <div className="who-line">
                         <b><Link href={`/sales/${s.id}`}>{s.billNo}</Link></b>
-                        <span>{s.customer ?? 'Walk-in'} · {s.date.slice(0, 10)} · {s.businessLine === 'RICE' ? 'Rice' : 'Bottles'}</span>
+                        <span>{s.customer ?? 'Walk-in'} · {s.date.slice(0, 10)} · {lineLabel(s.businessLine)}</span>
                       </div>
                       <div style={{ textAlign: 'right' }}>
-                        <div className="amt">Rs {n(s.net)}</div>
-                        {Number(s.net) > Number(s.paidNow) ? <span className="badge amber">Udhaar {n(Number(s.net) - Number(s.paidNow))}</span> : <span className="badge green">Paid</span>}
+                        <div className="amt">Rs {rupees(s.net)}</div>
+                        {Number(s.net) > Number(s.paidNow) ? <span className="badge amber">Udhaar {rupees(Number(s.net) - Number(s.paidNow))}</span> : <span className="badge green">Paid</span>}
                       </div>
                     </li>
                   ))}
@@ -237,7 +235,7 @@ export default function DashboardPage() {
                         <span>{[c.shopName, c.area].filter(Boolean).join(' · ') || '—'}</span>
                       </div>
                       <div style={{ textAlign: 'right' }}>
-                        <div className="amt">Rs {n(c.balance)}</div>
+                        <div className="amt">Rs {rupees(c.balance)}</div>
                         {c.overLimit && <span className="badge red">Over limit</span>}
                       </div>
                     </li>

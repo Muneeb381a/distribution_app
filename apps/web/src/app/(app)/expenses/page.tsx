@@ -5,21 +5,17 @@ import { BusyButton, Empty, SkeletonRows, useConfirm, useToast } from '@/compone
 import { Icon } from '@/components/Icon';
 import { downloadCsv, LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import { api } from '@/lib/api';
+import { lineLabel, lineTone, localDay, monthStart, rupees } from '@dist/shared';
 
 interface Expense { id: string; date: string; category: string; businessLine: string | null; amount: string; note: string | null; source: string | null; status: string }
 
-const iso = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
-const today = () => iso(new Date());
-const monthStart = () => today().slice(0, 8) + '01';
-const n = (v: string | number) => Number(v).toLocaleString('en-PK', { maximumFractionDigits: 0 });
-const LINE: Record<string, [string, string]> = { BOTTLES: ['Bottles', 'blue'], RICE: ['Rice', 'amber'], '': ['Shared', ''] };
 
 export default function ExpensesPage() {
   const [rows, setRows] = useState<Expense[] | null>(null);
   const [categories, setCategories] = useState<string[]>([]);
-  const [range, setRange] = useState({ from: monthStart(), to: today() });
+  const [range, setRange] = useState({ from: localDay(monthStart()), to: localDay() });
   const [lineFilter, setLineFilter] = useState<'ALL' | 'BOTTLES' | 'RICE' | ''>('ALL');
-  const [form, setForm] = useState({ date: today(), category: '', businessLine: '', amount: '', note: '' });
+  const [form, setForm] = useState({ date: localDay(), category: '', businessLine: '', amount: '', note: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const toast = useToast();
@@ -44,7 +40,7 @@ export default function ExpensesPage() {
         method: 'POST',
         json: { date: form.date, category: form.category.trim(), businessLine: form.businessLine || undefined, amount: Number(form.amount), note: form.note || undefined },
       });
-      toast.success(`Rs ${n(form.amount)} for ${form.category} added`);
+      toast.success(`Rs ${rupees(form.amount)} for ${form.category} added`);
       if (!categories.includes(form.category.trim())) setCategories([...categories, form.category.trim()].sort());
       setForm({ ...form, amount: '', note: '' });
       await load();
@@ -56,7 +52,7 @@ export default function ExpensesPage() {
   }
 
   async function cancel(r: Expense) {
-    if (!(await confirm({ title: 'Cancel this expense?', body: <p>Rs {n(r.amount)} for {r.category} on {r.date.slice(0, 10)}. It stays in the list as cancelled and no longer counts in reports.</p>, confirmLabel: 'Cancel expense', cancelLabel: 'Keep', danger: true }))) return;
+    if (!(await confirm({ title: 'Cancel this expense?', body: <p>Rs {rupees(r.amount)} for {r.category} on {r.date.slice(0, 10)}. It stays in the list as cancelled and no longer counts in reports.</p>, confirmLabel: 'Cancel expense', cancelLabel: 'Keep', danger: true }))) return;
     try {
       await api(`/expenses/${r.id}/cancel`, { method: 'POST', json: {} });
       toast.success('Expense cancelled');
@@ -82,7 +78,7 @@ export default function ExpensesPage() {
     <>
       <div className="page-head">
         <div><h1>Expenses</h1><p>Shop and business costs. Payroll adds salaries here automatically.</p></div>
-        <button className="secondary btn-icon" disabled={!shown.length} onClick={() => downloadCsv(`expenses-${range.from}_${range.to}.csv`, ['Date', 'Category', 'For', 'Amount', 'Note', 'Status'], shown.map((r) => [r.date.slice(0, 10), r.category, LINE[r.businessLine ?? ''][0], r.amount, r.note, r.status.toLowerCase()]))}>
+        <button className="secondary btn-icon" disabled={!shown.length} onClick={() => downloadCsv(`expenses-${range.from}_${range.to}.csv`, ['Date', 'Category', 'For', 'Amount', 'Note', 'Status'], shown.map((r) => [r.date.slice(0, 10), r.category, lineLabel(r.businessLine), r.amount, r.note, r.status.toLowerCase()]))}>
           <Icon name="download" />Export CSV
         </button>
       </div>
@@ -104,9 +100,9 @@ export default function ExpensesPage() {
           </div>
 
           <div className="sum-bar">
-            <div><span>Total</span><b>Rs {n(total)}</b></div>
+            <div><span>Total</span><b>Rs {rupees(total)}</b></div>
             <div><span>Entries</span><b>{active.length}</b></div>
-            <div><span>Biggest</span><b style={{ fontSize: 15 }}>{byCategory[0] ? `${byCategory[0][0]} · ${n(byCategory[0][1])}` : '—'}</b></div>
+            <div><span>Biggest</span><b style={{ fontSize: 15 }}>{byCategory[0] ? `${byCategory[0][0]} · ${rupees(byCategory[0][1])}` : '—'}</b></div>
           </div>
 
           <table className="sticky-head">
@@ -125,8 +121,8 @@ export default function ExpensesPage() {
                 <tr key={r.id} className={r.status === 'CANCELLED' ? 'inactive' : ''}>
                   <td>{new Date(r.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</td>
                   <td><b>{r.category}</b></td>
-                  <td><span className={`badge ${LINE[r.businessLine ?? ''][1]}`}>{LINE[r.businessLine ?? ''][0]}</span></td>
-                  <td className="num">{r.status === 'CANCELLED' ? <s>{n(r.amount)}</s> : <b>{n(r.amount)}</b>}</td>
+                  <td><span className={`badge ${lineTone(r.businessLine)}`}>{lineLabel(r.businessLine)}</span></td>
+                  <td className="num">{r.status === 'CANCELLED' ? <s>{rupees(r.amount)}</s> : <b>{rupees(r.amount)}</b>}</td>
                   <td className="muted">{r.note}</td>
                   <td>
                     {r.status === 'CANCELLED' ? <span className="badge">Cancelled</span>
@@ -163,7 +159,7 @@ export default function ExpensesPage() {
               </div>
             </div>
             <div className="two">
-              <label>Date<input type="date" required max={today()} value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
+              <label>Date<input type="date" required max={localDay()} value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
               <label>Note<input value={form.note} placeholder="Optional" onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
             </div>
             <BusyButton type="submit" busy={busy}>Add expense</BusyButton>
@@ -174,7 +170,7 @@ export default function ExpensesPage() {
               <ul className="list">
                 {byCategory.slice(0, 8).map(([c, v]) => (
                   <li key={c} style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
-                    <span style={{ display: 'flex', justifyContent: 'space-between' }}><span>{c}</span><span className="amt">{n(v)}</span></span>
+                    <span style={{ display: 'flex', justifyContent: 'space-between' }}><span>{c}</span><span className="amt">{rupees(v)}</span></span>
                     <span className="meter" aria-hidden="true"><span style={{ width: `${(v / byCategory[0][1]) * 100}%`, background: 'var(--accent)' }} /></span>
                   </li>
                 ))}

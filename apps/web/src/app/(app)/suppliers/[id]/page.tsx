@@ -9,6 +9,7 @@ import { Icon } from '@/components/Icon';
 import { api, can, useUser } from '@/lib/api';
 import { productOptions, useLookups } from '@/lib/lookups';
 import { usePageTitle } from '@/lib/pageTitle';
+import { money, PAYMENT_METHODS, SUPPLIER_LEDGER_LABEL } from '@dist/shared';
 
 interface Ledger {
   supplier: { id: string; name: string; phone?: string | null; type?: string };
@@ -20,9 +21,7 @@ interface Ledger {
 interface EmptiesEntry { id: string; date: string; qtyIn: number; qtyOut: number; note: string | null; status: string; product: { name: string; size: string | null } }
 interface EmptiesData { entries: EmptiesEntry[]; owed: { productId: string; product: string; owed: number }[] }
 
-const LABEL: Record<string, string> = { PURCHASE: 'Purchase', PAYMENT: 'Payment', RETURN: 'Return', CANCEL: 'Cancelled purchase' };
-const METHODS: [string, string][] = [['CASH', 'Cash'], ['BANK', 'Bank'], ['EASYPAISA', 'Easypaisa'], ['JAZZCASH', 'JazzCash']];
-const money = (n: string | number) => Number(n).toLocaleString('en-PK', { maximumFractionDigits: 2 });
+const METHODS = PAYMENT_METHODS.map((m) => [m.value, m.label] as const);
 
 export default function SupplierLedgerPage() {
   const { id } = useParams<{ id: string }>();
@@ -171,7 +170,7 @@ export default function SupplierLedgerPage() {
                   return (
                     <tr key={e.id} className={e.refType === 'CANCEL' ? 'cancel' : ''}>
                       <td>{new Date(e.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-                      <td>{LABEL[e.refType] ?? e.refType}</td>
+                      <td>{SUPPLIER_LEDGER_LABEL[e.refType] ?? e.refType}</td>
                       <td className="muted">{e.note}</td>
                       <td className="num amt-debit">{a > 0 ? money(a) : ''}</td>
                       <td className="num amt-credit">{a < 0 ? money(-a) : ''}</td>

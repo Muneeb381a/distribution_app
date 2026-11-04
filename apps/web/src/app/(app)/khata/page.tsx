@@ -7,13 +7,13 @@ import { Empty, SkeletonRows } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
 import { LoadMore, rowLink, SortTh, usePaged, useSort } from '@/components/Table';
 import { api } from '@/lib/api';
+import { money } from '@dist/shared';
 
 interface Row {
   id: string; name: string; shopName: string | null; area: string | null; phone: string | null;
   type: string; creditLimit: string | null; balance: string; overLimit: boolean;
 }
 
-const n = (v: string | number) => Number(v).toLocaleString();
 
 export default function KhataPage() {
   const router = useRouter();
@@ -42,7 +42,7 @@ export default function KhataPage() {
       {error && <p className="error">{error}</p>}
 
       <div className="sum-bar">
-        <div><span>Total outstanding</span><b>Rs {n(total)}</b></div>
+        <div><span>Total outstanding</span><b>Rs {money(total)}</b></div>
         <div><span>Customers</span><b>{shown.length}</b></div>
         <div><span>Over limit</span><b className={over ? 'error' : ''}>{over}</b></div>
       </div>
@@ -71,8 +71,8 @@ export default function KhataPage() {
               <td><strong>{r.name}</strong>{r.shopName && <span className="muted"> · {r.shopName}</span>}</td>
               <td>{r.area}</td>
               <td>{r.phone}</td>
-              <td className="num">{r.creditLimit ? n(r.creditLimit) : '—'}</td>
-              <td className="num"><strong className={r.overLimit ? 'error' : ''}>{n(r.balance)}</strong></td>
+              <td className="num">{r.creditLimit ? money(r.creditLimit) : '—'}</td>
+              <td className="num"><strong className={r.overLimit ? 'error' : ''}>{money(r.balance)}</strong></td>
               <td>{r.overLimit ? <span className="badge red">Over limit</span> : Number(r.balance) > 0 ? <span className="badge amber">Owes</span> : Number(r.balance) < 0 ? <span className="badge blue">Advance</span> : <span className="badge green">Clear</span>}</td>
               <td><Link href={`/khata/${r.id}`}>Open →</Link></td>
             </tr>

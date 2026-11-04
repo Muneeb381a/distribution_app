@@ -9,6 +9,7 @@ import { Icon } from '@/components/Icon';
 import { api, can, useUser } from '@/lib/api';
 import { productOptions, type ProductOpt } from '@/lib/lookups';
 import { usePageTitle } from '@/lib/pageTitle';
+import { money } from '@dist/shared';
 
 interface Customer { id: string; name: string; shopName: string | null; phone: string | null; area: string | null; type: string; creditLimit: string | null; openingBalance: string }
 interface RateRow { productId: string; unitName: string; rate: string }
@@ -91,8 +92,8 @@ export default function CustomerRatesPage() {
 
       <div className="mini-stats">
         <div className="stat"><span className="label">Fixed rates</span><span className="value">{rows?.length ?? '—'}</span><span className="sub">product / unit pairs</span></div>
-        <div className="stat"><span className="label">Credit limit</span><span className="value">{customer?.creditLimit ? <><small>Rs</small>{Number(customer.creditLimit).toLocaleString('en-PK')}</> : '—'}</span></div>
-        <div className="stat"><span className="label">Opening balance</span><span className="value"><small>Rs</small>{Number(customer?.openingBalance ?? 0).toLocaleString('en-PK')}</span></div>
+        <div className="stat"><span className="label">Credit limit</span><span className="value">{customer?.creditLimit ? <><small>Rs</small>{money(customer.creditLimit)}</> : '—'}</span></div>
+        <div className="stat"><span className="label">Opening balance</span><span className="value"><small>Rs</small>{money(customer?.openingBalance ?? 0)}</span></div>
       </div>
 
       <section className="card">

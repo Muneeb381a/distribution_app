@@ -1,6 +1,7 @@
 'use client';
 
 import CrudPage from '@/components/CrudPage';
+import { money } from '@dist/shared';
 
 interface Employee { id: string; isActive: boolean; name: string; phone: string | null; type: string; monthlySalary: string | null; dailyWage: string | null; commissionPercent: string | null }
 
@@ -27,7 +28,7 @@ export default function EmployeesPage() {
         { header: 'Name', render: (r) => <b>{r.name}</b>, value: (r) => r.name },
         { header: 'Phone', render: (r) => r.phone ?? '' },
         { header: 'Type', value: (r) => r.type, render: (r) => <span className="badge blue">{r.type === 'DAILY' ? 'Daily' : 'Monthly'}</span> },
-        { header: 'Pay', num: true, value: (r) => r.monthlySalary ?? r.dailyWage, render: (r) => Number(r.monthlySalary ?? r.dailyWage ?? 0).toLocaleString() },
+        { header: 'Pay', num: true, value: (r) => r.monthlySalary ?? r.dailyWage, render: (r) => money(r.monthlySalary ?? r.dailyWage ?? 0) },
         { header: 'Commission', num: true, render: (r) => (r.commissionPercent ? `${Number(r.commissionPercent)}%` : '—') },
       ]}
     />

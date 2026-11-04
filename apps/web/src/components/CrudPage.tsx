@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import { BusyButton, Empty, SkeletonRows, useConfirm, useToast } from '@/components/Feedback';
 import { Icon, type IconName } from '@/components/Icon';
 import { LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
+import type { Permission } from '@dist/shared';
 import { api, can, useUser } from '@/lib/api';
 
 export interface Field {
@@ -31,7 +32,7 @@ interface Props<T extends { id: string }> {
   fields: Field[];
   columns: Column<T>[];
   /** Permission needed to add, edit and deactivate. */
-  editPermission: string;
+  editPermission: Permission;
   /** Called to turn the form text values into the JSON body. */
   toBody?: (values: Record<string, string>) => Record<string, unknown>;
   extraRowActions?: (row: T) => ReactNode;

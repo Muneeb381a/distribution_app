@@ -11,6 +11,7 @@ import { api, can, useUser } from '@/lib/api';
 import { customerOptions, productOptions, useLookups, type ProductOpt } from '@/lib/lookups';
 import { getSnapshot, isNetworkError, previewOffline, saveSaleOffline, useSyncState, type OutboxOp, type Preview, type Snapshot } from '@/lib/offline';
 import type { PrintMode } from '@/components/PrintPanel';
+import { money, PAYMENT_METHODS, RETURN_REASONS } from '@dist/shared';
 
 interface Customer { id: string; name: string; shopName: string | null; area: string | null; phone: string | null; type: 'CASH' | 'CREDIT'; creditLimit: string | null }
 interface LastBill { id: string; billNo: string; date: string; net: string; rates: Record<string, string> }
@@ -20,8 +21,7 @@ interface Collected { productId: string; qty: string }
 type Priced = { rate: string; amount: string } | undefined;
 
 const blank = (): Line => ({ productId: '', unitName: '', qty: '', rate: '', reason: 'DAMAGED' });
-const money = (n: string | number) => Number(n).toLocaleString('en-PK');
-const METHODS = [['CASH', 'Cash'], ['BANK', 'Bank'], ['EASYPAISA', 'Easypaisa'], ['JAZZCASH', 'JazzCash']];
+const METHODS = PAYMENT_METHODS.map((m) => [m.value, m.label] as const);
 
 export default function NewSalePage() {
   const search = useSearchParams();
@@ -237,8 +237,7 @@ export default function NewSalePage() {
         />
         {isReturn && (
           <select aria-label="Reason" value={l.reason} onChange={(e) => setLine(set, list, i, { reason: e.target.value })}>
-            <option value="DAMAGED">Damaged</option>
-            <option value="EXPIRED">Expired</option>
+            {RETURN_REASONS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
           </select>
         )}
         <div className={`line-amt${isReturn ? ' neg' : ''}`}>{pr ? `${isReturn ? '-' : ''}${money(pr.amount)}` : '—'}</div>

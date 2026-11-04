@@ -5,16 +5,11 @@ import Link from 'next/link';
 import { SkeletonRows, useConfirm, usePrompt, useToast } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
 import { api, can, useUser } from '@/lib/api';
+import { PERMISSION_GROUPS } from '@dist/shared';
 
 interface Role { id: string; name: string; permissions: { permissionCode: string }[] }
 interface User { id: string; username: string; isActive: boolean; role: { id: string; name: string } }
 
-const GROUPS: { title: string; items: [string, string][] }[] = [
-  { title: 'Selling', items: [['SALE_CREATE', 'Create bills'], ['SALE_CANCEL', 'Cancel bills'], ['PAYMENT_RECORD', 'Record customer payments'], ['RATE_EDIT', 'Change rates on a bill'], ['CREDIT_OVERRIDE', 'Override credit limit']] },
-  { title: 'Stock & purchasing', items: [['PURCHASE_MANAGE', 'Purchases and returns'], ['SUPPLIER_PAYMENT', 'Pay suppliers'], ['STOCK_TRANSFER', 'Transfer stock'], ['STOCK_ADJUST', 'Adjust / mark damaged'], ['DAMAGED_APPROVE', 'Approve damaged → saleable']] },
-  { title: 'Money & reports', items: [['EXPENSE_MANAGE', 'Expenses'], ['PAYROLL_MANAGE', 'Payroll, attendance, advances'], ['REPORT_VIEW', 'Dashboard and reports'], ['AUDIT_VIEW', 'View audit log']] },
-  { title: 'Admin', items: [['MASTER_DATA_EDIT', 'Edit products, customers, suppliers'], ['IMPORT_DATA', 'Import from Excel'], ['USER_MANAGE', 'Users and roles']] },
-];
 
 function RoleEditor({ initial, onSave, onCancel }: { initial: { name: string; permissions: string[] }; onSave: (name: string, perms: string[]) => Promise<void>; onCancel: () => void }) {
   const [name, setName] = useState(initial.name);
@@ -36,7 +31,7 @@ function RoleEditor({ initial, onSave, onCancel }: { initial: { name: string; pe
         <span className="muted" style={{ alignSelf: 'center' }}>{perms.size} permissions selected</span>
       </div>
       <div className="perm-grid">
-        {GROUPS.map((g) => (
+        {PERMISSION_GROUPS.map((g) => (
           <div key={g.title}>
             <h3>{g.title}</h3>
             {g.items.map(([code, label]) => (

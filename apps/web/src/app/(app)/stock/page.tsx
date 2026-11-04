@@ -6,6 +6,7 @@ import { Empty, SkeletonRows, useToast } from '@/components/Feedback';
 import { LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
 import { formatQty, productLabel, productOptions, useLookups, type ProductOpt } from '@/lib/lookups';
+import { money } from '@dist/shared';
 
 interface Row {
   productId: string; productName: string; size: string | null; line: string; baseUnit: string;
@@ -130,8 +131,8 @@ export default function StockPage() {
               <td className="num">{Number(r.damaged) ? <span className="badge red">{Number(r.damaged)}</span> : <span className="muted">—</span>}</td>
               {showCost && (
                 <>
-                  <td className="num">{r.latestUnitCost ? Number(r.latestUnitCost).toLocaleString() : '—'}</td>
-                  <td className="num">{r.value ? <strong>{Number(r.value).toLocaleString()}</strong> : '—'}</td>
+                  <td className="num">{r.latestUnitCost ? money(r.latestUnitCost) : '—'}</td>
+                  <td className="num">{r.value ? <strong>{money(r.value)}</strong> : '—'}</td>
                 </>
               )}
             </tr>

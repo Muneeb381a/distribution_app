@@ -6,27 +6,18 @@ import { Empty, SkeletonRows } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
 import { downloadCsv, SortTh, useSort } from '@/components/Table';
 import { api } from '@/lib/api';
+import { addDays, lineLabel, localDay, presetRange, rupees } from '@dist/shared';
 
 type Tab = 'profit' | 'rice' | 'salesmen' | 'empties' | 'returns' | 'collections';
 const TABS: [Tab, string][] = [
   ['profit', 'Profit'], ['rice', 'Rice bought / sold'], ['salesmen', 'Salesmen & vehicles'],
   ['empties', 'Empties'], ['returns', 'Returns & damaged'], ['collections', 'Collections'],
 ];
-const n = (v: string | number | null | undefined) => Number(v ?? 0).toLocaleString('en-PK', { maximumFractionDigits: 0 });
 const neg = (v: string | number) => (Number(v) < 0 ? 'error' : '');
-const iso = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
-const addDays = (d: Date, k: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + k);
 
 type Preset = 'today' | 'yesterday' | '7d' | 'month' | 'lastMonth' | 'custom';
 const PRESETS: [Preset, string][] = [['today', 'Today'], ['yesterday', 'Yesterday'], ['7d', 'Last 7 days'], ['month', 'This month'], ['lastMonth', 'Last month']];
-function rangeOf(p: Preset): [string, string] {
-  const t = new Date();
-  if (p === 'yesterday') return [iso(addDays(t, -1)), iso(addDays(t, -1))];
-  if (p === '7d') return [iso(addDays(t, -6)), iso(t)];
-  if (p === 'month') return [iso(new Date(t.getFullYear(), t.getMonth(), 1)), iso(t)];
-  if (p === 'lastMonth') return [iso(new Date(t.getFullYear(), t.getMonth() - 1, 1)), iso(new Date(t.getFullYear(), t.getMonth(), 0))];
-  return [iso(t), iso(t)];
-}
+const rangeOf = (p: Preset): [string, string] => presetRange(p === 'custom' ? 'today' : p);
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Data = any;
@@ -42,7 +33,7 @@ function DataTable({ cols, rows, empty = 'Nothing in this range.', rowKey }: { c
       <table>
         <thead><tr>{cols.map((c) => <SortTh key={c.key} k={c.key} sort={sort} toggle={toggle} num={c.num}>{c.label}</SortTh>)}</tr></thead>
         <tbody>
-          {sorted.map((r, i) => <tr key={rowKey(r, i)}>{cols.map((c) => <td key={c.key} className={c.num ? 'num' : ''}>{c.render ? c.render(r) : c.num ? n(c.value(r)) : c.value(r)}</td>)}</tr>)}
+          {sorted.map((r, i) => <tr key={rowKey(r, i)}>{cols.map((c) => <td key={c.key} className={c.num ? 'num' : ''}>{c.render ? c.render(r) : c.num ? rupees(c.value(r)) : c.value(r)}</td>)}</tr>)}
           {!rows.length && <tr><td colSpan={cols.length}><Empty icon="reports" title={empty} text="Try a wider date range." /></td></tr>}
         </tbody>
       </table>
@@ -67,8 +58,8 @@ function Profit({ d, from, to, groupBy }: { d: Data; from: string; to: string; g
     };
     if (groupBy === 'day') {
       const out = [];
-      for (let t = new Date(`${from}T00:00:00`); iso(t) <= to && out.length < 93; t = addDays(t, 1)) {
-        out.push(point(iso(t), String(t.getDate()), t.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })));
+      for (let t = new Date(`${from}T00:00:00`); localDay(t) <= to && out.length < 93; t = addDays(t, 1)) {
+        out.push(point(localDay(t), String(t.getDate()), t.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })));
       }
       return out;
     }
@@ -78,7 +69,7 @@ function Profit({ d, from, to, groupBy }: { d: Data; from: string; to: string; g
   const tile = (label: string, value: number, sub: string, icon: Parameters<typeof Icon>[0]['name'], tone = '') => (
     <div className="stat">
       <span className="label"><span className={`icon ${tone}`}><Icon name={icon} /></span>{label}</span>
-      <span className={`value${value < 0 ? ' neg' : ''}`}><small>Rs</small>{n(value)}</span>
+      <span className={`value${value < 0 ? ' neg' : ''}`}><small>Rs</small>{rupees(value)}</span>
       <span className="sub">{sub}</span>
     </div>
   );
@@ -87,9 +78,9 @@ function Profit({ d, from, to, groupBy }: { d: Data; from: string; to: string; g
   return (
     <>
       <div className="stats">
-        {tile('Net sales', net, `${n(sumLine(rows, 'BOTTLES', 'netSales'))} bottles · ${n(sumLine(rows, 'RICE', 'netSales'))} rice`, 'sales')}
+        {tile('Net sales', net, `${rupees(sumLine(rows, 'BOTTLES', 'netSales'))} bottles · ${rupees(sumLine(rows, 'RICE', 'netSales'))} rice`, 'sales')}
         {tile('Gross profit', gross, pct(gross), 'trend', 'green')}
-        {tile('Expenses', exp, `incl. ${n(rows.reduce((s, r) => s + Number(r.sharedExpenses), 0))} shared`, 'expenses', 'amber')}
+        {tile('Expenses', exp, `incl. ${rupees(rows.reduce((s, r) => s + Number(r.sharedExpenses), 0))} shared`, 'expenses', 'amber')}
         {tile('Net profit', profit, pct(profit), 'wallet', profit < 0 ? 'red' : 'green')}
       </div>
       {uncosted > 0 && <p className="error"><Icon name="alert" /> {uncosted} sold lines have no cost yet, so profit is overstated.</p>}
@@ -110,9 +101,9 @@ function Profit({ d, from, to, groupBy }: { d: Data; from: string; to: string; g
           { key: 'r', label: 'Rice net', num: true, value: (r) => r.lines.RICE.netSales },
           { key: 'net', label: 'Net sales', num: true, value: (r) => r.total.netSales },
           { key: 'cost', label: 'Cost', num: true, value: (r) => r.total.cost },
-          { key: 'gross', label: 'Gross profit', num: true, value: (r) => r.total.grossProfit, render: (r) => <span className={neg(r.total.grossProfit)}>{n(r.total.grossProfit)}</span> },
+          { key: 'gross', label: 'Gross profit', num: true, value: (r) => r.total.grossProfit, render: (r) => <span className={neg(r.total.grossProfit)}>{rupees(r.total.grossProfit)}</span> },
           { key: 'exp', label: 'Expenses', num: true, value: (r) => r.total.expenses },
-          { key: 'np', label: 'Net profit', num: true, value: (r) => r.total.netProfit, render: (r) => <b className={neg(r.total.netProfit)}>{n(r.total.netProfit)}</b> },
+          { key: 'np', label: 'Net profit', num: true, value: (r) => r.total.netProfit, render: (r) => <b className={neg(r.total.netProfit)}>{rupees(r.total.netProfit)}</b> },
           { key: 'cash', label: 'Cash with bills', num: true, value: (r) => r.cash.paidWithBills },
           { key: 'udh', label: 'Udhaar given', num: true, value: (r) => r.cash.udhaarGiven },
         ]}
@@ -126,15 +117,15 @@ function Profit({ d, from, to, groupBy }: { d: Data; from: string; to: string; g
               <tbody>
                 {(['BOTTLES', 'RICE'] as const).map((k) => (
                   <tr key={k}>
-                    <td><span className="swatch" style={{ background: LINE_SERIES.find((s) => s.key === k)!.color }} />{k === 'BOTTLES' ? 'Bottles' : 'Rice'}</td>
+                    <td><span className="swatch" style={{ background: LINE_SERIES.find((s) => s.key === k)!.color }} />{lineLabel(k)}</td>
                     {['qtySold', 'sales', 'returnsCredit', 'netSales', 'cost', 'grossProfit', 'expenses', 'netProfit'].map((f) => (
-                      <td key={f} className={`num ${neg(sumLine(rows, k, f))}`}>{n(sumLine(rows, k, f))}</td>
+                      <td key={f} className={`num ${neg(sumLine(rows, k, f))}`}>{rupees(sumLine(rows, k, f))}</td>
                     ))}
                   </tr>
                 ))}
                 <tr className="total-row">
-                  <td>Total</td><td className="num">{n(sumTotal(rows, 'qtySold'))}</td><td className="num">{n(sumTotal(rows, 'sales'))}</td><td className="num">{n(sumTotal(rows, 'returnsCredit'))}</td>
-                  <td className="num">{n(net)}</td><td className="num">{n(sumTotal(rows, 'cost'))}</td><td className={`num ${neg(gross)}`}>{n(gross)}</td><td className="num">{n(exp)}</td><td className={`num ${neg(profit)}`}>{n(profit)}</td>
+                  <td>Total</td><td className="num">{rupees(sumTotal(rows, 'qtySold'))}</td><td className="num">{rupees(sumTotal(rows, 'sales'))}</td><td className="num">{rupees(sumTotal(rows, 'returnsCredit'))}</td>
+                  <td className="num">{rupees(net)}</td><td className="num">{rupees(sumTotal(rows, 'cost'))}</td><td className={`num ${neg(gross)}`}>{rupees(gross)}</td><td className="num">{rupees(exp)}</td><td className={`num ${neg(profit)}`}>{rupees(profit)}</td>
                 </tr>
               </tbody>
             </table>
@@ -146,7 +137,7 @@ function Profit({ d, from, to, groupBy }: { d: Data; from: string; to: string; g
   );
 }
 
-const methods = (r: Data) => Object.entries(r.byMethod ?? {}).map(([m, v]) => `${m.toLowerCase()} ${n(v as string)}`).join(' · ');
+const methods = (r: Data) => Object.entries(r.byMethod ?? {}).map(([m, v]) => `${m.toLowerCase()} ${rupees(v as string)}`).join(' · ');
 
 /** Columns per tab, also used for the CSV export. */
 function colsFor(tab: Tab): Record<string, Col[]> {
@@ -169,7 +160,7 @@ function colsFor(tab: Tab): Record<string, Col[]> {
     ] };
     case 'salesmen': return {
       salesmen: [{ key: 'name', label: 'Salesman', value: (r) => r.name, render: (r) => <b>{r.name}</b> }, ...sm,
-        { key: 'commission', label: 'Commission', num: true, value: (r) => r.commission, render: (r) => <>{n(r.commission)}{r.commissionPercent && <span className="muted"> ({Number(r.commissionPercent)}%)</span>}</> }],
+        { key: 'commission', label: 'Commission', num: true, value: (r) => r.commission, render: (r) => <>{rupees(r.commission)}{r.commissionPercent && <span className="muted"> ({Number(r.commissionPercent)}%)</span>}</> }],
       vehicles: [{ key: 'name', label: 'Vehicle', value: (r) => r.name, render: (r) => <b>{r.name}</b> }, ...sm],
     };
     case 'empties': return { customers: [
@@ -189,7 +180,7 @@ function colsFor(tab: Tab): Record<string, Col[]> {
         { key: 'bill', label: 'Bill', value: (r) => r.bill },
         { key: 'customer', label: 'Customer', value: (r) => r.customer },
         { key: 'product', label: 'Product', value: (r) => r.product },
-        { key: 'qty', label: 'Qty', num: true, value: (r) => r.qty, render: (r) => `${n(r.qty)} ${r.unitName.toLowerCase()}` },
+        { key: 'qty', label: 'Qty', num: true, value: (r) => r.qty, render: (r) => `${rupees(r.qty)} ${r.unitName.toLowerCase()}` },
         { key: 'reason', label: 'Reason', value: (r) => r.reason.toLowerCase(), render: (r) => <span className={`badge ${r.reason === 'DAMAGED' ? 'red' : 'amber'}`}>{r.reason.toLowerCase()}</span> },
         { key: 'credit', label: 'Credit', num: true, value: (r) => r.credit },
       ],
@@ -203,7 +194,7 @@ function colsFor(tab: Tab): Record<string, Col[]> {
       { key: 'date', label: 'Date', value: (r) => r.date },
       { key: 'user', label: 'Recorded by', value: (r) => r.user },
       { key: 'count', label: 'Receipts', num: true, value: (r) => r.count },
-      { key: 'total', label: 'Total', num: true, value: (r) => r.total, render: (r) => <b>{n(r.total)}</b> },
+      { key: 'total', label: 'Total', num: true, value: (r) => r.total, render: (r) => <b>{rupees(r.total)}</b> },
       { key: 'methods', label: 'By method', value: methods, render: (r) => <span className="muted">{methods(r)}</span> },
     ] };
     default: return {};
@@ -228,8 +219,8 @@ function View({ tab, d }: { tab: Tab; d: Data }) {
     <>
       {tab === 'returns' && (
         <div className="mini-stats">
-          <div className="stat"><span className="label">Damaged credited</span><span className="value"><small>Rs</small>{n(d.credit.DAMAGED)}</span></div>
-          <div className="stat"><span className="label">Expired credited</span><span className="value"><small>Rs</small>{n(d.credit.EXPIRED)}</span></div>
+          <div className="stat"><span className="label">Damaged credited</span><span className="value"><small>Rs</small>{rupees(d.credit.DAMAGED)}</span></div>
+          <div className="stat"><span className="label">Expired credited</span><span className="value"><small>Rs</small>{rupees(d.credit.EXPIRED)}</span></div>
         </div>
       )}
       {Object.keys(cols).map((k) => (
@@ -274,7 +265,7 @@ export default function ReportsPage() {
 
   function exportCsv() {
     if (!ready) return;
-    const name = `${tab}-${tab === 'empties' ? iso(new Date()) : `${from}_${to}`}`;
+    const name = `${tab}-${tab === 'empties' ? localDay(new Date()) : `${from}_${to}`}`;
     if (tab === 'profit') {
       const f = ['netSales', 'cost', 'grossProfit', 'expenses', 'netProfit'];
       downloadCsv(`${name}.csv`, ['Period', 'Bottles net', 'Rice net', 'Net sales', 'Cost', 'Gross profit', 'Expenses', 'Net profit', 'Cash with bills', 'Udhaar given'],
