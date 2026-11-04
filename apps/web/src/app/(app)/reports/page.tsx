@@ -90,9 +90,16 @@ function View({ tab, d }: { tab: Tab; d: Data }) {
   }
   if (tab === 'empties') {
     return (
-      <Table head={['Customer', 'Area', 'Product', 'Empties held']} empty={!d.length}>
-        {d.map((r: Data) => <tr key={r.customerId + r.productId}><td>{r.customer?.name}{r.customer?.shopName && <span className="muted"> · {r.customer.shopName}</span>}</td><td>{r.customer?.area}</td><td>{r.product}</td><td>{r.held}</td></tr>)}
-      </Table>
+      <>
+        <h2 style={{ marginTop: 0 }}>Held by customers</h2>
+        <Table head={['Customer', 'Area', 'Product', 'Empties held']} empty={!d.customers.length}>
+          {d.customers.map((r: Data) => <tr key={r.customerId + r.productId}><td>{r.customer?.name}{r.customer?.shopName && <span className="muted"> · {r.customer.shopName}</span>}</td><td>{r.customer?.area}</td><td>{r.product}</td><td>{r.held}</td></tr>)}
+        </Table>
+        <h2>Owed to suppliers</h2>
+        <Table head={['Supplier', 'Product', 'Position']} empty={!d.suppliers.length}>
+          {d.suppliers.map((r: Data) => <tr key={r.supplierId + r.productId}><td>{r.supplier}</td><td>{r.product}</td><td>{r.owed > 0 ? <span className="badge amber">{r.owed} to return</span> : <span className="badge blue">supplier owes us {-r.owed}</span>}</td></tr>)}
+        </Table>
+      </>
     );
   }
   if (tab === 'returns') {
@@ -126,7 +133,10 @@ export default function ReportsPage() {
 
   useEffect(() => {
     const qs = new URLSearchParams({ from, to, ...(tab === 'profit' ? { groupBy } : {}) }).toString();
-    api<Data>(`/reports/${tab}${tab === 'empties' ? '' : `?${qs}`}`)
+    const req = tab === 'empties'
+      ? Promise.all([api<Data>('/reports/empties'), api<Data>('/reports/supplier-empties')]).then(([customers, suppliers]) => ({ customers, suppliers }))
+      : api<Data>(`/reports/${tab}?${qs}`);
+    req
       .then((d) => { setData({ tab, d }); setError(''); })
       .catch((e) => setError(e.message));
   }, [tab, from, to, groupBy]);

@@ -13,6 +13,9 @@ interface Ledger {
   entries: { id: string; date: string; refType: string; note: string | null; amount: string; balance: string }[];
 }
 
+interface EmptiesEntry { id: string; date: string; qtyIn: number; qtyOut: number; note: string | null; status: string; product: { name: string; size: string | null } }
+interface EmptiesData { entries: EmptiesEntry[]; owed: { productId: string; product: string; owed: number }[] }
+
 const LABEL: Record<string, string> = { PURCHASE: 'Purchase', PAYMENT: 'Payment', RETURN: 'Return', CANCEL: 'Cancelled purchase' };
 
 export default function SupplierLedgerPage() {
@@ -23,6 +26,16 @@ export default function SupplierLedgerPage() {
   const [pay, setPay] = useState({ amount: '', method: 'CASH', note: '' });
   const [ret, setRet] = useState({ locationId: '', productId: '', unitName: '', qty: '', unitPrice: '', fromStatus: 'DAMAGED', note: '' });
   const [error, setError] = useState('');
+  const [empties, setEmpties] = useState<EmptiesData | null>(null);
+  const [emp, setEmp] = useState({ direction: 'RECEIVED', productId: '', qty: '', note: '' });
+  const canEmpties = can(user, 'PURCHASE_MANAGE');
+
+  const loadEmpties = useCallback(() => {
+    if (canEmpties) api<EmptiesData>(`/supplier-empties?supplierId=${id}`).then(setEmpties).catch((e) => setError(e.message));
+  }, [id, canEmpties]);
+  useEffect(() => {
+    loadEmpties();
+  }, [loadEmpties]);
 
   const load = useCallback(() => api<Ledger>(`/suppliers/${id}/ledger`).then(setLedger).catch((e) => setError(e.message)), [id]);
   useEffect(() => {
@@ -58,6 +71,28 @@ export default function SupplierLedgerPage() {
       items: [{ productId: ret.productId, unitName: ret.unitName, qty: Number(ret.qty), unitPrice: Number(ret.unitPrice), fromStatus: ret.fromStatus }],
     });
     if (ok) setRet({ ...ret, qty: '', unitPrice: '', note: '' });
+  }
+
+  async function submitEmpties(e: FormEvent) {
+    e.preventDefault();
+    setError('');
+    try {
+      await api('/supplier-empties', { method: 'POST', json: { supplierId: id, direction: emp.direction, productId: emp.productId, qty: Math.round(Number(emp.qty)), note: emp.note || undefined } });
+      setEmp({ ...emp, qty: '', note: '' });
+      loadEmpties();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function cancelEmpties(entryId: string) {
+    if (!confirm('Cancel this empties entry?')) return;
+    try {
+      await api(`/supplier-empties/${entryId}/cancel`, { method: 'POST', json: {} });
+      loadEmpties();
+    } catch (err) {
+      setError((err as Error).message);
+    }
   }
 
   const owed = Number(ledger?.balance ?? 0);
@@ -113,6 +148,56 @@ export default function SupplierLedgerPage() {
           </form>
         )}
       </div>
+      {canEmpties && empties && (
+        <>
+          <h2>Empties (bottles / crates)</h2>
+          <div className="grid2">
+            <form className="card form" onSubmit={submitEmpties}>
+              <label>What happened
+                <select value={emp.direction} onChange={(e) => setEmp({ ...emp, direction: e.target.value })}>
+                  <option value="RECEIVED">Received empties from supplier</option>
+                  <option value="RETURNED">Sent empties back to supplier</option>
+                </select>
+              </label>
+              <label>Product
+                <select required value={emp.productId} onChange={(e) => setEmp({ ...emp, productId: e.target.value })}>
+                  <option value="">Select…</option>
+                  {products.filter((p) => p.returnableEmpty).map((p) => <option key={p.id} value={p.id}>{productLabel(p)}</option>)}
+                </select>
+              </label>
+              <label>Empties<input type="number" min="1" step="1" required value={emp.qty} onChange={(e) => setEmp({ ...emp, qty: e.target.value })} /></label>
+              <label>Note<input value={emp.note} onChange={(e) => setEmp({ ...emp, note: e.target.value })} /></label>
+              <div className="form-actions"><button>Save</button></div>
+            </form>
+            <div className="card">
+              <h3>Still to return to this supplier</h3>
+              {empties.owed.length ? (
+                <ul className="list">
+                  {empties.owed.map((o) => (
+                    <li key={o.productId}><span>{o.product}</span><span className={`badge ${o.owed > 0 ? 'amber' : 'blue'}`}>{o.owed > 0 ? `${o.owed} to return` : `supplier owes us ${-o.owed}`}</span></li>
+                  ))}
+                </ul>
+              ) : <p className="muted" style={{ margin: 0 }}>Nothing owed either way.</p>}
+            </div>
+          </div>
+          {empties.entries.length > 0 && (
+            <table>
+              <thead><tr><th>Date</th><th>Product</th><th className="num">Received</th><th className="num">Returned</th><th>Note</th><th /></tr></thead>
+              <tbody>
+                {empties.entries.map((e) => (
+                  <tr key={e.id} style={e.status === 'CANCELLED' ? { opacity: 0.5, textDecoration: 'line-through' } : undefined}>
+                    <td>{e.date.slice(0, 10)}</td><td>{e.product.name}</td>
+                    <td className="num">{e.qtyIn || '—'}</td><td className="num">{e.qtyOut || '—'}</td>
+                    <td className="muted">{e.note}</td>
+                    <td>{e.status === 'ACTIVE' && <button className="secondary" onClick={() => cancelEmpties(e.id)}>Cancel</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <h2>Money ledger</h2>
+        </>
+      )}
       <table>
         <thead><tr><th>Date</th><th>Entry</th><th>Ref</th><th>Amount</th><th>Balance</th></tr></thead>
         <tbody>

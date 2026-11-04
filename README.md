@@ -21,12 +21,11 @@ cd apps/web && pnpm dev              # web on :3100
 
 Ports 3000/3001/5433 were already taken on the development machine, hence 3010, 3100 and 5440.
 
-## Status
+## Tests
 
-- **Phase 1** (done): users, roles, audit log, products and units, customers with rates and credit limits, suppliers, employees, Excel/CSV import.
-- **Phase 2** (done): stock per location, transfers, adjustments and damaged stock, purchases, supplier ledger and payments, latest cost, opening-stock import.
-- **Phase 3** (done, screens not yet clicked through in a browser): counter and delivery bills, part payment, previous balance, credit limit with owner override, returns, empties (counts only), receipts, customer khata, thermal (Urdu image) and A4/PDF printing.
-- **Phase 5** (done, screens not yet clicked through in a browser): expenses (bottles / rice / shared), attendance, advances with carry-forward, payroll with commission and absence deduction, salary slips, and reports (profit by day or month, rice bought vs sold, salesmen and vehicles, empties, returns and damaged stock, collections).
-- **Not yet**: offline mode on the PC (Phase 4; see `/prototype`), automated tests, supplier empties, go-live data cleanup.
+```
+cd apps/api
+pnpm test
+```
 
-New roles/permissions only reach existing databases through the seed for Owner. Other roles must be edited (`PATCH /roles/:id`).
+Builds the API, then runs the end-to-end tests (selling and khata, credit limit, returns and cancellation, stock races, supplier empties, payroll, sign-in and permissions) against a throwaway database called `distribution_test`. The database is dropped and rebuilt on every run, so your dev data is never touched. The Docker database must be running.

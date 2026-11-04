@@ -13,10 +13,11 @@ import { SalesModule } from './sales/sales.module.js';
 import { HrModule } from './hr/hr.module.js';
 import { ReportsModule } from './reports/reports.module.js';
 import { DashboardModule } from './dashboard/dashboard.module.js';
+import { SupplierEmptiesModule } from './purchasing/supplier-empties.module.js';
 import { SearchModule } from './search/search.module.js';
 import { PrototypeModule } from './prototype/prototype.module.js';
 
 @Module({
-  imports: [PrismaModule, AuditModule, AuthModule, CatalogModule, MasterDataModule, UsersModule, ImportModule, StockCoreModule, StockModule, PurchasingModule, SalesModule, HrModule, ReportsModule, DashboardModule, SearchModule, PrototypeModule],
+  imports: [PrismaModule, AuditModule, AuthModule, CatalogModule, MasterDataModule, UsersModule, ImportModule, StockCoreModule, StockModule, PurchasingModule, SalesModule, HrModule, ReportsModule, DashboardModule, SearchModule, SupplierEmptiesModule, PrototypeModule],
 })
 export class AppModule {}

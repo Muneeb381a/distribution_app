@@ -247,7 +247,11 @@ class HrController {
   @Get('payroll/preview') @RequirePermissions('PAYROLL_MANAGE')
   async preview(@Query('employeeId') employeeId: string, @Query('month') month: string) {
     const existing = await this.prisma.payrollRun.findFirst({ where: { employeeId, month, status: 'ACTIVE' } });
-    return { alreadyRun: existing, ...(await this.payroll.calc(this.prisma, employeeId, month)) };
+    const calc = await this.payroll.calc(this.prisma, employeeId, month);
+    if (!existing) return { alreadyRun: null, ...calc };
+    // A finalised month shows what was actually paid, not a fresh calculation (its advances are already deducted).
+    const { id, base, commission, absenceDeduction, gross, advances, carryIn, netPaid, carryOut, details } = existing;
+    return { ...calc, alreadyRun: { id, status: existing.status }, base, commission, absenceDeduction, gross, advances, carryIn, netPaid, carryOut, details };
   }
 
   /** Finalises the month: deducts the advances, posts the salary expense, records what was paid. */

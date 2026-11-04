@@ -189,6 +189,20 @@ class ReportsController {
       .sort((a, b) => b.held - a.held);
   }
 
+  /** Empties we hold that belong to suppliers (positive) or that suppliers hold of ours (negative). */
+  @Get('supplier-empties') @RequirePermissions('REPORT_VIEW')
+  async supplierEmpties() {
+    const g = await this.prisma.supplierEmptiesLedger.groupBy({ by: ['supplierId', 'productId'], where: { status: 'ACTIVE' }, _sum: { qtyIn: true, qtyOut: true } });
+    const rows = g.map((r) => ({ supplierId: r.supplierId, productId: r.productId, owed: (r._sum.qtyIn ?? 0) - (r._sum.qtyOut ?? 0) })).filter((r) => r.owed !== 0);
+    const [suppliers, products] = await Promise.all([
+      this.prisma.supplier.findMany({ where: { id: { in: rows.map((r) => r.supplierId) } }, select: { id: true, name: true } }),
+      this.prisma.product.findMany({ where: { id: { in: rows.map((r) => r.productId) } }, select: { id: true, name: true } }),
+    ]);
+    return rows
+      .map((r) => ({ ...r, supplier: suppliers.find((s) => s.id === r.supplierId)?.name, product: products.find((p) => p.id === r.productId)?.name }))
+      .sort((a, b) => b.owed - a.owed);
+  }
+
   /** Customer returns in the range, plus damaged stock currently on hand. */
   @Get('returns') @RequirePermissions('REPORT_VIEW')
   async returns(@Query() q: RangeQuery) {

@@ -62,6 +62,12 @@ export default function PayrollPage() {
     return act(() => api('/payroll/run', { method: 'POST', json: { employeeId: p.employee.id, month } }), `Payroll saved for ${p.employee.name}`);
   };
 
+  const cancelRun = (p: Preview) => {
+    const reason = prompt(`Cancel ${p.employee.name}'s payroll for ${month}?\nAdvances become open again and the salary expense is cancelled.\n\nReason:`);
+    if (!reason || reason.trim().length < 3) return;
+    return act(() => api(`/payroll/${p.alreadyRun!.id}/cancel`, { method: 'POST', json: { reason: reason.trim() } }), `Payroll cancelled for ${p.employee.name}`);
+  };
+
   function addAdvance(e: FormEvent) {
     e.preventDefault();
     return act(async () => {
@@ -93,7 +99,7 @@ export default function PayrollPage() {
               <td className="num">{n(p.base)}</td><td className="num">{n(p.commission)}</td><td className="num">{Number(p.absenceDeduction) ? `-${n(p.absenceDeduction)}` : '—'}</td>
               <td className="num">{n(p.gross)}</td><td className="num">{Number(p.advances) ? `-${n(p.advances)}` : '—'}</td><td className="num">{Number(p.carryIn) ? `-${n(p.carryIn)}` : '—'}</td>
               <td className="num"><strong>{n(p.netPaid)}</strong></td><td className={`num ${Number(p.carryOut) ? 'error' : 'muted'}`}>{Number(p.carryOut) ? n(p.carryOut) : '—'}</td>
-              <td>{p.alreadyRun ? <Link href={`/payroll/${p.alreadyRun.id}`}>Slip</Link> : <button onClick={() => run(p)}>Finalise</button>}</td>
+              <td>{p.alreadyRun ? <><Link href={`/payroll/${p.alreadyRun.id}`}>Slip</Link>{' '}<button className="secondary" onClick={() => cancelRun(p)}>Cancel</button></> : <button onClick={() => run(p)}>Finalise</button>}</td>
             </tr>
           ))}
           {!previews.length && <tr><td colSpan={10} className="empty">No employees yet.</td></tr>}
