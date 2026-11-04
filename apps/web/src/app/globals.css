@@ -363,6 +363,8 @@ button.icon-only svg { width: 15px; height: 15px; }
 .chip.on { background: var(--text); color: var(--surface); border-color: transparent; }
 .chip.on:hover:not(:disabled) { background: var(--text); color: var(--surface); }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.fld input.big { font-size: 19px; font-weight: 700; }
+.chip-count { margin-left: 6px; font-weight: 500; opacity: 0.75; font-variant-numeric: tabular-nums; }
 .chip.on[data-tone='green'] { background: var(--success); color: var(--surface); }
 .chip.on[data-tone='red'] { background: var(--danger); color: var(--surface); }
 .chip.on[data-tone='amber'] { background: var(--warn); color: var(--surface); }
@@ -688,6 +690,12 @@ input[type='number'] { font-variant-numeric: tabular-nums; }
 .mini-stats .stat .value { font-size: 22px; }
 
 .dash-grid { display: grid; grid-template-columns: 1.55fr 1fr; gap: 20px; }
+.dash-grid.two-even { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-bottom: 20px; }
+.profit-stats { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.profit-sheet tr.pl-minus td { color: var(--text-2); border-top: 0; }
+.profit-sheet tr.pl-net td { font-size: 15.5px; }
+.profit-sheet td:first-child { white-space: nowrap; }
+@media (max-width: 640px) { .profit-sheet .hide-sm { display: none; } .profit-sheet td:first-child { white-space: normal; } }
 .dash-grid .card { margin-bottom: 0; }
 .dash-grid > *, .doc-grid > * { min-width: 0; }
 .dash-grid + .dash-grid, .dash-grid + .stats { margin-top: 20px; }

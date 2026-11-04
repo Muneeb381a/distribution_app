@@ -1,7 +1,7 @@
 import { BadRequestException, Body, ConflictException, Controller, Get, Injectable, Module, NotFoundException, Param, Post, Put, Query } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsEnum, IsISO8601, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Matches, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
-import { AttendanceStatus, BusinessLineCode, Prisma } from '@prisma/client';
+import { AttendanceStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service.js';
 import { AuditService } from '../audit/audit.module.js';
 import { CurrentUser, RequirePermissions, type AuthUser } from '../common/decorators.js';
@@ -28,7 +28,8 @@ export function monthRange(month: string) {
 class ExpenseDto {
   @IsOptional() @IsISO8601() date?: string;
   @IsString() @MaxLength(60) category: string;
-  @IsOptional() @IsEnum(BusinessLineCode) businessLine?: BusinessLineCode;
+  /** Godown or shop the cost is for; leave out for a general cost. */
+  @IsOptional() @IsUUID() locationId?: string;
   @IsNumber({ maxDecimalPlaces: 2 }) @IsPositive() amount: number;
   @IsOptional() @IsString() note?: string;
 }
@@ -216,14 +217,16 @@ class HrController {
   }
 
   @Get('expenses') @RequirePermissions('EXPENSE_MANAGE')
-  expenses(@Query() q: { from?: string; to?: string; category?: string; line?: BusinessLineCode }) {
+  expenses(@Query() q: { from?: string; to?: string; category?: string; locationId?: string }) {
     return this.prisma.expense.findMany({
       where: {
-        category: q.category, businessLine: q.line,
+        category: q.category,
+        locationId: q.locationId === 'none' ? null : q.locationId || undefined,
         date: q.from || q.to ? { gte: q.from ? dayOf(q.from) : undefined, lte: q.to ? dayOf(q.to) : undefined } : undefined,
       },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
       take: 500,
+      include: { location: { select: { id: true, name: true, type: true } } },
     });
   }
 
@@ -231,8 +234,12 @@ class HrController {
   async addExpense(@Body() dto: ExpenseDto, @CurrentUser() u: AuthUser) {
     const category = dto.category.trim();
     if (!category) throw new BadRequestException('Category is required');
+    if (dto.locationId) {
+      const loc = await this.prisma.location.findUnique({ where: { id: dto.locationId } });
+      if (!loc?.isActive || loc.type === 'VEHICLE') throw new BadRequestException('Pick a godown or shop');
+    }
     const row = await this.prisma.expense.create({
-      data: { date: dayOf(dto.date), category, businessLine: dto.businessLine, amount: dto.amount, note: dto.note, createdById: u.id },
+      data: { date: dayOf(dto.date), category, locationId: dto.locationId, amount: dto.amount, note: dto.note, createdById: u.id },
     });
     await this.audit.log(u.id, 'CREATE', 'Expense', row.id, undefined, row);
     return row;

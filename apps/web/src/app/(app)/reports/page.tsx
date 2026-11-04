@@ -47,7 +47,11 @@ const sumTotal = (rows: Data[], f: string) => rows.reduce((s, r) => s + Number(r
 function Profit({ d, from, to, groupBy }: { d: Data; from: string; to: string; groupBy: string }) {
   const rows: Data[] = d.rows;
   const net = sumTotal(rows, 'netSales'), gross = sumTotal(rows, 'grossProfit'), exp = sumTotal(rows, 'expenses'), profit = sumTotal(rows, 'netProfit');
+  const lineNet = { BOTTLES: sumLine(rows, 'BOTTLES', 'netSales'), RICE: sumLine(rows, 'RICE', 'netSales') };
+  const lineGross = { BOTTLES: sumLine(rows, 'BOTTLES', 'grossProfit'), RICE: sumLine(rows, 'RICE', 'grossProfit') };
   const uncosted = rows.reduce((s, r) => s + r.uncostedLines, 0);
+  const places: { locationId: string | null; name: string; type: string | null; amount: string }[] = d.expensesByPlace ?? [];
+  const categories: { category: string; amount: string }[] = d.expensesByCategory ?? [];
 
   // Every day of the range on the chart, including days with no sales.
   const chart = useMemo(() => {
@@ -73,17 +77,88 @@ function Profit({ d, from, to, groupBy }: { d: Data; from: string; to: string; g
       <span className="sub">{sub}</span>
     </div>
   );
-  const pct = (v: number) => (net ? `${Math.round((v / net) * 100)}% of net sales` : '—');
+  /** Profit as a share of the sales it came from: "18% margin". */
+  const margin = (p: number, sales: number) => (sales ? `${Math.round((p / sales) * 100)}% margin` : 'No sales');
+  const placeLabel = (p: (typeof places)[number]) => (p.type === 'GODOWN' ? 'Godown' : p.type === 'SHOP' ? 'Shop' : 'Salaries, office and other');
+  const biggestPlace = Math.max(1, ...places.map((p) => Number(p.amount)));
+  const biggestCat = Math.max(1, ...categories.map((c) => Number(c.amount)));
 
   return (
     <>
-      <div className="stats">
-        {tile('Net sales', net, `${rupees(sumLine(rows, 'BOTTLES', 'netSales'))} bottles · ${rupees(sumLine(rows, 'RICE', 'netSales'))} rice`, 'sales')}
-        {tile('Gross profit', gross, pct(gross), 'trend', 'green')}
-        {tile('Expenses', exp, `incl. ${rupees(rows.reduce((s, r) => s + Number(r.sharedExpenses), 0))} shared`, 'expenses', 'amber')}
-        {tile('Net profit', profit, pct(profit), 'wallet', profit < 0 ? 'red' : 'green')}
+      <div className="stats profit-stats">
+        {tile('Bottles profit', lineGross.BOTTLES, `${margin(lineGross.BOTTLES, lineNet.BOTTLES)} on Rs ${rupees(lineNet.BOTTLES)}`, 'products', 'blue')}
+        {tile('Rice profit', lineGross.RICE, `${margin(lineGross.RICE, lineNet.RICE)} on Rs ${rupees(lineNet.RICE)}`, 'stock', 'amber')}
+        {tile('Both together', gross, `${margin(gross, net)} on Rs ${rupees(net)} sales`, 'trend', 'green')}
+        {tile('Expenses', exp, places.length ? places.slice(0, 2).map((p) => `${p.name} ${rupees(p.amount)}`).join(' · ') : 'None in this range', 'expenses', 'amber')}
+        {tile('Net profit', profit, 'Both lines, after all expenses', 'wallet', profit < 0 ? 'red' : 'green')}
       </div>
       {uncosted > 0 && <p className="error"><Icon name="alert" /> {uncosted} sold lines have no cost yet, so profit is overstated.</p>}
+
+      {rows.length > 0 && (
+        <section className="card profit-sheet">
+          <div className="card-head"><h2>Profit and loss</h2><span className="muted" style={{ fontSize: 13 }}>{from === to ? from : `${from} to ${to}`}</span></div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th /><th className="num hide-sm">Net sales</th><th className="num hide-sm">Cost</th><th className="num">Profit</th><th className="num">Margin</th></tr></thead>
+              <tbody>
+                {(['BOTTLES', 'RICE'] as const).map((k) => (
+                  <tr key={k}>
+                    <td><span className="swatch" style={{ background: LINE_SERIES.find((s) => s.key === k)!.color }} />{lineLabel(k)}</td>
+                    <td className="num hide-sm">{rupees(lineNet[k])}</td>
+                    <td className="num hide-sm">{rupees(sumLine(rows, k, 'cost'))}</td>
+                    <td className={`num ${neg(lineGross[k])}`}><b>{rupees(lineGross[k])}</b></td>
+                    <td className="num muted">{lineNet[k] ? `${Math.round((lineGross[k] / lineNet[k]) * 100)}%` : '—'}</td>
+                  </tr>
+                ))}
+                <tr className="total-row">
+                  <td>Both lines</td><td className="num hide-sm">{rupees(net)}</td><td className="num hide-sm">{rupees(sumTotal(rows, 'cost'))}</td>
+                  <td className={`num ${neg(gross)}`}>{rupees(gross)}</td><td className="num">{net ? `${Math.round((gross / net) * 100)}%` : '—'}</td>
+                </tr>
+                {places.map((p) => (
+                  <tr key={p.locationId ?? 'general'} className="pl-minus">
+                    <td>Less expenses · {p.name}</td><td className="hide-sm" /><td className="hide-sm" /><td className="num amt-debit">-{rupees(p.amount)}</td><td />
+                  </tr>
+                ))}
+                <tr className="total-row pl-net">
+                  <td>Net profit</td><td className="hide-sm" /><td className="hide-sm" /><td className={`num ${neg(profit)}`}>{rupees(profit)}</td><td className="num">{net ? `${Math.round((profit / net) * 100)}%` : '—'}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="muted" style={{ fontSize: 13, margin: '10px 0 0' }}>Each line&apos;s profit is its net sales minus the purchase cost of what was sold. Expenses are kept together and come off the combined profit.</p>
+        </section>
+      )}
+
+      {places.length > 0 && (
+        <div className="dash-grid two-even">
+          <section className="card">
+            <div className="card-head"><h2>Expenses by place</h2></div>
+            <ul className="list">
+              {places.map((p) => (
+                <li key={p.locationId ?? 'general'} style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+                  <span style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                    <span><b>{p.name}</b>{placeLabel(p).toLowerCase() !== p.name.toLowerCase() && <span className="muted" style={{ fontSize: 12.5 }}> {placeLabel(p)}</span>}</span>
+                    <span className="amt">Rs {rupees(p.amount)}</span>
+                  </span>
+                  <span className="meter" aria-hidden="true"><span style={{ width: `${(Number(p.amount) / biggestPlace) * 100}%`, background: 'var(--accent)' }} /></span>
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section className="card">
+            <div className="card-head"><h2>Expenses by category</h2></div>
+            <ul className="list">
+              {categories.slice(0, 8).map((c) => (
+                <li key={c.category} style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+                  <span style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>{c.category}</span><span className="amt">Rs {rupees(c.amount)}</span></span>
+                  <span className="meter" aria-hidden="true"><span style={{ width: `${(Number(c.amount) / biggestCat) * 100}%`, background: 'var(--warn)' }} /></span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+      )}
+
       {chart.length > 1 && (
         <section className="card">
           <div className="card-head"><h2>Net sales by {groupBy === 'month' ? 'month' : 'day'}</h2></div>
@@ -97,11 +172,10 @@ function Profit({ d, from, to, groupBy }: { d: Data; from: string; to: string; g
         empty="No sales or expenses in this range."
         cols={[
           { key: 'period', label: 'Period', value: (r) => r.period, render: (r) => <b style={{ whiteSpace: 'nowrap' }}>{r.period}</b> },
-          { key: 'b', label: 'Bottles net', num: true, value: (r) => r.lines.BOTTLES.netSales },
-          { key: 'r', label: 'Rice net', num: true, value: (r) => r.lines.RICE.netSales },
           { key: 'net', label: 'Net sales', num: true, value: (r) => r.total.netSales },
-          { key: 'cost', label: 'Cost', num: true, value: (r) => r.total.cost },
-          { key: 'gross', label: 'Gross profit', num: true, value: (r) => r.total.grossProfit, render: (r) => <span className={neg(r.total.grossProfit)}>{rupees(r.total.grossProfit)}</span> },
+          { key: 'bp', label: 'Bottles profit', num: true, value: (r) => r.lines.BOTTLES.grossProfit, render: (r) => <span className={neg(r.lines.BOTTLES.grossProfit)}>{rupees(r.lines.BOTTLES.grossProfit)}</span> },
+          { key: 'rp', label: 'Rice profit', num: true, value: (r) => r.lines.RICE.grossProfit, render: (r) => <span className={neg(r.lines.RICE.grossProfit)}>{rupees(r.lines.RICE.grossProfit)}</span> },
+          { key: 'gross', label: 'Both', num: true, value: (r) => r.total.grossProfit, render: (r) => <span className={neg(r.total.grossProfit)}>{rupees(r.total.grossProfit)}</span> },
           { key: 'exp', label: 'Expenses', num: true, value: (r) => r.total.expenses },
           { key: 'np', label: 'Net profit', num: true, value: (r) => r.total.netProfit, render: (r) => <b className={neg(r.total.netProfit)}>{rupees(r.total.netProfit)}</b> },
           { key: 'cash', label: 'Cash with bills', num: true, value: (r) => r.cash.paidWithBills },
@@ -110,23 +184,19 @@ function Profit({ d, from, to, groupBy }: { d: Data; from: string; to: string; g
       />
       {rows.length > 0 && (
         <>
-          <h2>By line (whole range)</h2>
+          <h2>Sales detail by line</h2>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Line</th><th className="num">Qty sold</th><th className="num">Sales</th><th className="num">Returns</th><th className="num">Net sales</th><th className="num">Cost</th><th className="num">Gross profit</th><th className="num">Expenses</th><th className="num">Net profit</th></tr></thead>
+              <thead><tr><th>Line</th><th className="num">Qty sold</th><th className="num">Sales</th><th className="num">Returns</th><th className="num">Net sales</th><th className="num">Cost</th><th className="num">Gross profit</th></tr></thead>
               <tbody>
                 {(['BOTTLES', 'RICE'] as const).map((k) => (
                   <tr key={k}>
                     <td><span className="swatch" style={{ background: LINE_SERIES.find((s) => s.key === k)!.color }} />{lineLabel(k)}</td>
-                    {['qtySold', 'sales', 'returnsCredit', 'netSales', 'cost', 'grossProfit', 'expenses', 'netProfit'].map((f) => (
+                    {['qtySold', 'sales', 'returnsCredit', 'netSales', 'cost', 'grossProfit'].map((f) => (
                       <td key={f} className={`num ${neg(sumLine(rows, k, f))}`}>{rupees(sumLine(rows, k, f))}</td>
                     ))}
                   </tr>
                 ))}
-                <tr className="total-row">
-                  <td>Total</td><td className="num">{rupees(sumTotal(rows, 'qtySold'))}</td><td className="num">{rupees(sumTotal(rows, 'sales'))}</td><td className="num">{rupees(sumTotal(rows, 'returnsCredit'))}</td>
-                  <td className="num">{rupees(net)}</td><td className="num">{rupees(sumTotal(rows, 'cost'))}</td><td className={`num ${neg(gross)}`}>{rupees(gross)}</td><td className="num">{rupees(exp)}</td><td className={`num ${neg(profit)}`}>{rupees(profit)}</td>
-                </tr>
               </tbody>
             </table>
           </div>
@@ -267,9 +337,9 @@ export default function ReportsPage() {
     if (!ready) return;
     const name = `${tab}-${tab === 'empties' ? localDay(new Date()) : `${from}_${to}`}`;
     if (tab === 'profit') {
-      const f = ['netSales', 'cost', 'grossProfit', 'expenses', 'netProfit'];
-      downloadCsv(`${name}.csv`, ['Period', 'Bottles net', 'Rice net', 'Net sales', 'Cost', 'Gross profit', 'Expenses', 'Net profit', 'Cash with bills', 'Udhaar given'],
-        ready.rows.map((r: Data) => [r.period, r.lines.BOTTLES.netSales, r.lines.RICE.netSales, ...f.map((k) => r.total[k]), r.cash.paidWithBills, r.cash.udhaarGiven]));
+      downloadCsv(`${name}.csv`, ['Period', 'Bottles net sales', 'Bottles profit', 'Rice net sales', 'Rice profit', 'Net sales', 'Cost', 'Gross profit (both)', 'Expenses', 'Net profit', 'Cash with bills', 'Udhaar given'],
+        ready.rows.map((r: Data) => [r.period, r.lines.BOTTLES.netSales, r.lines.BOTTLES.grossProfit, r.lines.RICE.netSales, r.lines.RICE.grossProfit,
+          r.total.netSales, r.total.cost, r.total.grossProfit, r.total.expenses, r.total.netProfit, r.cash.paidWithBills, r.cash.udhaarGiven]));
       return;
     }
     const cols = colsFor(tab), rows = rowsFor(tab, ready);
@@ -315,7 +385,7 @@ export default function ReportsPage() {
       {error && <p className="error">{error}</p>}
       {!ready && !error && (
         <div aria-busy="true">
-          {tab === 'profit' && <div className="stats">{[0, 1, 2, 3].map((i) => <span key={i} className="skeleton" style={{ height: 104 }} />)}</div>}
+          {tab === 'profit' && <div className="stats profit-stats">{[0, 1, 2, 3, 4].map((i) => <span key={i} className="skeleton" style={{ height: 104 }} />)}</div>}
           <table><tbody><SkeletonRows cols={6} rows={6} /></tbody></table>
         </div>
       )}

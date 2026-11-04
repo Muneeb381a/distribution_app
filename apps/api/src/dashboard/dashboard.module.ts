@@ -26,7 +26,7 @@ class DashboardController {
     const [items, sales, expenses, receipts, customerRows, supplierRows, recent, damaged] = await Promise.all([
       this.prisma.saleItem.findMany({
         where: { sale: { status: 'ACTIVE', date: { gte: from, lte: today } } },
-        select: { qtyBase: true, unitCostBase: true, sale: { select: { date: true } } },
+        select: { qtyBase: true, unitCostBase: true, sale: { select: { date: true, businessLine: true } } },
       }),
       this.prisma.sale.findMany({
         where: { status: 'ACTIVE', date: { gte: from, lte: today } },
@@ -47,7 +47,7 @@ class DashboardController {
     const trend = new Map(days.map((d) => [d, { date: d, sales: ZERO(), bills: 0 }]));
     const todayKey = iso(today);
     const t = { bills: 0, netSales: ZERO(), cashWithBills: ZERO(), receipts: ZERO(), udhaar: ZERO(), expenses: ZERO(), cost: ZERO() };
-    const m = { bills: 0, netSales: ZERO(), expenses: ZERO(), cost: ZERO(), bottles: ZERO(), rice: ZERO() };
+    const m = { bills: 0, netSales: ZERO(), expenses: ZERO(), cost: ZERO(), bottles: ZERO(), rice: ZERO(), bottlesCost: ZERO(), riceCost: ZERO() };
 
     for (const s of sales) {
       const k = iso(s.date);
@@ -69,7 +69,11 @@ class DashboardController {
     }
     for (const it of items) {
       const c = it.unitCostBase ? it.qtyBase.mul(it.unitCostBase) : ZERO();
-      if (it.sale.date >= monthStart) m.cost = m.cost.plus(c);
+      if (it.sale.date >= monthStart) {
+        m.cost = m.cost.plus(c);
+        if (it.sale.businessLine === 'BOTTLES') m.bottlesCost = m.bottlesCost.plus(c);
+        else m.riceCost = m.riceCost.plus(c);
+      }
       if (iso(it.sale.date) === todayKey) t.cost = t.cost.plus(c);
     }
     for (const e of expenses) {
@@ -89,7 +93,11 @@ class DashboardController {
 
     return {
       today: { ...t, grossProfit: t.netSales.minus(t.cost), netProfit: t.netSales.minus(t.cost).minus(t.expenses) },
-      month: { ...m, grossProfit: m.netSales.minus(m.cost), netProfit: m.netSales.minus(m.cost).minus(m.expenses) },
+      month: {
+        ...m, grossProfit: m.netSales.minus(m.cost), netProfit: m.netSales.minus(m.cost).minus(m.expenses),
+        // Each line's own gross profit; expenses are not split and only come off the combined profit.
+        bottlesProfit: m.bottles.minus(m.bottlesCost), riceProfit: m.rice.minus(m.riceCost),
+      },
       trend: [...trend.values()],
       khata: { receivable, customersOwing: owing.length, overLimit: topDebtors.filter((d) => d.overLimit).length, topDebtors },
       payable: payable.gt(0) ? payable : ZERO(),

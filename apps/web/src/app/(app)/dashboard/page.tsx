@@ -25,7 +25,7 @@ function isLow(r: StockRow) {
 
 interface Summary {
   today: { bills: number; netSales: string; cashWithBills: string; receipts: string; udhaar: string; expenses: string; grossProfit: string; netProfit: string };
-  month: { bills: number; netSales: string; expenses: string; grossProfit: string; netProfit: string; bottles: string; rice: string };
+  month: { bills: number; netSales: string; expenses: string; grossProfit: string; netProfit: string; bottles: string; rice: string; bottlesProfit: string; riceProfit: string };
   trend: { date: string; sales: string; bills: number }[];
   khata: { receivable: string; customersOwing: number; overLimit: number; topDebtors: { id: string; name: string; shopName: string | null; area: string | null; balance: string; overLimit: boolean }[] };
   payable: string;
@@ -142,9 +142,9 @@ export default function DashboardPage() {
               <div className="card-head"><h2>This month</h2></div>
               <ul className="list">
                 <li><span className="muted">Net sales</span><span className="amt">Rs {rupees(data.month.netSales)}</span></li>
-                <li><span className="muted">· Bottles</span><span className="amt">Rs {rupees(data.month.bottles)}</span></li>
-                <li><span className="muted">· Rice</span><span className="amt">Rs {rupees(data.month.rice)}</span></li>
-                <li><span className="muted">Gross profit</span><span className="amt">Rs {rupees(data.month.grossProfit)}</span></li>
+                <li><span className="muted">Bottles profit <small>on {rupees(data.month.bottles)}</small></span><span className="amt">Rs {rupees(data.month.bottlesProfit)}</span></li>
+                <li><span className="muted">Rice profit <small>on {rupees(data.month.rice)}</small></span><span className="amt">Rs {rupees(data.month.riceProfit)}</span></li>
+                <li><span className="muted">Both together</span><span className="amt">Rs {rupees(data.month.grossProfit)}</span></li>
                 <li><span className="muted">Expenses</span><span className="amt">Rs {rupees(data.month.expenses)}</span></li>
                 <li><strong>Net profit</strong><span className={`amt ${Number(data.month.netProfit) < 0 ? 'error' : 'ok'}`}>Rs {rupees(data.month.netProfit)}</span></li>
               </ul>

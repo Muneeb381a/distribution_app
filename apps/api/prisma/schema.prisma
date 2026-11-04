@@ -162,6 +162,7 @@ model Location {
   transfersFrom   StockTransfer[]  @relation("TransferFrom")
   transfersTo     StockTransfer[]  @relation("TransferTo")
   sales           Sale[]
+  expenses        Expense[]
 }
 
 model Employee {
@@ -581,7 +582,11 @@ model Expense {
   id           String            @id @default(uuid())
   date         DateTime          @db.Date
   category     String
+  /// Old entries only: expenses are no longer split by business line; they come off total profit.
   businessLine BusinessLineCode?
+  /// Godown or shop the cost belongs to; null = general (salaries, office).
+  locationId   String?
+  location     Location?         @relation(fields: [locationId], references: [id])
   amount       Decimal           @db.Decimal(14, 2)
   note         String?
   /// Set for expenses created by the system (e.g. PAYROLL) so they can't be edited by hand.
@@ -592,6 +597,7 @@ model Expense {
   createdAt    DateTime          @default(now())
 
   @@index([date])
+  @@index([locationId])
 }
 
 model Attendance {

@@ -2,20 +2,29 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { BusyButton, Empty, SkeletonRows, useConfirm, useToast } from '@/components/Feedback';
+import { Affix, Choice, Field, FormActions, FormCard, FormSection } from '@/components/Form';
 import { Icon } from '@/components/Icon';
 import { downloadCsv, LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import { api } from '@/lib/api';
-import { lineLabel, lineTone, localDay, monthStart, rupees } from '@dist/shared';
+import { formatDate, localDay, monthStart, rupees } from '@dist/shared';
 
-interface Expense { id: string; date: string; category: string; businessLine: string | null; amount: string; note: string | null; source: string | null; status: string }
+interface Place { id: string; name: string; type: 'GODOWN' | 'SHOP' | 'VEHICLE'; isActive: boolean }
+interface Expense {
+  id: string; date: string; category: string; amount: string; note: string | null; source: string | null; status: string;
+  location: { id: string; name: string; type: string } | null;
+}
+const placeOf = (r: Expense) => r.location?.name ?? 'General';
 
 
 export default function ExpensesPage() {
   const [rows, setRows] = useState<Expense[] | null>(null);
   const [categories, setCategories] = useState<string[]>([]);
   const [range, setRange] = useState({ from: localDay(monthStart()), to: localDay() });
-  const [lineFilter, setLineFilter] = useState<'ALL' | 'BOTTLES' | 'RICE' | ''>('ALL');
-  const [form, setForm] = useState({ date: localDay(), category: '', businessLine: '', amount: '', note: '' });
+  const [places, setPlaces] = useState<Place[]>([]);
+  // 'ALL', 'none' (general) or a location id
+  const [placeFilter, setPlaceFilter] = useState('ALL');
+  const [form, setForm] = useState({ date: localDay(), category: '', locationId: '', amount: '', note: '' });
+  const [fresh, setFresh] = useState(0);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const toast = useToast();
@@ -30,6 +39,7 @@ export default function ExpensesPage() {
   }, [load]);
   useEffect(() => {
     api<string[]>('/expenses/categories').then(setCategories).catch(() => {});
+    api<Place[]>('/locations').then((l) => setPlaces(l.filter((x) => x.isActive && x.type !== 'VEHICLE'))).catch(() => {});
   }, []);
 
   async function add(e: FormEvent) {
@@ -38,11 +48,13 @@ export default function ExpensesPage() {
     try {
       await api('/expenses', {
         method: 'POST',
-        json: { date: form.date, category: form.category.trim(), businessLine: form.businessLine || undefined, amount: Number(form.amount), note: form.note || undefined },
+        json: { date: form.date, category: form.category.trim(), locationId: form.locationId || undefined, amount: Number(form.amount), note: form.note || undefined },
       });
       toast.success(`Rs ${rupees(form.amount)} for ${form.category} added`);
       if (!categories.includes(form.category.trim())) setCategories([...categories, form.category.trim()].sort());
+      // keep date, category and place: the next entry is often the same kind
       setForm({ ...form, amount: '', note: '' });
+      setFresh((n) => n + 1);
       await load();
     } catch (err) {
       toast.error((err as Error).message);
@@ -52,7 +64,7 @@ export default function ExpensesPage() {
   }
 
   async function cancel(r: Expense) {
-    if (!(await confirm({ title: 'Cancel this expense?', body: <p>Rs {rupees(r.amount)} for {r.category} on {r.date.slice(0, 10)}. It stays in the list as cancelled and no longer counts in reports.</p>, confirmLabel: 'Cancel expense', cancelLabel: 'Keep', danger: true }))) return;
+    if (!(await confirm({ title: 'Cancel this expense?', body: <p>Rs {rupees(r.amount)} for {r.category} on {formatDate(r.date)}. It stays in the list as cancelled and no longer counts in reports.</p>, confirmLabel: 'Cancel expense', cancelLabel: 'Keep', danger: true }))) return;
     try {
       await api(`/expenses/${r.id}/cancel`, { method: 'POST', json: {} });
       toast.success('Expense cancelled');
@@ -62,7 +74,13 @@ export default function ExpensesPage() {
     }
   }
 
-  const shown = useMemo(() => (rows ?? []).filter((r) => lineFilter === 'ALL' || (r.businessLine ?? '') === lineFilter), [rows, lineFilter]);
+  const shown = useMemo(() => (rows ?? []).filter((r) => placeFilter === 'ALL' || (r.location?.id ?? 'none') === placeFilter), [rows, placeFilter]);
+  // Totals per place for the chips, from every active entry in the date range.
+  const placeTotals = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of rows ?? []) if (r.status === 'ACTIVE') m.set(r.location?.id ?? 'none', (m.get(r.location?.id ?? 'none') ?? 0) + Number(r.amount));
+    return m;
+  }, [rows]);
   const active = useMemo(() => shown.filter((r) => r.status === 'ACTIVE'), [shown]);
   const total = active.reduce((s, r) => s + Number(r.amount), 0);
   const byCategory = useMemo(() => {
@@ -78,7 +96,7 @@ export default function ExpensesPage() {
     <>
       <div className="page-head">
         <div><h1>Expenses</h1><p>Shop and business costs. Payroll adds salaries here automatically.</p></div>
-        <button className="secondary btn-icon" disabled={!shown.length} onClick={() => downloadCsv(`expenses-${range.from}_${range.to}.csv`, ['Date', 'Category', 'For', 'Amount', 'Note', 'Status'], shown.map((r) => [r.date.slice(0, 10), r.category, lineLabel(r.businessLine), r.amount, r.note, r.status.toLowerCase()]))}>
+        <button className="secondary btn-icon" disabled={!shown.length} onClick={() => downloadCsv(`expenses-${range.from}_${range.to}.csv`, ['Date', 'Category', 'Place', 'Amount', 'Note', 'Status'], shown.map((r) => [r.date.slice(0, 10), r.category, placeOf(r), r.amount, r.note, r.status.toLowerCase()]))}>
           <Icon name="download" />Export CSV
         </button>
       </div>
@@ -92,9 +110,11 @@ export default function ExpensesPage() {
               <span className="muted">to</span>
               <input type="date" aria-label="To" value={range.to} min={range.from} onChange={(e) => setRange({ ...range, to: e.target.value })} />
             </div>
-            <div className="chips">
-              {([['ALL', 'All'], ['BOTTLES', 'Bottles'], ['RICE', 'Rice'], ['', 'Shared']] as const).map(([v, l]) => (
-                <button key={v} type="button" className={`chip${lineFilter === v ? ' on' : ''}`} aria-pressed={lineFilter === v} onClick={() => setLineFilter(v)}>{l}</button>
+            <div className="chips" role="group" aria-label="Place">
+              {[['ALL', 'All places'], ...places.map((p) => [p.id, p.name]), ['none', 'General']].map(([v, l]) => (
+                <button key={v} type="button" className={`chip${placeFilter === v ? ' on' : ''}`} aria-pressed={placeFilter === v} onClick={() => setPlaceFilter(v)}>
+                  {l}{v !== 'ALL' && placeTotals.get(v) ? <span className="chip-count">{rupees(placeTotals.get(v)!)}</span> : null}
+                </button>
               ))}
             </div>
           </div>
@@ -110,7 +130,7 @@ export default function ExpensesPage() {
               <tr>
                 <SortTh k="date" sort={sort} toggle={toggle}>Date</SortTh>
                 <SortTh k="category" sort={sort} toggle={toggle}>Category</SortTh>
-                <th>For</th>
+                <th>Place</th>
                 <SortTh k="amount" sort={sort} toggle={toggle} num>Amount</SortTh>
                 <th>Note</th><th><span className="sr-only">Actions</span></th>
               </tr>
@@ -119,9 +139,9 @@ export default function ExpensesPage() {
               {!rows && !error && <SkeletonRows cols={6} />}
               {page.map((r) => (
                 <tr key={r.id} className={r.status === 'CANCELLED' ? 'inactive' : ''}>
-                  <td>{new Date(r.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</td>
+                  <td>{formatDate(r.date, 'short')}</td>
                   <td><b>{r.category}</b></td>
-                  <td><span className={`badge ${lineTone(r.businessLine)}`}>{lineLabel(r.businessLine)}</span></td>
+                  <td>{r.location ? <span className={`badge ${r.location.type === 'GODOWN' ? 'amber' : 'blue'}`}>{r.location.name}</span> : <span className="badge">General</span>}</td>
                   <td className="num">{r.status === 'CANCELLED' ? <s>{rupees(r.amount)}</s> : <b>{rupees(r.amount)}</b>}</td>
                   <td className="muted">{r.note}</td>
                   <td>
@@ -138,32 +158,32 @@ export default function ExpensesPage() {
         </div>
 
         <aside className="doc-side first-on-small">
-          <form className="card side-form receipt" onSubmit={add}>
-            <h2 style={{ margin: 0 }}>Add expense</h2>
-            <label>Amount (Rs)<input className="big" type="number" step="any" min="1" required inputMode="decimal" placeholder="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></label>
-            <label>Category
-              <input required list="expense-categories" placeholder="Fuel, rent, electricity…" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
+          <FormCard key={fresh} title="Add expense" onSubmit={add}
+            actions={<FormActions><BusyButton type="submit" busy={busy}><Icon name="plus" />Add expense</BusyButton></FormActions>}>
+            <FormSection>
+              <Field label="Amount" required span={12}>
+                <Affix prefix="Rs"><input className="big" type="number" step="any" min="1" required inputMode="decimal" placeholder="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></Affix>
+              </Field>
+              <Field label="Category" required span={12}>
+                <input required list="expense-categories" placeholder="Fuel, rent, electricity…" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
+              </Field>
               <datalist id="expense-categories">{categories.map((c) => <option key={c} value={c} />)}</datalist>
-            </label>
-            {categories.length > 0 && (
-              <div className="chips">
-                {categories.slice(0, 6).map((c) => <button key={c} type="button" className={`chip${form.category === c ? ' on' : ''}`} onClick={() => setForm({ ...form, category: c })}>{c}</button>)}
-              </div>
-            )}
-            <div>
-              <span className="field-label" id="exp-line">Belongs to</span>
-              <div className="seg" role="radiogroup" aria-labelledby="exp-line" style={{ margin: '6px 0 0', display: 'flex' }}>
-                {[['', 'Shared'], ['BOTTLES', 'Bottles'], ['RICE', 'Rice']].map(([v, l]) => (
-                  <button key={v} type="button" role="radio" aria-checked={form.businessLine === v} className={form.businessLine === v ? 'on' : ''} style={{ flex: 1 }} onClick={() => setForm({ ...form, businessLine: v })}>{l}</button>
-                ))}
-              </div>
-            </div>
-            <div className="two">
-              <label>Date<input type="date" required max={localDay()} value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
-              <label>Note<input value={form.note} placeholder="Optional" onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
-            </div>
-            <BusyButton type="submit" busy={busy}>Add expense</BusyButton>
-          </form>
+              {categories.length > 0 && (
+                <div className="chips span-12" role="group" aria-label="Common categories">
+                  {categories.slice(0, 6).map((c) => <button key={c} type="button" className={`chip${form.category === c ? ' on' : ''}`} onClick={() => setForm({ ...form, category: c })}>{c}</button>)}
+                </div>
+              )}
+              <Field label="Where" span={12} hint="Godown and shop costs are shown separately in reports; both come off total profit.">
+                <Choice name="exp-place" value={form.locationId || 'none'} onChange={(v) => setForm({ ...form, locationId: v === 'none' ? '' : v })} columns={1}
+                  options={[
+                    ...places.map((p) => ({ value: p.id, label: p.name, description: (p.type === 'GODOWN' ? 'Godown' : 'Shop').toLowerCase() === p.name.toLowerCase() ? undefined : p.type === 'GODOWN' ? 'Godown' : 'Shop', icon: (p.type === 'GODOWN' ? 'stock' : 'locations') as 'stock' | 'locations' })),
+                    { value: 'none', label: 'General', description: 'Salaries, office, phone', icon: 'wallet' as const },
+                  ]} />
+              </Field>
+              <Field label="Date" required span={6}><input type="date" required max={localDay()} value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></Field>
+              <Field label="Note" optional span={6}><input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></Field>
+            </FormSection>
+          </FormCard>
           {byCategory.length > 0 && (
             <section className="card">
               <h3>By category</h3>
