@@ -137,6 +137,7 @@ model Product {
   saleItems           SaleItem[]
   saleReturnItems     SaleReturnItem[]
   emptiesLedger       EmptiesLedger[]
+  supplierEmpties     SupplierEmptiesLedger[]
 
   @@index([categoryId])
 }
@@ -225,6 +226,7 @@ model Supplier {
   purchaseReturns  PurchaseReturn[]
   supplierPayments SupplierPayment[]
   supplierLedgers  SupplierLedger[]
+  empties          SupplierEmptiesLedger[]
 }
 
 // ---------- Phase 2: stock, purchasing, supplier ledger ----------
@@ -646,4 +648,26 @@ model PayrollRun {
 
   /// One ACTIVE run per employee and month is enforced by a partial unique index (see the cancel_payroll migration).
   @@index([employeeId, month])
+}
+
+/// Empties (bottles / crates) we received from or sent back to a supplier. Held by us = qtyIn - qtyOut over ACTIVE rows.
+model SupplierEmptiesLedger {
+  id            String    @id @default(uuid())
+  supplierId    String
+  productId     String
+  date          DateTime  @db.Date
+  /// Received from the supplier (we owe these back).
+  qtyIn         Int       @default(0)
+  /// Returned to the supplier.
+  qtyOut        Int       @default(0)
+  note          String?
+  status        DocStatus @default(ACTIVE)
+  createdById   String
+  createdAt     DateTime  @default(now())
+  cancelledById String?
+  cancelledAt   DateTime?
+  supplier      Supplier  @relation(fields: [supplierId], references: [id])
+  product       Product   @relation(fields: [productId], references: [id])
+
+  @@index([supplierId, productId])
 }

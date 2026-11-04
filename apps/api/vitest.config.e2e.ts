@@ -1,11 +1,15 @@
 import { defineConfig } from 'vitest/config';
-import tsconfigPaths from 'vite-tsconfig-paths';
 
+// The tests run against the compiled app in dist/ (decorator metadata is needed for Nest's DI),
+// on a throwaway database that global-setup recreates on every run. `pnpm test` builds first.
 export default defineConfig({
-  plugins: [tsconfigPaths()],
   test: {
     globals: true,
     root: './',
-    include: ['**/*.e2e-spec.ts'],
+    include: ['test/**/*.e2e-spec.mjs'],
+    globalSetup: ['test/global-setup.mjs'],
+    fileParallelism: false,
+    testTimeout: 30_000,
+    hookTimeout: 180_000,
   },
 });

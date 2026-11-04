@@ -545,6 +545,7 @@ dl.totals { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 9px 
 .ledger td.bal { font-weight: 650; }
 .ledger tr.opening td { background: #f8fafc; color: var(--muted); font-style: italic; }
 .ledger tr.cancel td { color: var(--muted); }
+.ledger tr.struck td:not(:last-child) { text-decoration: line-through; }
 
 /* salary slip */
 .slip { max-width: 600px; margin: 0 auto 20px; padding: 28px; border-top: 4px solid var(--accent); }

@@ -155,7 +155,7 @@ Source codes: **VN** = voice note (timestamp), **A-n** = answer to question n (s
 ### 3.10 Offline
 | ID | Requirement | Source |
 |---|---|---|
-| OF-1 | The web app works **without internet** for selling, recording payments and printing slips. Data syncs when back online. | A-20 |
+| OF-1 | The web app works **without internet** for selling, recording payments and printing slips. Data syncs when back online. **Decision (kickoff):** offline is needed on the **PC only**. Phones and tablets stay online-only. | A-20 |
 
 ### 3.11 Reports
 | ID | Requirement | Source |
@@ -184,7 +184,7 @@ Not requested: GST/FBR invoicing (A-16 says a simple bill is enough), GPS live t
 
 ## 4. Solution overview
 
-A single **offline-capable web app (PWA)**. It is used on a PC at the shop and godown, and on phones/tablets by salesmen.
+A single **offline-capable web app (PWA)**. It is used on a PC at the shop and godown, and on phones/tablets by salesmen. Only the PC works offline; phones need internet.
 
 ```
 ┌───────────────────────────────────────────────────────────────────┐
@@ -420,7 +420,7 @@ Engineering rules:
 | **1. Foundation** | Users, roles, audit log; products, units, categories; locations; customers with rates and credit limits; suppliers; **data import**. | Master data loaded. |
 | **2. Stock & purchasing** | Purchases, supplier ledger and payments, transfers (godown/shop/vehicle), latest cost, damaged stock. | Accurate stock per location. |
 | **3. Sales & khata (online)** | Counter and delivery bills, part payment, previous balance on bill, credit-limit check, payment receipts, returns, empties; thermal/A4/PDF in Urdu and English. | Daily selling runs in the app. |
-| **4. Offline** | PWA install, offline billing, receipts and printing, sync queue, device-prefixed numbering, conflict flags. | Salesmen work without internet. |
+| **4. Offline** | PWA install, offline billing, receipts and printing, sync queue, device-prefixed numbering, conflict flags. | The PC keeps billing without internet. |
 | **5. Expenses, payroll & reports** | Expenses; attendance, daily wage, commission, advances with carry-forward, salary slips; all RE-1 to RE-11 reports; vehicle settlement. | Everything in the voice note and answers is done. |
 | **6. Go-live** | Parallel run against paper for one week, staff training, backups verified. | Live. |
 

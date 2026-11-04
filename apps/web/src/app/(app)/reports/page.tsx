@@ -171,11 +171,16 @@ function colsFor(tab: Tab): Record<string, Col[]> {
         { key: 'commission', label: 'Commission', num: true, value: (r) => r.commission, render: (r) => <>{n(r.commission)}{r.commissionPercent && <span className="muted"> ({Number(r.commissionPercent)}%)</span>}</> }],
       vehicles: [{ key: 'name', label: 'Vehicle', value: (r) => r.name, render: (r) => <b>{r.name}</b> }, ...sm],
     };
-    case 'empties': return { rows: [
+    case 'empties': return { customers: [
       { key: 'customer', label: 'Customer', value: (r) => r.customer?.name ?? '', render: (r) => <>{r.customer?.name}{r.customer?.shopName && <span className="muted"> · {r.customer.shopName}</span>}</> },
       { key: 'area', label: 'Area', value: (r) => r.customer?.area ?? '' },
       { key: 'product', label: 'Product', value: (r) => r.product },
       { key: 'held', label: 'Empties held', num: true, value: (r) => r.held },
+    ], suppliers: [
+      { key: 'supplier', label: 'Supplier', value: (r) => r.supplier ?? '', render: (r) => <b>{r.supplier}</b> },
+      { key: 'product', label: 'Product', value: (r) => r.product ?? '' },
+      { key: 'owed', label: 'Position', num: true, value: (r) => r.owed,
+        render: (r) => (r.owed > 0 ? <span className="badge amber">{r.owed} to return</span> : <span className="badge blue">supplier owes us {-r.owed}</span>) },
     ] };
     case 'returns': return {
       items: [
@@ -206,13 +211,14 @@ function colsFor(tab: Tab): Record<string, Col[]> {
 
 /** The arrays of rows for a tab, keyed like colsFor(). */
 function rowsFor(tab: Tab, d: Data): Record<string, Data[]> {
-  if (tab === 'empties') return { rows: d };
+  if (tab === 'empties') return { customers: d.customers, suppliers: d.suppliers };
   if (tab === 'salesmen') return { salesmen: d.salesmen, vehicles: d.vehicles };
   if (tab === 'returns') return { items: d.items, damagedOnHand: d.damagedOnHand };
   return { rows: d.rows };
 }
 
-const TITLES: Record<string, string> = { salesmen: 'Salesmen', vehicles: 'Vehicles (cash to settle)', items: 'Returned items', damagedOnHand: 'Damaged stock on hand' };
+const EMPTY: Record<string, string> = { customers: 'No shop is holding empties.', suppliers: 'Nothing owed to or by suppliers.' };
+const TITLES: Record<string, string> = { customers: 'Held by customers', suppliers: 'Owed to suppliers', salesmen: 'Salesmen', vehicles: 'Vehicles (cash to settle)', items: 'Returned items', damagedOnHand: 'Damaged stock on hand' };
 
 function View({ tab, d }: { tab: Tab; d: Data }) {
   const cols = colsFor(tab);
@@ -228,7 +234,7 @@ function View({ tab, d }: { tab: Tab; d: Data }) {
       {Object.keys(cols).map((k) => (
         <div key={k}>
           {TITLES[k] && <h2>{TITLES[k]}</h2>}
-          <DataTable cols={cols[k]} rows={rows[k] ?? []} rowKey={(r, i) => `${k}-${i}`} empty={tab === 'empties' ? 'No shop is holding empties.' : undefined} />
+          <DataTable cols={cols[k]} rows={rows[k] ?? []} rowKey={(r, i) => `${k}-${i}`} empty={EMPTY[k]} />
         </div>
       ))}
     </>
@@ -247,7 +253,11 @@ export default function ReportsPage() {
   useEffect(() => {
     const qs = new URLSearchParams({ from, to, ...(tab === 'profit' ? { groupBy } : {}) }).toString();
     let stale = false;
-    api<Data>(`/reports/${tab}${tab === 'empties' ? '' : `?${qs}`}`)
+    // Empties combines what customers hold with what we owe suppliers.
+    const req: Promise<Data> = tab === 'empties'
+      ? Promise.all([api<Data>('/reports/empties'), api<Data>('/reports/supplier-empties')]).then(([customers, suppliers]) => ({ customers, suppliers }))
+      : api<Data>(`/reports/${tab}?${qs}`);
+    req
       .then((d) => { if (!stale) { setData({ key: `${tab}|${from}|${to}|${tab === 'profit' ? groupBy : ''}`, d }); setError(''); } })
       .catch((e) => { if (!stale) setError(e.message); });
     return () => { stale = true; };
@@ -272,10 +282,14 @@ export default function ReportsPage() {
     }
     const cols = colsFor(tab), rows = rowsFor(tab, ready);
     const keys = Object.keys(cols);
-    const multi = keys.length > 1;
-    const head = [...(multi ? ['Section'] : []), ...cols[keys[0]].map((c) => c.label)];
-    const out = keys.flatMap((k) => (rows[k] ?? []).map((r) => [...(multi ? [TITLES[k] ?? k] : []), ...cols[k].map((c) => c.value(r))]));
-    downloadCsv(`${name}.csv`, head, out);
+    const body = (k: string) => (rows[k] ?? []).map((r) => cols[k].map((c) => c.value(r)));
+    if (keys.length === 1) {
+      downloadCsv(`${name}.csv`, cols[keys[0]].map((c) => c.label), body(keys[0]));
+      return;
+    }
+    // Sections have different columns: each gets its own title and header row.
+    const out = keys.flatMap((k, i) => [...(i ? [[]] : []), [TITLES[k] ?? k], cols[k].map((c) => c.label), ...body(k)]);
+    downloadCsv(`${name}.csv`, [TABS.find(([t]) => t === tab)?.[1] ?? tab], out);
   }
 
   return (
