@@ -4,23 +4,19 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Combobox from '@/components/Combobox';
+import DocPrintDialog from '@/components/DocPrintDialog';
 import { BusyButton, useToast } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
 import { api, can, useUser } from '@/lib/api';
 import { customerOptions, productOptions, useLookups, type ProductOpt } from '@/lib/lookups';
+import { getSnapshot, isNetworkError, previewOffline, saveSaleOffline, useSyncState, type OutboxOp, type Preview, type Snapshot } from '@/lib/offline';
+import type { PrintMode } from '@/components/PrintPanel';
 
 interface Customer { id: string; name: string; shopName: string | null; area: string | null; phone: string | null; type: 'CASH' | 'CREDIT'; creditLimit: string | null }
 interface LastBill { id: string; billNo: string; date: string; net: string; rates: Record<string, string> }
-interface Saved { id: string; billNo: string; net: string }
+interface Saved { id: string | null; billNo: string; net: string; offline?: OutboxOp }
 interface Line { productId: string; unitName: string; qty: string; rate: string; reason: string }
 interface Collected { productId: string; qty: string }
-interface Preview {
-  gross: string; returnsCredit: string; net: string; paid: string; previousBalance: string; newBalance: string;
-  items: { rate: string; amount: string }[]; returns: { rate: string; amount: string }[];
-  credit: { limit: string | null; available: string | null; blocked: string | null };
-  empties: { productName: string; given: number; collected: number; heldAfter: number }[];
-  shortages: string[];
-}
 type Priced = { rate: string; amount: string } | undefined;
 
 const blank = (): Line => ({ productId: '', unitName: '', qty: '', rate: '', reason: 'DAMAGED' });
@@ -31,9 +27,20 @@ export default function NewSalePage() {
   const search = useSearchParams();
   const user = useUser();
   const toast = useToast();
-  const { products, locations, error: lookupError } = useLookups();
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [salesmen, setSalesmen] = useState<{ id: string; name: string }[]>([]);
+  const sync = useSyncState();
+  const offline = !sync.reachable;
+  const [snap, setSnap] = useState<Snapshot | null>(null);
+  const [printing, setPrinting] = useState<PrintMode | null>(null);
+  const lookups = useLookups();
+  const [onlineCustomers, setCustomers] = useState<Customer[]>([]);
+  const [onlineSalesmen, setSalesmen] = useState<{ id: string; name: string }[]>([]);
+  // Offline (or before the server answers), the screen works from the last snapshot saved on this PC.
+  const fromSnap = offline && !!snap;
+  const products: ProductOpt[] = fromSnap ? snap.products : lookups.products;
+  const locations = fromSnap ? snap.locations : lookups.locations;
+  const customers: Customer[] = fromSnap ? snap.customers : onlineCustomers;
+  const salesmen = fromSnap ? snap.salesmen : onlineSalesmen;
+  const lookupError = offline ? '' : lookups.error;
   const [head, setHead] = useState({ saleType: 'COUNTER', customerId: search.get('customer') ?? '', locationId: '', salesmanId: '', paidNow: '', method: 'CASH', note: '' });
   const [lastBill, setLastBill] = useState<LastBill | null>(null);
   const [saved, setSaved] = useState<Saved | null>(null);
@@ -51,9 +58,12 @@ export default function NewSalePage() {
   const [clientId, setClientId] = useState(() => crypto.randomUUID());
 
   useEffect(() => {
-    api<Customer[]>('/customers').then(setCustomers).catch((e) => setError(e.message));
+    api<Customer[]>('/customers').then(setCustomers).catch((e) => { if (!isNetworkError(e)) setError(e.message); });
     api<{ id: string; name: string }[]>('/employees/options').then(setSalesmen).catch(() => {});
   }, []);
+  useEffect(() => {
+    getSnapshot().then(setSnap);
+  }, [offline, sync.snapshotAt]);
 
   // Last bill of the chosen customer, for the "last rate" hints.
   useEffect(() => {
@@ -114,12 +124,15 @@ export default function NewSalePage() {
       return;
     }
     const t = setTimeout(() => {
-      api<Preview>('/sales/preview', { method: 'POST', json: body })
+      const run = fromSnap
+        ? previewOffline(snap, body, user?.permissions ?? [])
+        : api<Preview>('/sales/preview', { method: 'POST', json: body });
+      run
         .then((p) => { setPreview(p); setPreviewError(''); })
-        .catch((e) => { setPreview(null); setPreviewError(e.message); });
-    }, 400);
+        .catch((e) => { setPreview(null); setPreviewError(isNetworkError(e) && !snap ? 'No connection, and this PC has no saved data yet.' : e.message); });
+    }, fromSnap ? 120 : 400);
     return () => clearTimeout(t);
-  }, [body, hasLines, head.locationId]);
+  }, [body, hasLines, head.locationId, fromSnap, snap, user]);
 
   const setLine = (set: typeof setItems, list: Line[], i: number, patch: Partial<Line>) => set(list.map((l, j) => (j === i ? { ...l, ...patch } : l)));
   const pick = (id: string): Partial<Line> => ({ productId: id, unitName: prod(id)?.units[0]?.unitName ?? '', rate: '' });
@@ -128,13 +141,31 @@ export default function NewSalePage() {
     e.preventDefault();
     setError('');
     setBusy(true);
-    try {
-      const bill = await api<Saved>('/sales', { method: 'POST', json: { ...body, clientId, overrideCredit: override || undefined } });
+    const offlineSave = async () => {
+      const s = snap ?? (await getSnapshot());
+      if (!s || !preview) throw new Error('No connection, and this PC has no saved data to bill from yet.');
+      const p = fromSnap ? preview : await previewOffline(s, body, user?.permissions ?? []);
+      const op = await saveSaleOffline(s, { ...body, overrideCredit: override || undefined }, p, clientId, salesmen.find((x) => x.id === head.salesmanId)?.name ?? null);
       setClientId(crypto.randomUUID());
-      setSaved({ id: bill.id, billNo: bill.billNo, net: bill.net ?? preview?.net ?? '0' });
-      toast.success(`Bill ${bill.billNo ?? ''} saved`);
+      setSaved({ id: null, billNo: op.number, net: p.net, offline: op });
+      toast.info(`Bill ${op.number} saved on this PC — it syncs when the connection is back`);
+    };
+    try {
+      if (fromSnap) {
+        await offlineSave();
+      } else {
+        const bill = await api<Saved>('/sales', { method: 'POST', json: { ...body, clientId, overrideCredit: override || undefined } });
+        setClientId(crypto.randomUUID());
+        setSaved({ id: bill.id, billNo: bill.billNo, net: bill.net ?? preview?.net ?? '0' });
+        toast.success(`Bill ${bill.billNo ?? ''} saved`);
+      }
     } catch (err) {
-      toast.error((err as Error).message);
+      // The connection dropped while saving: keep the bill on this PC (same clientId, so it can never double up).
+      if (!fromSnap && isNetworkError(err)) {
+        try { await offlineSave(); } catch (e2) { toast.error((e2 as Error).message); }
+      } else {
+        toast.error((err as Error).message);
+      }
     } finally {
       setBusy(false);
     }
@@ -237,15 +268,45 @@ export default function NewSalePage() {
       {saved && (
         <div className="modal-scrim">
           <div className="modal success" role="dialog" aria-modal="true" aria-labelledby="saved-title">
-            <div className="modal-head"><span className="modal-icon ok"><Icon name="check" /></span><h2 id="saved-title">Bill {saved.billNo} saved</h2></div>
-            <p className="modal-body">Total <b>Rs {money(saved.net)}</b>. Print it now or start the next bill.</p>
+            <div className="modal-head">
+              <span className={`modal-icon ${saved.offline ? 'info' : 'ok'}`}><Icon name={saved.offline ? 'cloud' : 'check'} /></span>
+              <h2 id="saved-title">Bill {saved.billNo} {saved.offline ? 'saved on this PC' : 'saved'}</h2>
+            </div>
+            <p className="modal-body">
+              Total <b>Rs {money(saved.net)}</b>.{' '}
+              {saved.offline ? 'There is no connection, so it waits in the outbox and syncs by itself. You can print it now.' : 'Print it now or start the next bill.'}
+            </p>
             <div className="success-actions">
-              <Link className="btn primary" href={`/sales/${saved.id}?print=thermal`}><Icon name="print" />Print thermal</Link>
-              <Link className="btn" href={`/sales/${saved.id}?print=a4`}><Icon name="file" />A4 / PDF</Link>
-              <Link className="btn" href={`/sales/${saved.id}`}>View bill</Link>
+              {saved.offline ? (
+                <>
+                  <button type="button" className="btn primary" onClick={() => setPrinting('thermal')}><Icon name="print" />Print thermal</button>
+                  <button type="button" className="btn" onClick={() => setPrinting('a4')}><Icon name="file" />A4 / PDF</button>
+                  <Link className="btn" href="/outbox">Open outbox</Link>
+                </>
+              ) : (
+                <>
+                  <Link className="btn primary" href={`/sales/${saved.id}?print=thermal`}><Icon name="print" />Print thermal</Link>
+                  <Link className="btn" href={`/sales/${saved.id}?print=a4`}><Icon name="file" />A4 / PDF</Link>
+                  <Link className="btn" href={`/sales/${saved.id}`}>View bill</Link>
+                </>
+              )}
               <button type="button" autoFocus onClick={newBill}><Icon name="plus" />New bill</button>
             </div>
           </div>
+        </div>
+      )}
+
+      {printing && saved?.offline?.bill && <DocPrintDialog bill={saved.offline.bill} autoPrint={printing} onClose={() => setPrinting(null)} />}
+
+      {offline && (
+        <div className="offline-note" role="status">
+          <Icon name="wifiOff" />
+          <span>
+            {snap
+              ? <>Working offline from data saved {new Date(snap.at).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}. Bills get numbers like <b>BTL-{sync.prefix ?? 'D?'}-000001</b>, print normally and sync when the connection is back. Balances and stock include bills still waiting to sync.</>
+              : <>No connection, and this PC has no saved data yet. Open the app once while online to prepare it for offline billing.</>}
+            {snap && !sync.prefix && <> <b>This PC has no device number yet</b> — connect once to set it up.</>}
+          </span>
         </div>
       )}
 

@@ -921,4 +921,8 @@ tr.row-link.open td { background: var(--surface-hover); }
   .a4doc { width: auto; }
   .slip { box-shadow: none; border: 0; max-width: none; padding: 12mm; }
   .slip-net { background: none; border: 2px solid #000; }
+  /* printing from the offline print dialog: only the dialog's document */
+  body:has(.print-dialog) .shell { display: none !important; }
+  .modal-scrim.print-dialog { display: block !important; position: static; background: none; padding: 0; animation: none; }
+  .print-dialog .modal { box-shadow: none; border: 0; padding: 0; max-width: none !important; max-height: none; overflow: visible; background: none; animation: none; }
 }
