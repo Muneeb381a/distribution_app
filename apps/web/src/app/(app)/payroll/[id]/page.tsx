@@ -14,6 +14,12 @@ interface Slip {
   details: { attendance?: Record<string, number>; salesNet?: string; commissionPercent?: string | null } | null;
 }
 
+const ATT: Record<string, string> = { present: 'present', absent: 'absent', halfday: 'half day', half_day: 'half day', paidleave: 'paid leave', paid_leave: 'paid leave', unpaidleave: 'unpaid leave', unpaid_leave: 'unpaid leave' };
+/** "22 present · 2 absent", leaving out zeros. */
+function attendanceText(a: Record<string, number>) {
+  const parts = Object.entries(a).filter(([, v]) => Number(v) > 0).map(([k, v]) => `${v} ${ATT[k.toLowerCase()] ?? k.toLowerCase()}`);
+  return parts.length ? parts.join(' · ') : 'Not marked';
+}
 const n = (v: string | number) => Number(v).toLocaleString('en-PK');
 const monthName = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 
@@ -40,7 +46,7 @@ export default function SalarySlipPage() {
       {error && <p className="error">{error}</p>}
       {!slip && !error && <span className="skeleton" style={{ display: 'block', maxWidth: 560, height: 420, margin: '0 auto' }} />}
       {slip && (
-        <article className="slip card">
+        <article className="slip card paper">
           <header className="slip-head">
             <div>
               <span className="slip-kicker">Salary slip</span>
@@ -55,7 +61,7 @@ export default function SalarySlipPage() {
             <div><dt>Pay type</dt><dd>{slip.employee.type === 'DAILY' ? 'Daily wage' : 'Monthly salary'}</dd></div>
             <div><dt>Paid on</dt><dd>{new Date(slip.paidOn).toLocaleDateString('en-GB', { dateStyle: 'medium' })}</dd></div>
             {slip.details?.attendance && (
-              <div><dt>Attendance</dt><dd>{Object.entries(slip.details.attendance).map(([k, v]) => `${v} ${k.toLowerCase()}`).join(' · ')}</dd></div>
+              <div><dt>Attendance</dt><dd>{attendanceText(slip.details.attendance)}</dd></div>
             )}
           </dl>
           <table className="slip-table">

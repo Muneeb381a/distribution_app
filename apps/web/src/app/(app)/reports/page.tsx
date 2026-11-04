@@ -37,15 +37,16 @@ interface Col { key: string; label: string; num?: boolean; render?: (r: Data) =>
 function DataTable({ cols, rows, empty = 'Nothing in this range.', rowKey }: { cols: Col[]; rows: Data[]; empty?: string; rowKey: (r: Data, i: number) => string }) {
   const { sorted, sort, toggle } = useSort<Data, string>(rows, (r, k) => cols.find((c) => c.key === k)!.value(r));
   return (
-    <>
-      <table className="sticky-head">
+    // Wide report tables scroll sideways inside their box instead of widening the page.
+    <div className="table-wrap">
+      <table>
         <thead><tr>{cols.map((c) => <SortTh key={c.key} k={c.key} sort={sort} toggle={toggle} num={c.num}>{c.label}</SortTh>)}</tr></thead>
         <tbody>
           {sorted.map((r, i) => <tr key={rowKey(r, i)}>{cols.map((c) => <td key={c.key} className={c.num ? 'num' : ''}>{c.render ? c.render(r) : c.num ? n(c.value(r)) : c.value(r)}</td>)}</tr>)}
           {!rows.length && <tr><td colSpan={cols.length}><Empty icon="reports" title={empty} text="Try a wider date range." /></td></tr>}
         </tbody>
       </table>
-    </>
+    </div>
   );
 }
 
@@ -104,7 +105,7 @@ function Profit({ d, from, to, groupBy }: { d: Data; from: string; to: string; g
         rows={rows}
         empty="No sales or expenses in this range."
         cols={[
-          { key: 'period', label: 'Period', value: (r) => r.period, render: (r) => <b>{r.period}</b> },
+          { key: 'period', label: 'Period', value: (r) => r.period, render: (r) => <b style={{ whiteSpace: 'nowrap' }}>{r.period}</b> },
           { key: 'b', label: 'Bottles net', num: true, value: (r) => r.lines.BOTTLES.netSales },
           { key: 'r', label: 'Rice net', num: true, value: (r) => r.lines.RICE.netSales },
           { key: 'net', label: 'Net sales', num: true, value: (r) => r.total.netSales },

@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
+import { BusyButton } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
 import { api, saveSession, type SessionUser } from '@/lib/api';
 
@@ -29,23 +30,40 @@ export default function LoginPage() {
 
   return (
     <div className="login-page">
-      <div className="login card">
-        <div className="logo" style={{ color: '#fff' }}><Icon name="products" /></div>
-        <h1>Welcome back</h1>
-        <p className="muted" style={{ margin: 0 }}>Sign in to your distribution account.</p>
-        <form className="form" onSubmit={submit}>
-          <label>
-            Username
-            <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus required autoComplete="username" />
-          </label>
-          <label>
-            Password
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
-          </label>
-          {error && <p className="error" style={{ margin: 0 }}>{error}</p>}
-          <button disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
-        </form>
-      </div>
+      <aside className="login-art" aria-hidden="true">
+        <div className="brand-row"><span className="logo"><Icon name="products" /></span>Distribution</div>
+        <div>
+          <p className="ur-line" dir="rtl" lang="ur">چاول اور مشروبات کی تقسیم</p>
+          <h2>Bills, khata and stock for rice &amp; beverages — in one place.</h2>
+          <p>Counter and delivery billing, customer udhaar, godown and vehicle stock, payroll and daily profit.</p>
+          <ul>
+            <li><Icon name="print" />Thermal and A4 bills in Urdu and English</li>
+            <li><Icon name="wifiOff" />Keeps billing when the internet drops</li>
+            <li><Icon name="khata" />Credit limits and khata on every bill</li>
+          </ul>
+        </div>
+        <span style={{ opacity: 0.7, fontSize: 13 }}>Rice &amp; Beverages distribution</span>
+      </aside>
+      <main className="login-side">
+        <div className="login">
+          <span className="logo" style={{ marginBottom: 18 }}><Icon name="products" /></span>
+          <h1>Welcome back</h1>
+          <p className="muted" style={{ margin: 0 }}>Sign in to your distribution account.</p>
+          <form className="form" onSubmit={submit}>
+            <label>
+              Username
+              <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus required autoComplete="username" />
+            </label>
+            <label>
+              Password
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
+            </label>
+            {error && <p className="error" role="alert" style={{ margin: 0 }}>{error}</p>}
+            <BusyButton busy={busy}>{busy ? 'Signing in…' : 'Sign in'}</BusyButton>
+          </form>
+          <div className="foot"><span>Forgot your password? Ask the owner to reset it.</span></div>
+        </div>
+      </main>
     </div>
   );
 }

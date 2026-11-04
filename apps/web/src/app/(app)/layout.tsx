@@ -7,6 +7,7 @@ import { FeedbackProvider } from '@/components/Feedback';
 import { Icon, type IconName } from '@/components/Icon';
 import TopBar from '@/components/TopBar';
 import { api, can, updateUser, useUser, type SessionUser } from '@/lib/api';
+import { startSync, useSyncState } from '@/lib/offline';
 import { PageTitleCtx } from '@/lib/pageTitle';
 
 interface NavItem { href: string; label: string; icon: IconName; permission: string | null }
@@ -18,6 +19,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
     items: [
       { href: '/sales', label: 'Sales', icon: 'sales', permission: 'SALE_CREATE' },
       { href: '/khata', label: 'Khata', icon: 'khata', permission: 'PAYMENT_RECORD' },
+      { href: '/outbox', label: 'Offline outbox', icon: 'cloud', permission: 'SALE_CREATE' },
       { href: '/customers', label: 'Customers', icon: 'customers', permission: null },
     ],
   },
@@ -45,6 +47,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
       { href: '/employees', label: 'Employees', icon: 'employees', permission: 'USER_MANAGE' },
       { href: '/users', label: 'Users & roles', icon: 'users', permission: 'USER_MANAGE' },
       { href: '/import', label: 'Import', icon: 'import', permission: 'IMPORT_DATA' },
+      { href: '/audit', label: 'Audit log', icon: 'history', permission: 'AUDIT_VIEW' },
     ],
   },
 ];
@@ -60,6 +63,7 @@ const DETAIL: [RegExp, string][] = [
   [/^\/payroll\/[^/]+$/, 'Salary slip'],
 ];
 const RECEIPT_PARENT = NAV[1].items[1];
+// /outbox is listed in the menu, so it needs no detail entry.
 
 export interface Crumb { label: string; href?: string }
 
@@ -76,6 +80,8 @@ function crumbsFor(pathname: string, detail?: string): Crumb[] {
 
 function NavLinks({ user, onNavigate, collapsed }: { user: SessionUser; onNavigate: () => void; collapsed: boolean }) {
   const pathname = usePathname();
+  const sync = useSyncState();
+  const waiting = sync.pending + sync.failed;
   return (
     <>
       {NAV.map((g) => {
@@ -93,6 +99,7 @@ function NavLinks({ user, onNavigate, collapsed }: { user: SessionUser; onNaviga
               >
                 <Icon name={n.icon} />
                 <span className="nav-label">{n.label}</span>
+                {n.href === '/outbox' && waiting > 0 && <span className="nav-count" aria-label={`${waiting} waiting`}>{waiting}</span>}
               </Link>
             ))}
           </div>
@@ -114,7 +121,34 @@ function TitledTopBar({ user, onMenu, detail }: { user: SessionUser; onMenu: () 
   useEffect(() => {
     document.title = `${crumbs[crumbs.length - 1].label} · Distribution`;
   }, [crumbs]);
-  return <TopBar user={user} onMenu={onMenu} crumbs={crumbs} />;
+  return <TopBar user={user} onMenu={onMenu} crumbs={crumbs} status={<SyncPill />} />;
+}
+
+/** Connection and outbox state, always visible; opens the outbox. */
+function SyncPill() {
+  const s = useSyncState();
+  const cls = !s.reachable ? 'offline' : s.failed ? 'failed' : s.pending || s.syncing ? 'pending' : '';
+  const text = !s.reachable ? (s.pending ? `Offline · ${s.pending} waiting` : 'Offline')
+    : s.failed ? `${s.failed} need attention`
+    : s.syncing ? 'Syncing…'
+    : s.pending ? `${s.pending} to sync`
+    : 'Online';
+  return (
+    <Link href="/outbox" className={`net-pill ${cls}`} title={s.lastSync ? `Last sync ${new Date(s.lastSync).toLocaleTimeString()}` : 'Offline outbox'} aria-live="polite">
+      <i aria-hidden="true" /><span className="net-label">{text}</span>
+    </Link>
+  );
+}
+
+function OfflineBanner() {
+  const s = useSyncState();
+  if (s.reachable) return null;
+  return (
+    <div className="offline-banner" role="status">
+      <Icon name="wifiOff" />
+      <span>No connection to the server. New bills and receipts are saved on this PC and sync automatically.{s.pending ? ` ${s.pending} waiting.` : ''}</span>
+    </div>
+  );
 }
 
 export default function AppLayout({ children }: { children: ReactNode }) {
@@ -130,6 +164,19 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     setReady(true);
     try { setCollapsed(localStorage.getItem(SIDEBAR_KEY) === 'collapsed'); } catch { /* ignore */ }
   }, []);
+
+  // Offline support: background sync, and the service worker that keeps the app shell for offline use.
+  useEffect(() => {
+    if (!user) return;
+    startSync();
+    if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
+      navigator.serviceWorker.register('/sw.js').then((reg) => {
+        // Warm the pages that must open with no connection.
+        const warm = () => reg.active?.postMessage({ type: 'warm', urls: ['/sales/new', '/outbox', '/dashboard'] });
+        if (reg.active) warm(); else navigator.serviceWorker.ready.then(warm);
+      }).catch(() => {});
+    }
+  }, [user]);
 
   const toggleSidebar = () => {
     setCollapsed((c) => {
@@ -180,6 +227,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             <Suspense fallback={<header className="topbar" />}>
               <TitledTopBar user={user} onMenu={() => setOpen(true)} detail={detail} />
             </Suspense>
+            <OfflineBanner />
             <main className="content" id="main" tabIndex={-1}>{children}</main>
           </div>
         </div>

@@ -5,11 +5,16 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { api, clearSession, type SessionUser } from '@/lib/api';
+import { setTheme, useTheme, type ThemePref } from '@/lib/theme';
+
+const NEXT_THEME: Record<ThemePref, ThemePref> = { system: 'light', light: 'dark', dark: 'system' };
+const THEME_LABEL: Record<ThemePref, string> = { system: 'Theme: follows device', light: 'Theme: light', dark: 'Theme: dark' };
 
 interface Hit { group: string; title: string; sub: string; href: string }
 
-export default function TopBar({ user, onMenu, crumbs }: { user: SessionUser; onMenu: () => void; crumbs: { label: string; href?: string }[] }) {
+export default function TopBar({ user, onMenu, crumbs, status }: { user: SessionUser; onMenu: () => void; crumbs: { label: string; href?: string }[]; status?: React.ReactNode }) {
   const router = useRouter();
+  const theme = useTheme();
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<Hit[]>([]);
   const [open, setOpen] = useState(false);
@@ -108,6 +113,13 @@ export default function TopBar({ user, onMenu, crumbs }: { user: SessionUser; on
       </div>
       <div className="top-right">
         <span className="top-date">{today}</span>
+        {status}
+        <button
+          type="button" className="top-icon" onClick={() => setTheme(NEXT_THEME[theme])}
+          aria-label={`${THEME_LABEL[theme]}. Switch to ${NEXT_THEME[theme]}.`} title={THEME_LABEL[theme]}
+        >
+          <Icon name={theme === 'dark' ? 'moon' : theme === 'light' ? 'sun' : 'monitor'} />
+        </button>
         <div className="top-user">
           <div className="avatar">{user.username.slice(0, 2)}</div>
           <div className="who-text"><b>{user.username}</b><span>{user.roleName}</span></div>
@@ -119,7 +131,7 @@ export default function TopBar({ user, onMenu, crumbs }: { user: SessionUser; on
             router.replace('/login');
           }}
         >
-          <Icon name="logout" /> Logout
+          <Icon name="logout" /> Sign out
         </button>
       </div>
     </header>

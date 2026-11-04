@@ -1,9 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { useConfirm, usePrompt, useToast } from '@/components/Feedback';
+import Link from 'next/link';
+import { SkeletonRows, useConfirm, usePrompt, useToast } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
-import { api } from '@/lib/api';
+import { api, can, useUser } from '@/lib/api';
 
 interface Role { id: string; name: string; permissions: { permissionCode: string }[] }
 interface User { id: string; username: string; isActive: boolean; role: { id: string; name: string } }
@@ -60,6 +61,8 @@ export default function UsersPage() {
   const [editing, setEditing] = useState<string | 'new' | null>(null);
   const [error, setError] = useState('');
   const toast = useToast();
+  const me = useUser();
+  const [loaded, setLoaded] = useState(false);
   const prompt = usePrompt();
   const confirm = useConfirm();
 
@@ -68,6 +71,7 @@ export default function UsersPage() {
       const [u, r] = await Promise.all([api<User[]>('/users'), api<Role[]>('/roles')]);
       setUsers(u);
       setRoles(r);
+      setLoaded(true);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -119,7 +123,10 @@ export default function UsersPage() {
     <>
       <div className="page-head">
         <div><h1>Users &amp; roles</h1><p>{users.length} users · {roles.length} roles</p></div>
-        {!adding && <button onClick={() => setAdding(true)}><Icon name="plus" /> Add user</button>}
+        <div className="actions">
+          {can(me, 'AUDIT_VIEW') && <Link className="btn" href="/audit"><Icon name="history" />Audit log</Link>}
+          {!adding && <button className="btn-icon" onClick={() => setAdding(true)}><Icon name="plus" />Add user</button>}
+        </div>
       </div>
       {error && <p className="error">{error}</p>}
 
@@ -142,25 +149,34 @@ export default function UsersPage() {
       )}
 
       <table>
-        <thead><tr><th>Username</th><th>Role</th><th>Status</th><th /></tr></thead>
+        <thead><tr><th>User</th><th>Role</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead>
         <tbody>
+          {!loaded && <SkeletonRows cols={4} rows={3} />}
           {users.map((u) => (
-            <tr key={u.id}>
-              <td><strong>{u.username}</strong></td>
+            <tr key={u.id} className={u.isActive ? '' : 'inactive'}>
               <td>
-                <select value={u.role.id} onChange={(e) => patch(u.id, { roleId: e.target.value }, `${u.username} is now ${roles.find((r) => r.id === e.target.value)?.name}`)}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span className="avatar" style={{ width: 30, height: 30, fontSize: 11 }}>{u.username.slice(0, 2)}</span>
+                  <b>{u.username}</b>{u.id === me?.id && <span className="badge teal">You</span>}
+                </span>
+              </td>
+              <td>
+                <select aria-label={`Role for ${u.username}`} disabled={u.id === me?.id} value={u.role.id} onChange={(e) => patch(u.id, { roleId: e.target.value }, `${u.username} is now ${roles.find((r) => r.id === e.target.value)?.name}`)}>
                   {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                 </select>
               </td>
               <td><span className={`badge ${u.isActive ? 'green' : 'red'}`}>{u.isActive ? 'Active' : 'Disabled'}</span></td>
               <td>
+                <div className="row-actions">
                 <button
                   className="secondary"
+                  disabled={u.id === me?.id}
+                  title={u.id === me?.id ? 'You cannot disable yourself' : undefined}
                   onClick={async () => {
                     if (u.isActive && !(await confirm({ title: `Disable ${u.username}?`, body: <p>They are signed out and cannot sign in until enabled again.</p>, confirmLabel: 'Disable', danger: true }))) return;
                     patch(u.id, { isActive: !u.isActive }, `${u.username} ${u.isActive ? 'disabled' : 'enabled'}`);
                   }}
-                >{u.isActive ? 'Disable' : 'Enable'}</button>{' '}
+                >{u.isActive ? 'Disable' : 'Enable'}</button>
                 <button
                   className="secondary"
                   onClick={async () => {
@@ -168,6 +184,7 @@ export default function UsersPage() {
                     if (p) patch(u.id, { password: p }, `Password changed for ${u.username}`);
                   }}
                 >Reset password</button>
+                </div>
               </td>
             </tr>
           ))}

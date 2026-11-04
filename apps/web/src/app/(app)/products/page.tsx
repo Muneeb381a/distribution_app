@@ -1,143 +1,308 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { BusyButton, Empty, SkeletonRows, useConfirm, usePrompt, useToast } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
+import { LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
 
 type Line = 'BOTTLES' | 'RICE';
 interface Category { id: string; name: string; parentId: string | null; businessLine: { code: Line } }
+interface Unit { unitName: string; factorToBase: string }
 interface Product {
-  id: string; name: string; brand: string | null; size: string | null; returnableEmpty: boolean;
-  units: { unitName: string; factorToBase: string }[];
+  id: string; name: string; brand: string | null; size: string | null; returnableEmpty: boolean; isActive: boolean; isPacked: boolean;
+  categoryId: string; baseUnit: 'BOTTLE' | 'KG';
+  units: Unit[];
   category: { name: string; businessLine: { code: Line } };
 }
+interface Price { productId: string; unitName: string; rate: string }
 
 const EMPTY = { name: '', brand: '', size: '', categoryId: '', packSize: '6', bagKg: '', returnableEmpty: true };
+type Form = typeof EMPTY;
+const money = (n: string | number) => Number(n).toLocaleString('en-PK', { maximumFractionDigits: 2 });
+const unitLabel = (u: string) => u.toLowerCase();
+
+/** Units sent to the API for a bottle or rice product. */
+function unitsFor(line: Line, f: Form) {
+  return line === 'BOTTLES'
+    ? [{ unitName: 'BOTTLE', factorToBase: 1 }, { unitName: 'CARTON', factorToBase: Number(f.packSize) }]
+    : [
+        { unitName: 'KG', factorToBase: 1 },
+        { unitName: 'MAUND', factorToBase: 40 },
+        ...(f.bagKg ? [{ unitName: 'BAG', factorToBase: Number(f.bagKg) }] : []),
+      ];
+}
 
 export default function ProductsPage() {
+  const user = useUser();
+  const canEdit = can(user, 'MASTER_DATA_EDIT');
+  const canRate = can(user, 'RATE_EDIT');
+  const toast = useToast();
+  const confirm = useConfirm();
+  const prompt = usePrompt();
   const [line, setLine] = useState<Line>('BOTTLES');
-  const [products, setProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<Product[] | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [form, setForm] = useState(EMPTY);
-  const [error, setError] = useState('');
-  const [adding, setAdding] = useState(false);
+  const [prices, setPrices] = useState<Price[]>([]);
   const [filter, setFilter] = useState('');
-  const canEdit = can(useUser(), 'MASTER_DATA_EDIT');
+  const [showInactive, setShowInactive] = useState(false);
+  const [editing, setEditing] = useState<Product | 'new' | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [p, c] = await Promise.all([api<Product[]>(`/products?line=${line}`), api<Category[]>(`/categories?line=${line}`)]);
+      const [p, c, pr] = await Promise.all([
+        api<Product[]>(`/products?line=${line}&includeInactive=true`),
+        api<Category[]>(`/categories?line=${line}`),
+        api<Price[]>('/product-prices'),
+      ]);
       setProducts(p);
       setCategories(c);
+      setPrices(pr);
     } catch (e) {
-      setError((e as Error).message);
+      toast.error((e as Error).message);
     }
-  }, [line]);
+  }, [line, toast]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
+    setProducts(null);
     load();
   }, [load]);
 
-  // "Basmati › Super Kernel › Sella" labels, only leaf categories can hold products in practice but any level is allowed.
-  const label = (c: Category): string => {
-    const parent = categories.find((x) => x.id === c.parentId);
-    return parent ? `${label(parent)} › ${c.name}` : c.name;
-  };
-  const options = categories.map((c) => ({ id: c.id, text: label(c) })).sort((a, b) => a.text.localeCompare(b.text));
+  // "Basmati › Super Kernel › Sella"
+  const paths = useMemo(() => {
+    const byId = new Map(categories.map((c) => [c.id, c]));
+    const walk = (id: string, seen = 0): string => {
+      const c = byId.get(id);
+      if (!c || seen > 10) return '';
+      return c.parentId ? `${walk(c.parentId, seen + 1)} › ${c.name}` : c.name;
+    };
+    return new Map(categories.map((c) => [c.id, walk(c.id)]));
+  }, [categories]);
+  const pathOf = useCallback((id: string) => paths.get(id) ?? '', [paths]);
+  const catOptions = useMemo(() => categories.map((c) => ({ id: c.id, text: pathOf(c.id) })).sort((a, b) => a.text.localeCompare(b.text)), [categories, pathOf]);
+  const priceOf = (p: Product) => prices.filter((x) => x.productId === p.id);
 
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    setError('');
-    const bottles = line === 'BOTTLES';
-    const units = bottles
-      ? [{ unitName: 'BOTTLE', factorToBase: 1 }, { unitName: 'CARTON', factorToBase: Number(form.packSize) }]
-      : [
-          { unitName: 'KG', factorToBase: 1 },
-          { unitName: 'MAUND', factorToBase: 40 },
-          ...(form.bagKg ? [{ unitName: 'BAG', factorToBase: Number(form.bagKg) }] : []),
-        ];
+  const inactiveCount = products?.filter((p) => !p.isActive).length ?? 0;
+  const shown = useMemo(() => {
+    const f = filter.trim().toLowerCase();
+    return (products ?? []).filter((p) => (showInactive || p.isActive) && (!f || `${p.name} ${p.brand ?? ''} ${p.size ?? ''} ${pathOf(p.categoryId)}`.toLowerCase().includes(f)));
+  }, [products, filter, showInactive, pathOf]);
+  type Key = 'name' | 'category' | 'size' | 'rate';
+  const { sorted, sort, toggle } = useSort<Product, Key>(shown, (p, k) =>
+    k === 'name' ? p.name : k === 'category' ? pathOf(p.categoryId) : k === 'size' ? p.size : priceOf(p)[0]?.rate ?? null);
+  const { page, loadMore, reset } = usePaged(sorted, 30);
+  const missingRate = (products ?? []).filter((p) => p.isActive && !priceOf(p).length).length;
+
+  async function setActive(p: Product, isActive: boolean) {
+    if (!isActive && !(await confirm({ title: `Deactivate ${p.name}?`, body: <p>It is hidden from bills, purchases and stock pickers. Stock and history stay; you can activate it again.</p>, confirmLabel: 'Deactivate', danger: true }))) return;
     try {
-      await api('/products', {
-        method: 'POST',
-        json: {
-          categoryId: form.categoryId,
-          name: form.name,
-          brand: form.brand || undefined,
-          size: form.size || undefined,
-          baseUnit: bottles ? 'BOTTLE' : 'KG',
-          isPacked: !bottles && !!form.bagKg,
-          returnableEmpty: bottles && form.returnableEmpty,
-          units,
-        },
-      });
-      setForm({ ...EMPTY, categoryId: form.categoryId });
-      setAdding(false);
-      await load();
-    } catch (err) {
-      setError((err as Error).message);
+      await api(`/products/${p.id}`, { method: 'PATCH', json: { isActive } });
+      toast.success(`${p.name} ${isActive ? 'activated' : 'deactivated'}`);
+      load();
+    } catch (e) {
+      toast.error((e as Error).message);
     }
   }
 
-  const set = (patch: Partial<typeof EMPTY>) => setForm({ ...form, ...patch });
+  async function addCategory() {
+    const name = await prompt({ title: `New ${line === 'BOTTLES' ? 'bottle' : 'rice'} category`, label: 'Name, e.g. "Coca-Cola" or "Basmati"', confirmLabel: 'Add category', minLength: 2 });
+    if (!name) return;
+    try {
+      await api('/categories', { method: 'POST', json: { businessLine: line, name: name.trim() } });
+      toast.success(`Category “${name.trim()}” added`);
+      load();
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
 
   return (
     <>
       <div className="page-head">
-        <div><h1>Products</h1><p>{products.length} {line === 'BOTTLES' ? 'bottle' : 'rice'} products</p></div>
-        {canEdit && !adding && <button onClick={() => setAdding(true)}>+ Add product</button>}
-      </div>
-      <div className="list-head">
-        {(['BOTTLES', 'RICE'] as Line[]).map((l) => (
-          <button key={l} className={`chip${line === l ? ' on' : ''}`} onClick={() => { setLine(l); setForm(EMPTY); }}>
-            {l === 'BOTTLES' ? 'Bottles' : 'Rice'}
-          </button>
-        ))}
-        <div className="filter"><Icon name="search" /><input placeholder="Filter products…" value={filter} onChange={(e) => setFilter(e.target.value)} /></div>
-      </div>
-      {error && <p className="error">{error}</p>}
-      {canEdit && adding && (
-        <form className="card form" onSubmit={submit}>
-          <p className="form-title">New {line === 'BOTTLES' ? 'bottle' : 'rice'} product</p>
-          <label>Category
-            <select required value={form.categoryId} onChange={(e) => set({ categoryId: e.target.value })}>
-              <option value="">—</option>
-              {options.map((o) => <option key={o.id} value={o.id}>{o.text}</option>)}
-            </select>
-          </label>
-          <label>Name<input required value={form.name} onChange={(e) => set({ name: e.target.value })} /></label>
-          <label>Brand<input value={form.brand} onChange={(e) => set({ brand: e.target.value })} /></label>
-          <label>Size<input value={form.size} placeholder={line === 'BOTTLES' ? '1.5 L' : '25 kg'} onChange={(e) => set({ size: e.target.value })} /></label>
-          {line === 'BOTTLES' ? (
-            <>
-              <label>Bottles per carton<input type="number" min="1" required value={form.packSize} onChange={(e) => set({ packSize: e.target.value })} /></label>
-              <label>Returnable empty
-                <input type="checkbox" checked={form.returnableEmpty} onChange={(e) => set({ returnableEmpty: e.target.checked })} />
-              </label>
-            </>
-          ) : (
-            <label>Bag size (kg, if packed)<input type="number" step="any" min="0" value={form.bagKg} onChange={(e) => set({ bagKg: e.target.value })} /></label>
-          )}
-          <div className="form-actions">
-            <button>Save product</button>
-            <button type="button" className="secondary" onClick={() => setAdding(false)}>Cancel</button>
+        <div><h1>Products</h1><p>{products ? `${products.length - inactiveCount} active ${line === 'BOTTLES' ? 'bottle' : 'rice'} products` : 'Loading…'}</p></div>
+        {canEdit && (
+          <div className="actions">
+            <button className="secondary btn-icon" onClick={addCategory}><Icon name="plus" />Category</button>
+            <button className="btn-icon" onClick={() => setEditing('new')}><Icon name="plus" />Add product</button>
           </div>
-        </form>
-      )}
-      <table>
-        <thead><tr><th>Name</th><th>Category</th><th>Size</th><th>Units (per base)</th></tr></thead>
-        <tbody>
-          {products.filter((p) => `${p.name} ${p.brand ?? ''} ${p.size ?? ''} ${p.category.name}`.toLowerCase().includes(filter.trim().toLowerCase())).map((p) => (
-            <tr key={p.id}>
-              <td><strong>{p.name}</strong>{p.brand && <span className="muted"> · {p.brand}</span>}</td>
-              <td>{p.category.name}</td>
-              <td>{p.size}</td>
-              <td>{p.units.map((u) => <span key={u.unitName} className="badge blue" style={{ marginRight: 6 }}>{u.unitName.toLowerCase()} = {Number(u.factorToBase)}</span>)}{p.returnableEmpty && <span className="badge amber">returnable</span>}</td>
-            </tr>
+        )}
+      </div>
+
+      <div className="list-head">
+        <div className="seg" role="radiogroup" aria-label="Business line" style={{ margin: 0 }}>
+          {(['BOTTLES', 'RICE'] as Line[]).map((l) => (
+            <button key={l} type="button" role="radio" aria-checked={line === l} className={line === l ? 'on' : ''} onClick={() => { setLine(l); reset(); }}>{l === 'BOTTLES' ? 'Bottles' : 'Rice'}</button>
           ))}
-          {!products.length && <tr><td colSpan={4} className="empty">No products yet. Add one or use Import.</td></tr>}
+        </div>
+        <div className="filter"><Icon name="search" /><input aria-label="Filter products" placeholder="Filter by name, brand, size, category…" value={filter} onChange={(e) => { setFilter(e.target.value); reset(); }} /></div>
+        {inactiveCount > 0 && <button type="button" className={`chip${showInactive ? ' on' : ''}`} aria-pressed={showInactive} onClick={() => setShowInactive(!showInactive)}>Show inactive ({inactiveCount})</button>}
+      </div>
+
+      {missingRate > 0 && (
+        <p className="error" role="status"><Icon name="alert" /> {missingRate} active product{missingRate === 1 ? ' has' : 's have'} no default sale rate. Bills for customers without a fixed rate will ask for one.</p>
+      )}
+
+      <table className="sticky-head">
+        <thead>
+          <tr>
+            <SortTh k="name" sort={sort} toggle={toggle}>Product</SortTh>
+            <SortTh k="category" sort={sort} toggle={toggle}>Category</SortTh>
+            <SortTh k="size" sort={sort} toggle={toggle}>Size</SortTh>
+            <th>Units</th>
+            <SortTh k="rate" sort={sort} toggle={toggle} num>Default rate</SortTh>
+            {(canEdit || canRate) && <th><span className="sr-only">Actions</span></th>}
+          </tr>
+        </thead>
+        <tbody>
+          {!products && <SkeletonRows cols={canEdit || canRate ? 6 : 5} />}
+          {page.map((p) => {
+            const pr = priceOf(p);
+            return (
+              <tr key={p.id} className={p.isActive ? '' : 'inactive'}>
+                <td><b>{p.name}</b>{p.brand && <span className="muted"> · {p.brand}</span>}{!p.isActive && <> <span className="badge">Inactive</span></>}</td>
+                <td>{pathOf(p.categoryId) || p.category.name}</td>
+                <td>{p.size ?? <span className="muted">—</span>}</td>
+                <td>
+                  <span className="chips" style={{ gap: 5 }}>
+                    {p.units.filter((u) => Number(u.factorToBase) !== 1).map((u) => <span key={u.unitName} className="badge blue">1 {unitLabel(u.unitName)} = {Number(u.factorToBase)} {p.baseUnit === 'KG' ? 'kg' : 'bottles'}</span>)}
+                    {p.returnableEmpty && <span className="badge teal">returnable</span>}
+                  </span>
+                </td>
+                <td className="num">
+                  {pr.length ? pr.map((x) => <div key={x.unitName}><b>{money(x.rate)}</b> <span className="muted">/ {unitLabel(x.unitName)}</span></div>) : <span className="badge amber">Not set</span>}
+                </td>
+                {(canEdit || canRate) && (
+                  <td>
+                    <div className="row-actions">
+                      <button type="button" className="secondary icon-only" title={canEdit ? 'Edit' : 'Edit rates'} aria-label={`Edit ${p.name}`} onClick={() => setEditing(p)}><Icon name="edit" /></button>
+                      {!canEdit ? null : p.isActive
+                        ? <button type="button" className="secondary icon-only danger-hover" title="Deactivate" aria-label={`Deactivate ${p.name}`} onClick={() => setActive(p, false)}><Icon name="ban" /></button>
+                        : <button type="button" className="secondary" onClick={() => setActive(p, true)}>Activate</button>}
+                    </div>
+                  </td>
+                )}
+              </tr>
+            );
+          })}
+          {products && !shown.length && (
+            <tr><td colSpan={6}>
+              {filter ? <Empty icon="search" title={`No product matches “${filter}”`} />
+                : <Empty icon="products" title={`No ${line === 'BOTTLES' ? 'bottle' : 'rice'} products yet`} text="Add one here or bring a list in with Import." action={canEdit && <button type="button" onClick={() => setEditing('new')}><Icon name="plus" />Add first product</button>} />}
+            </td></tr>
+          )}
         </tbody>
       </table>
+      <LoadMore shown={page.length} total={sorted.length} onMore={loadMore} />
+
+      {editing && (
+        <ProductDialog
+          key={editing === 'new' ? 'new' : editing.id}
+          line={line}
+          product={editing === 'new' ? null : editing}
+          categories={catOptions}
+          prices={editing === 'new' ? [] : priceOf(editing)}
+          canEdit={canEdit}
+          canRate={canRate}
+          onClose={() => setEditing(null)}
+          onSaved={(name) => { setEditing(null); toast.success(`${name} saved`); load(); }}
+          onError={(m) => toast.error(m)}
+        />
+      )}
     </>
+  );
+}
+
+function ProductDialog({ line, product, categories, prices, canEdit, canRate, onClose, onSaved, onError }: {
+  line: Line; product: Product | null; categories: { id: string; text: string }[]; prices: Price[];
+  canEdit: boolean; canRate: boolean; onClose: () => void; onSaved: (name: string) => void; onError: (m: string) => void;
+}) {
+  const factor = (u: string) => product?.units.find((x) => x.unitName === u)?.factorToBase;
+  const [form, setForm] = useState<Form>(() => (product ? {
+    name: product.name, brand: product.brand ?? '', size: product.size ?? '', categoryId: product.categoryId,
+    packSize: String(Number(factor('CARTON') ?? 6)), bagKg: factor('BAG') ? String(Number(factor('BAG'))) : '', returnableEmpty: product.returnableEmpty,
+  } : EMPTY));
+  const units = unitsFor(line, form);
+  const [rates, setRates] = useState<Record<string, string>>(() => Object.fromEntries(prices.map((p) => [p.unitName, String(Number(p.rate))])));
+  const [busy, setBusy] = useState(false);
+  const set = (patch: Partial<Form>) => setForm({ ...form, ...patch });
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    const bottles = line === 'BOTTLES';
+    const body = {
+      categoryId: form.categoryId, name: form.name.trim(), brand: form.brand || undefined, size: form.size || undefined,
+      isPacked: !bottles && !!form.bagKg, returnableEmpty: bottles && form.returnableEmpty, units,
+    };
+    try {
+      // Someone with only the rate permission edits rates, not the product itself.
+      const saved = product && !canEdit
+        ? product
+        : product
+        ? await api<{ id: string }>(`/products/${product.id}`, { method: 'PATCH', json: body })
+        : await api<{ id: string }>('/products', { method: 'POST', json: { ...body, baseUnit: bottles ? 'BOTTLE' : 'KG' } });
+      if (canRate) {
+        const list = units.filter((u) => rates[u.unitName] !== undefined && rates[u.unitName] !== '').map((u) => ({ unitName: u.unitName, rate: Number(rates[u.unitName]) }));
+        const before = JSON.stringify(prices.map((p) => [p.unitName, Number(p.rate)]).sort());
+        if (JSON.stringify(list.map((p) => [p.unitName, p.rate]).sort()) !== before) {
+          await api(`/product-prices/${saved.id}`, { method: 'PUT', json: { prices: list } });
+        }
+      }
+      onSaved(form.name.trim());
+    } catch (err) {
+      onError((err as Error).message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal wide" role="dialog" aria-modal="true" aria-labelledby="product-title" onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
+        <form onSubmit={submit}>
+          <div className="modal-head">
+            <span className="modal-icon info"><Icon name="products" /></span>
+            <h2 id="product-title">{product ? `Edit ${product.name}` : `New ${line === 'BOTTLES' ? 'bottle' : 'rice'} product`}</h2>
+          </div>
+          <fieldset disabled={!canEdit} style={{ border: 0, padding: 0, margin: '14px 0 0' }}>
+            <div className="form" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
+              <label style={{ gridColumn: '1 / -1' }}>Category
+                <select required value={form.categoryId} onChange={(e) => set({ categoryId: e.target.value })}>
+                  <option value="">Select category…</option>
+                  {categories.map((o) => <option key={o.id} value={o.id}>{o.text}</option>)}
+                </select>
+              </label>
+              <label>Name<input required autoFocus value={form.name} onChange={(e) => set({ name: e.target.value })} /></label>
+              <label>Brand<input value={form.brand} placeholder="Optional" onChange={(e) => set({ brand: e.target.value })} /></label>
+              <label>Size<input value={form.size} placeholder={line === 'BOTTLES' ? '1.5 L' : '25 kg'} onChange={(e) => set({ size: e.target.value })} /></label>
+              {line === 'BOTTLES' ? (
+                <>
+                  <label>Bottles per carton<input type="number" min="1" step="1" required value={form.packSize} onChange={(e) => set({ packSize: e.target.value })} /></label>
+                  <label>Returnable empty
+                    <input type="checkbox" checked={form.returnableEmpty} onChange={(e) => set({ returnableEmpty: e.target.checked })} />
+                  </label>
+                </>
+              ) : (
+                <label>Bag size (kg, if packed)<input type="number" step="any" min="0" placeholder="Loose" value={form.bagKg} onChange={(e) => set({ bagKg: e.target.value })} /></label>
+              )}
+            </div>
+          </fieldset>
+          <h3 style={{ margin: '22px 0 4px' }}>Default sale rate</h3>
+          <p className="card-sub" style={{ margin: '0 0 12px' }}>Used on bills when the customer has no fixed rate. {canRate ? 'Leave a unit empty to require a rate on the bill.' : 'You need the rate-edit permission to change these.'}</p>
+          <div className="form" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
+            {units.map((u) => (
+              <label key={u.unitName}>Rs per {unitLabel(u.unitName)}
+                <input type="number" step="any" min="0" inputMode="decimal" disabled={!canRate} placeholder="—" value={rates[u.unitName] ?? ''} onChange={(e) => setRates({ ...rates, [u.unitName]: e.target.value })} />
+                {u.unitName === 'CARTON' && rates.BOTTLE && !rates.CARTON && <span className="hint">= {money(Number(rates.BOTTLE) * Number(form.packSize || 0))} at bottle rate</span>}
+              </label>
+            ))}
+          </div>
+          <div className="modal-actions">
+            <button type="button" className="secondary" onClick={onClose}>Cancel</button>
+            <BusyButton busy={busy} disabled={!canEdit && !canRate}>{product ? 'Save changes' : 'Add product'}</BusyButton>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
