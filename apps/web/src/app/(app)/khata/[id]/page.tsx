@@ -157,7 +157,7 @@ export default function CustomerKhataPage() {
           </div>
         </div>
 
-        <aside className="doc-side">
+        <aside className="doc-side first-on-small">
           {can(user, 'PAYMENT_RECORD') && (
             <form className="card side-form receipt" onSubmit={submit}>
               <h2 style={{ margin: 0 }}>Receive payment</h2>

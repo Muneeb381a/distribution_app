@@ -142,7 +142,8 @@ export default function PayrollPage() {
       pay: p.reduce((s, x) => s + Number(x.netPaid), 0),
       paid: done.reduce((s, x) => s + Number(x.netPaid), 0),
       done: done.length,
-      advances: p.reduce((s, x) => s + Number(x.advances) + Number(x.carryIn), 0),
+      // Only months not yet finalised still have advances to take off.
+      advances: p.filter((x) => !x.alreadyRun).reduce((s, x) => s + Number(x.advances) + Number(x.carryIn), 0),
     };
   }, [previews]);
   const openAdvances = (advances ?? []).filter((a) => a.status === 'ACTIVE' && !a.payrollRunId);
@@ -165,7 +166,8 @@ export default function PayrollPage() {
       </div>
 
       <h2>Salary for {monthName(month)}</h2>
-      <table className="sticky-head">
+      <div className="table-wrap">
+      <table>
         <thead>
           <tr>
             <th>Employee</th><th className="num">Base</th><th className="num">Commission</th><th className="num">Absence</th><th className="num">Gross</th>
@@ -203,6 +205,7 @@ export default function PayrollPage() {
           )}
         </tbody>
       </table>
+      </div>
       <p className="muted" style={{ fontSize: 13 }}>Monthly staff lose salary ÷ 30 per absent or unpaid-leave day (half day = half). Daily staff are paid for days present (half day = half) and paid leave. Advances above what was earned carry to next month.</p>
 
       <div className="dash-grid" style={{ marginTop: 28 }}>
