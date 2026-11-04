@@ -1,0 +1,1 @@
+﻿{ "name": "distribution-app", "private": true, "scripts": { "api": "pnpm --filter api start:dev", "web": "pnpm --filter web dev" } }

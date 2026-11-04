@@ -1,0 +1,13 @@
+﻿services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: dist
+      POSTGRES_PASSWORD: dist
+      POSTGRES_DB: distribution
+    ports:
+      - "5440:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+volumes:
+  pgdata:

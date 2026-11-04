@@ -1,0 +1,649 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum BusinessLineCode {
+  BOTTLES
+  RICE
+}
+
+enum LocationType {
+  GODOWN
+  SHOP
+  VEHICLE
+}
+
+enum CustomerType {
+  CASH
+  CREDIT
+}
+
+enum SupplierType {
+  BEVERAGE
+  RICE_MILL
+  OTHER
+}
+
+enum EmployeeType {
+  MONTHLY
+  DAILY
+}
+
+enum BaseUnit {
+  BOTTLE
+  KG
+}
+
+enum UnitName {
+  BOTTLE
+  CARTON
+  KG
+  MAUND
+  BAG
+}
+
+// ---------- system ----------
+
+model Role {
+  id          String           @id @default(uuid())
+  name        String           @unique
+  permissions RolePermission[]
+  users       AppUser[]
+}
+
+model RolePermission {
+  roleId         String
+  permissionCode String
+  role           Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionCode])
+}
+
+model AppUser {
+  id           String     @id @default(uuid())
+  username     String     @unique
+  passwordHash String
+  roleId       String
+  employeeId   String?    @unique
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  role         Role       @relation(fields: [roleId], references: [id])
+  employee     Employee?  @relation(fields: [employeeId], references: [id])
+  auditLogs    AuditLog[]
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  action     String
+  entity     String
+  entityId   String?
+  beforeJson Json?
+  afterJson  Json?
+  at         DateTime @default(now())
+  user       AppUser? @relation(fields: [userId], references: [id])
+
+  @@index([entity, entityId])
+  @@index([at])
+}
+
+// ---------- master data ----------
+
+model BusinessLine {
+  id         String           @id @default(uuid())
+  code       BusinessLineCode @unique
+  name       String
+  categories Category[]
+}
+
+model Category {
+  id             String       @id @default(uuid())
+  businessLineId String
+  name           String
+  parentId       String?
+  businessLine   BusinessLine @relation(fields: [businessLineId], references: [id])
+  parent         Category?    @relation("CategoryTree", fields: [parentId], references: [id])
+  children       Category[]   @relation("CategoryTree")
+  products       Product[]
+
+  @@unique([businessLineId, parentId, name])
+}
+
+model Product {
+  id                  String               @id @default(uuid())
+  categoryId          String
+  name                String
+  brand               String?
+  size                String?
+  baseUnit            BaseUnit
+  isPacked            Boolean              @default(false)
+  returnableEmpty     Boolean              @default(false)
+  isActive            Boolean              @default(true)
+  createdAt           DateTime             @default(now())
+  category            Category             @relation(fields: [categoryId], references: [id])
+  units               ProductUnit[]
+  customerRates       CustomerRate[]
+  stockMovements      StockMovement[]
+  cost                ProductCost?
+  purchaseItems       PurchaseItem[]
+  purchaseReturnItems PurchaseReturnItem[]
+  stockTransferItems  StockTransferItem[]
+  prices              ProductPrice[]
+  saleItems           SaleItem[]
+  saleReturnItems     SaleReturnItem[]
+  emptiesLedger       EmptiesLedger[]
+
+  @@index([categoryId])
+}
+
+model ProductUnit {
+  productId    String
+  unitName     UnitName
+  factorToBase Decimal  @db.Decimal(14, 3)
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([productId, unitName])
+}
+
+model Location {
+  id              String           @id @default(uuid())
+  name            String           @unique
+  type            LocationType
+  isActive        Boolean          @default(true)
+  movements       StockMovement[]
+  purchases       Purchase[]
+  purchaseReturns PurchaseReturn[]
+  transfersFrom   StockTransfer[]  @relation("TransferFrom")
+  transfersTo     StockTransfer[]  @relation("TransferTo")
+  sales           Sale[]
+}
+
+model Employee {
+  id                String          @id @default(uuid())
+  name              String
+  phone             String?
+  type              EmployeeType
+  monthlySalary     Decimal?        @db.Decimal(14, 2)
+  dailyWage         Decimal?        @db.Decimal(14, 2)
+  joinDate          DateTime?       @db.Date
+  isActive          Boolean         @default(true)
+  user              AppUser?
+  sales             Sale[]
+  /// Percent of the employee's delivered net sales paid as commission (e.g. 1.5). Null = none.
+  commissionPercent Decimal?        @db.Decimal(5, 2)
+  attendance        Attendance[]
+  advances          SalaryAdvance[]
+  payrollRuns       PayrollRun[]
+}
+
+model Customer {
+  id             String           @id @default(uuid())
+  name           String
+  shopName       String?
+  phone          String?
+  address        String?
+  area           String?
+  type           CustomerType     @default(CASH)
+  creditLimit    Decimal?         @db.Decimal(14, 2)
+  openingBalance Decimal          @default(0) @db.Decimal(14, 2)
+  isActive       Boolean          @default(true)
+  createdAt      DateTime         @default(now())
+  rates          CustomerRate[]
+  sales          Sale[]
+  ledger         CustomerLedger[]
+  payments       Payment[]
+  empties        EmptiesLedger[]
+
+  @@index([name])
+  @@index([area])
+}
+
+model CustomerRate {
+  customerId String
+  productId  String
+  unitName   UnitName
+  rate       Decimal  @db.Decimal(14, 2)
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  product    Product  @relation(fields: [productId], references: [id])
+
+  @@id([customerId, productId, unitName])
+}
+
+model Supplier {
+  id               String            @id @default(uuid())
+  name             String
+  phone            String?
+  type             SupplierType      @default(OTHER)
+  openingBalance   Decimal           @default(0) @db.Decimal(14, 2)
+  isActive         Boolean           @default(true)
+  purchases        Purchase[]
+  purchaseReturns  PurchaseReturn[]
+  supplierPayments SupplierPayment[]
+  supplierLedgers  SupplierLedger[]
+}
+
+// ---------- Phase 2: stock, purchasing, supplier ledger ----------
+
+enum StockStatus {
+  OK
+  DAMAGED
+}
+
+enum MovementType {
+  OPENING
+  PURCHASE
+  PURCHASE_CANCEL
+  PURCHASE_RETURN
+  SALE
+  SALE_RETURN
+  SALE_CANCEL
+  TRANSFER_OUT
+  TRANSFER_IN
+  ADJUST
+  DAMAGE_MARK
+  DAMAGE_RESTORE
+  WRITE_OFF
+}
+
+enum LedgerRefType {
+  PURCHASE
+  PAYMENT
+  RETURN
+  CANCEL
+}
+
+enum DocStatus {
+  ACTIVE
+  CANCELLED
+}
+
+/// Document numbers for server-created documents (P-000001, T-000001, ...).
+model Counter {
+  key   String @id
+  value Int
+}
+
+/// Append-only. qtyBase is signed: positive adds stock, negative removes it.
+model StockMovement {
+  id          String       @id @default(uuid())
+  productId   String
+  locationId  String
+  qtyBase     Decimal      @db.Decimal(14, 3)
+  status      StockStatus  @default(OK)
+  type        MovementType
+  refType     String?
+  refId       String?
+  note        String?
+  createdById String
+  createdAt   DateTime     @default(now())
+  product     Product      @relation(fields: [productId], references: [id])
+  location    Location     @relation(fields: [locationId], references: [id])
+
+  @@index([productId, locationId, status])
+  @@index([refType, refId])
+  @@index([createdAt])
+}
+
+model ProductCost {
+  productId          String   @id
+  latestUnitCostBase Decimal  @db.Decimal(14, 4)
+  updatedAt          DateTime @updatedAt
+  product            Product  @relation(fields: [productId], references: [id])
+}
+
+model Purchase {
+  id          String         @id @default(uuid())
+  purchaseNo  String         @unique
+  supplierId  String
+  locationId  String
+  date        DateTime       @db.Date
+  total       Decimal        @db.Decimal(14, 2)
+  paidNow     Decimal        @default(0) @db.Decimal(14, 2)
+  note        String?
+  status      DocStatus      @default(ACTIVE)
+  createdById String
+  createdAt   DateTime       @default(now())
+  supplier    Supplier       @relation(fields: [supplierId], references: [id])
+  location    Location       @relation(fields: [locationId], references: [id])
+  items       PurchaseItem[]
+
+  @@index([supplierId, date])
+}
+
+model PurchaseItem {
+  id         String   @id @default(uuid())
+  purchaseId String
+  productId  String
+  unitName   UnitName
+  qty        Decimal  @db.Decimal(14, 3)
+  qtyBase    Decimal  @db.Decimal(14, 3)
+  unitPrice  Decimal  @db.Decimal(14, 2)
+  lineTotal  Decimal  @db.Decimal(14, 2)
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  product    Product  @relation(fields: [productId], references: [id])
+}
+
+model PurchaseReturn {
+  id          String               @id @default(uuid())
+  returnNo    String               @unique
+  supplierId  String
+  locationId  String
+  date        DateTime             @db.Date
+  total       Decimal              @db.Decimal(14, 2)
+  note        String?
+  createdById String
+  createdAt   DateTime             @default(now())
+  supplier    Supplier             @relation(fields: [supplierId], references: [id])
+  location    Location             @relation(fields: [locationId], references: [id])
+  items       PurchaseReturnItem[]
+}
+
+model PurchaseReturnItem {
+  id         String         @id @default(uuid())
+  returnId   String
+  productId  String
+  unitName   UnitName
+  qty        Decimal        @db.Decimal(14, 3)
+  qtyBase    Decimal        @db.Decimal(14, 3)
+  unitPrice  Decimal        @db.Decimal(14, 2)
+  lineTotal  Decimal        @db.Decimal(14, 2)
+  fromStatus StockStatus
+  ret        PurchaseReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  product    Product        @relation(fields: [productId], references: [id])
+}
+
+model SupplierPayment {
+  id          String   @id @default(uuid())
+  paymentNo   String   @unique
+  supplierId  String
+  amount      Decimal  @db.Decimal(14, 2)
+  method      String   @default("CASH")
+  date        DateTime @db.Date
+  note        String?
+  createdById String
+  createdAt   DateTime @default(now())
+  supplier    Supplier @relation(fields: [supplierId], references: [id])
+}
+
+/// amount > 0 means we owe the supplier more (purchase); amount < 0 means we owe less (payment, return).
+/// Balance = Supplier.openingBalance + sum(amount).
+model SupplierLedger {
+  id          String        @id @default(uuid())
+  supplierId  String
+  date        DateTime      @db.Date
+  amount      Decimal       @db.Decimal(14, 2)
+  refType     LedgerRefType
+  refId       String
+  note        String?
+  createdById String
+  createdAt   DateTime      @default(now())
+  supplier    Supplier      @relation(fields: [supplierId], references: [id])
+
+  @@index([supplierId, date])
+}
+
+model StockTransfer {
+  id             String              @id @default(uuid())
+  transferNo     String              @unique
+  fromLocationId String
+  toLocationId   String
+  date           DateTime            @db.Date
+  note           String?
+  createdById    String
+  createdAt      DateTime            @default(now())
+  from           Location            @relation("TransferFrom", fields: [fromLocationId], references: [id])
+  to             Location            @relation("TransferTo", fields: [toLocationId], references: [id])
+  items          StockTransferItem[]
+}
+
+model StockTransferItem {
+  id         String        @id @default(uuid())
+  transferId String
+  productId  String
+  unitName   UnitName
+  qty        Decimal       @db.Decimal(14, 3)
+  qtyBase    Decimal       @db.Decimal(14, 3)
+  transfer   StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  product    Product       @relation(fields: [productId], references: [id])
+}
+
+// ---------- Phase 3: sales, customer khata, payments, empties ----------
+
+enum SaleType {
+  COUNTER
+  DELIVERY
+}
+
+enum ReturnReason {
+  DAMAGED
+  EXPIRED
+}
+
+enum CustomerLedgerRef {
+  SALE
+  PAYMENT
+  SALE_CANCEL
+  PAYMENT_CANCEL
+}
+
+/// List price used when the customer has no fixed rate.
+model ProductPrice {
+  productId String
+  unitName  UnitName
+  rate      Decimal  @db.Decimal(14, 2)
+  product   Product  @relation(fields: [productId], references: [id])
+
+  @@id([productId, unitName])
+}
+
+model Sale {
+  id              String           @id @default(uuid())
+  billNo          String           @unique
+  /// Client-generated id so a bill that is sent twice is only created once.
+  clientId        String?          @unique
+  businessLine    BusinessLineCode
+  saleType        SaleType
+  customerId      String?
+  locationId      String
+  salesmanId      String?
+  date            DateTime         @db.Date
+  gross           Decimal          @db.Decimal(14, 2)
+  returnsCredit   Decimal          @default(0) @db.Decimal(14, 2)
+  net             Decimal          @db.Decimal(14, 2)
+  paidNow         Decimal          @default(0) @db.Decimal(14, 2)
+  /// Customer balance before and after this bill, frozen so reprints match what the customer saw.
+  previousBalance Decimal          @default(0) @db.Decimal(14, 2)
+  newBalance      Decimal          @default(0) @db.Decimal(14, 2)
+  note            String?
+  /// Empties given/collected/held-after per product, frozen at billing time.
+  empties         Json?
+  status          DocStatus        @default(ACTIVE)
+  createdById     String
+  createdAt       DateTime         @default(now())
+  cancelledById   String?
+  cancelledAt     DateTime?
+  customer        Customer?        @relation(fields: [customerId], references: [id])
+  location        Location         @relation(fields: [locationId], references: [id])
+  salesman        Employee?        @relation(fields: [salesmanId], references: [id])
+  items           SaleItem[]
+  returns         SaleReturnItem[]
+  payments        Payment[]
+
+  @@index([customerId, date])
+  @@index([businessLine, date])
+  @@index([salesmanId, date])
+}
+
+model SaleItem {
+  id           String   @id @default(uuid())
+  saleId       String
+  productId    String
+  unitName     UnitName
+  qty          Decimal  @db.Decimal(14, 3)
+  qtyBase      Decimal  @db.Decimal(14, 3)
+  rate         Decimal  @db.Decimal(14, 2)
+  lineTotal    Decimal  @db.Decimal(14, 2)
+  /// Latest purchase cost per base unit at the moment of sale; frozen so past profit never changes.
+  unitCostBase Decimal? @db.Decimal(14, 4)
+  sale         Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product      Product  @relation(fields: [productId], references: [id])
+}
+
+model SaleReturnItem {
+  id           String       @id @default(uuid())
+  saleId       String
+  productId    String
+  unitName     UnitName
+  qty          Decimal      @db.Decimal(14, 3)
+  qtyBase      Decimal      @db.Decimal(14, 3)
+  rate         Decimal      @db.Decimal(14, 2)
+  creditAmount Decimal      @db.Decimal(14, 2)
+  reason       ReturnReason
+  sale         Sale         @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product      Product      @relation(fields: [productId], references: [id])
+}
+
+/// amount > 0 means the customer owes more (bill); amount < 0 means they owe less (payment).
+/// Balance = Customer.openingBalance + sum(amount).
+model CustomerLedger {
+  id          String            @id @default(uuid())
+  customerId  String
+  date        DateTime          @db.Date
+  amount      Decimal           @db.Decimal(14, 2)
+  refType     CustomerLedgerRef
+  refId       String
+  note        String?
+  createdById String
+  createdAt   DateTime          @default(now())
+  customer    Customer          @relation(fields: [customerId], references: [id])
+
+  @@index([customerId, date])
+}
+
+/// A receipt: money received from a customer, either with a bill or on its own.
+model Payment {
+  id              String    @id @default(uuid())
+  receiptNo       String    @unique
+  clientId        String?   @unique
+  customerId      String
+  saleId          String?
+  amount          Decimal   @db.Decimal(14, 2)
+  method          String    @default("CASH")
+  date            DateTime  @db.Date
+  previousBalance Decimal   @db.Decimal(14, 2)
+  newBalance      Decimal   @db.Decimal(14, 2)
+  note            String?
+  status          DocStatus @default(ACTIVE)
+  createdById     String
+  createdAt       DateTime  @default(now())
+  customer        Customer  @relation(fields: [customerId], references: [id])
+  sale            Sale?     @relation(fields: [saleId], references: [id])
+
+  @@index([customerId, date])
+  @@index([createdById, date])
+}
+
+/// Returnable empties (counted in bottles). Cancelling a bill adds an offsetting row.
+model EmptiesLedger {
+  id          String   @id @default(uuid())
+  customerId  String
+  productId   String
+  qtyOut      Int      @default(0)
+  qtyIn       Int      @default(0)
+  saleId      String?
+  createdById String
+  createdAt   DateTime @default(now())
+  customer    Customer @relation(fields: [customerId], references: [id])
+  product     Product  @relation(fields: [productId], references: [id])
+
+  @@index([customerId, productId])
+}
+
+// ---------- Phase 5: expenses, attendance, advances, payroll ----------
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  HALF_DAY
+  PAID_LEAVE
+  UNPAID_LEAVE
+}
+
+/// businessLine null means a shared cost (rent, bills) that belongs to both lines.
+model Expense {
+  id           String            @id @default(uuid())
+  date         DateTime          @db.Date
+  category     String
+  businessLine BusinessLineCode?
+  amount       Decimal           @db.Decimal(14, 2)
+  note         String?
+  /// Set for expenses created by the system (e.g. PAYROLL) so they can't be edited by hand.
+  source       String?
+  sourceId     String?
+  status       DocStatus         @default(ACTIVE)
+  createdById  String
+  createdAt    DateTime          @default(now())
+
+  @@index([date])
+}
+
+model Attendance {
+  employeeId String
+  date       DateTime         @db.Date
+  status     AttendanceStatus
+  employee   Employee         @relation(fields: [employeeId], references: [id])
+
+  @@id([employeeId, date])
+}
+
+model SalaryAdvance {
+  id           String      @id @default(uuid())
+  employeeId   String
+  date         DateTime    @db.Date
+  amount       Decimal     @db.Decimal(14, 2)
+  note         String?
+  /// Set when a payroll run has deducted this advance.
+  payrollRunId String?
+  status       DocStatus   @default(ACTIVE)
+  createdById  String
+  createdAt    DateTime    @default(now())
+  employee     Employee    @relation(fields: [employeeId], references: [id])
+  payrollRun   PayrollRun? @relation(fields: [payrollRunId], references: [id])
+
+  @@index([employeeId, date])
+}
+
+/// One finalised salary calculation for an employee and month ("2026-11").
+model PayrollRun {
+  id               String          @id @default(uuid())
+  employeeId       String
+  month            String
+  base             Decimal         @db.Decimal(14, 2)
+  commission       Decimal         @default(0) @db.Decimal(14, 2)
+  absenceDeduction Decimal         @default(0) @db.Decimal(14, 2)
+  gross            Decimal         @db.Decimal(14, 2)
+  advances         Decimal         @default(0) @db.Decimal(14, 2)
+  carryIn          Decimal         @default(0) @db.Decimal(14, 2)
+  /// Cash paid to the employee (never negative).
+  netPaid          Decimal         @db.Decimal(14, 2)
+  /// Advances beyond what was earned; deducted from next month.
+  carryOut         Decimal         @default(0) @db.Decimal(14, 2)
+  details          Json?
+  paidOn           DateTime        @db.Date
+  createdById      String
+  createdAt        DateTime        @default(now())
+  status           DocStatus       @default(ACTIVE)
+  cancelledById    String?
+  cancelledAt      DateTime?
+  cancelReason     String?
+  employee         Employee        @relation(fields: [employeeId], references: [id])
+  advanceItems     SalaryAdvance[]
+
+  /// One ACTIVE run per employee and month is enforced by a partial unique index (see the cancel_payroll migration).
+  @@index([employeeId, month])
+}
