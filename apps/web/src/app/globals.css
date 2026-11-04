@@ -370,6 +370,7 @@ th.sortable.sorted svg { opacity: 1; }
 th.sortable:hover { color: var(--text); }
 .sticky-head thead th { position: sticky; top: 64px; z-index: 2; }
 .sticky-head { overflow: visible; }
+.table-wrap .sticky-head thead th { position: static; }
 .table-wrap.scroll { max-height: 70vh; overflow: auto; }
 .table-wrap.scroll thead th { position: sticky; top: 0; z-index: 2; }
 tr.row-link { cursor: pointer; }
@@ -387,6 +388,35 @@ td.neg-amt, .amt-credit { color: var(--success); }
 .tabs button[aria-selected='true'] { color: var(--accent-dark); border-bottom-color: var(--accent); }
 .tabs button:focus-visible { outline-offset: -3px; }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* ---------- report filters ---------- */
+.filters { display: flex; align-items: center; gap: 12px 18px; flex-wrap: wrap; margin-bottom: 20px; }
+.filters .seg { margin: 0; }
+.date-range { display: flex; align-items: center; gap: 8px; }
+.date-range input { min-width: 0; width: 150px; }
+button.btn-icon { display: inline-flex; align-items: center; gap: 8px; }
+button.btn-icon svg { width: 16px; height: 16px; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px; vertical-align: 0; }
+tr.total-row td { font-weight: 700; background: #f8fafc !important; border-top: 1px solid var(--border-strong); }
+p.error svg { width: 16px; height: 16px; vertical-align: -3px; }
+
+/* ---------- chart ---------- */
+.chart { margin: 0; position: relative; }
+.chart-legend { display: flex; gap: 16px; font-size: 13px; color: var(--muted); margin-bottom: 8px; flex-wrap: wrap; }
+.chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend i, .chart-tip i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.chart-plot { position: relative; }
+.chart svg { display: block; overflow: visible; }
+.chart-grid { stroke: #eef1f6; stroke-width: 1; }
+.chart-axis { stroke: var(--border-strong); stroke-width: 1; }
+.chart-tick { font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.chart-tick.strong { fill: var(--text); font-weight: 650; }
+.chart g.dim path, .chart g.dim rect[fill^='#'] { opacity: 0.45; }
+.chart-tip { position: absolute; pointer-events: none; z-index: 5; min-width: 160px; background: #fff; border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 10px 28px rgba(16, 24, 40, 0.16); padding: 9px 11px; font-size: 12.5px; display: flex; flex-direction: column; gap: 3px; }
+.chart-tip b { font-size: 12.5px; margin-bottom: 2px; }
+.chart-tip span { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.chart-tip em { margin-left: auto; font-style: normal; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.chart-tip .tot { border-top: 1px solid var(--border); padding-top: 4px; margin-top: 2px; color: var(--text); font-weight: 600; }
 
 /* ---------- document pages (bill, khata, ledgers, slips) ---------- */
 .back { display: inline-flex; align-items: center; gap: 4px; font-weight: 550; margin-bottom: 8px; }
@@ -499,6 +529,7 @@ dl.totals { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 9px 
   .content { padding: 20px 16px 40px; }
   table { display: block; overflow-x: auto; white-space: nowrap; }
   .sticky-head thead th { position: static; }
+  table.sticky-head { overflow-x: auto; }
   .topbar .crumbs { display: none; }
   .collapse-btn { display: none; }
   .shell.collapsed .sidebar { width: 248px; }
@@ -593,6 +624,14 @@ dl.totals { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 9px 
   .line > :first-child { grid-column: 1 / -1; }
   .line.emp { grid-template-columns: 1fr 34px; }
   .kbd-help { display: none; }
+}
+@media (max-width: 560px) {
+  .stats, .mini-stats { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat { padding: 14px; }
+  .stat .value { font-size: 20px; }
+  .stat .label { font-size: 11px; letter-spacing: 0.02em; }
+  .stat .icon { display: none; }
+  .party-bal b { font-size: 26px; }
 }
 
 /* new bill: pickers, hints, keyboard, success */
