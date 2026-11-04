@@ -168,14 +168,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             <div className="brand">
               <span className="logo"><Icon name="products" /></span>
               <span className="brand-text">Distribution<small>Rice &amp; Beverages</small></span>
+              <button className="collapse-btn" onClick={toggleSidebar} aria-label={collapsed ? 'Expand menu' : 'Collapse menu'} title={collapsed ? 'Expand menu' : 'Collapse menu'}>
+                <Icon name={collapsed ? 'chevronRight' : 'chevronLeft'} />
+              </button>
             </div>
             <Suspense fallback={null}>
               <NavLinks user={user} onNavigate={() => setOpen(false)} collapsed={collapsed} />
             </Suspense>
-            <button className="collapse-btn" onClick={toggleSidebar} aria-label={collapsed ? 'Expand menu' : 'Collapse menu'} title={collapsed ? 'Expand menu' : 'Collapse menu'}>
-              <Icon name={collapsed ? 'chevronRight' : 'chevronLeft'} />
-              <span className="nav-label">Collapse</span>
-            </button>
           </nav>
           <div className="main">
             <Suspense fallback={<header className="topbar" />}>

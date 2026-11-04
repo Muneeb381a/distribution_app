@@ -288,15 +288,16 @@ p.ok { background: var(--success-soft); border: 1px solid #b5e3cf; padding: 10px
 /* ---------- collapsible sidebar ---------- */
 .nav-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar a.nav-link.active { box-shadow: inset 3px 0 0 #93c5fd; font-weight: 600; }
-.collapse-btn { margin: 8px 12px 0; display: flex; align-items: center; gap: 11px; padding: 9px 10px; background: transparent; color: #8796ad; border-radius: 8px; font-weight: 500; }
+.collapse-btn { margin-left: auto; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; background: transparent; color: #8796ad; border-radius: 7px; flex-shrink: 0; }
 .collapse-btn:hover:not(:disabled) { background: var(--side-hover); color: #fff; }
 .collapse-btn svg { width: 18px; height: 18px; }
 .shell.collapsed .sidebar { width: 72px; }
-.shell.collapsed .sidebar .brand { padding: 20px; justify-content: center; }
+.shell.collapsed .sidebar .brand { padding: 16px 12px; flex-direction: column; gap: 8px; }
+.shell.collapsed .collapse-btn { margin: 0; }
 .shell.collapsed .brand-text, .shell.collapsed .nav-label, .shell.collapsed .nav-title { display: none; }
 .shell.collapsed .nav-group { padding: 4px 12px; }
 .shell.collapsed .nav-group + .nav-group { border-top: 1px solid #22314a; }
-.shell.collapsed .sidebar a.nav-link, .shell.collapsed .collapse-btn { justify-content: center; padding: 10px; }
+.shell.collapsed .sidebar a.nav-link { justify-content: center; padding: 10px; }
 
 /* ---------- toasts ---------- */
 .toasts { position: fixed; right: 20px; bottom: 20px; z-index: 90; display: flex; flex-direction: column; gap: 10px; width: min(380px, calc(100vw - 32px)); pointer-events: none; }
@@ -604,7 +605,7 @@ dl.totals { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 9px 
 /* ---------- print ---------- */
 @page { margin: 0; }
 @media print {
-  .sidebar, .topbar, .scrim, .no-print { display: none !important; }
+  .sidebar, .topbar, .scrim, .no-print, .toasts, .modal-scrim, .skip-link { display: none !important; }
   .shell, .main, .content { display: block; padding: 0; max-width: none; }
   .print-area { border: 0; padding: 0; margin: 0; }
   body { background: #fff; }
