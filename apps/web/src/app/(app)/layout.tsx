@@ -69,6 +69,7 @@ const DETAIL: [RegExp, string][] = [
   [/^\/payroll\/[^/]+$/, 'Salary slip'],
   [/^\/employees\/[^/]+$/, 'Employee ledger'],
   [/^\/products\/catalog$/, 'Add from catalog'],
+  [/^\/stock\/history$/, 'Stock history'],
 ];
 const RECEIPT_PARENT = NAV[1].items[1];
 // /outbox is listed in the menu, so it needs no detail entry.

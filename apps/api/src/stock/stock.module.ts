@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Module, Post, Query } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import { ArrayNotEmpty, IsArray, IsEnum, IsISO8601, IsNumber, IsOptional, IsPositive, IsString, IsUUID, MinLength, ValidateNested } from 'class-validator';
-import { Prisma, StockStatus, UnitName } from '@prisma/client';
+import { MovementType, Prisma, StockStatus, UnitName } from '@prisma/client';
 import { PrismaService } from '../prisma.service.js';
 import { AuditService } from '../audit/audit.module.js';
 import { CurrentUser, RequirePermissions, type AuthUser } from '../common/decorators.js';
@@ -39,6 +39,17 @@ interface StockQuery {
   productId?: string;
   line?: 'BOTTLES' | 'RICE';
   search?: string;
+}
+
+/** Local-time [start, end) for a range of days ("2026-11-01" to "2026-11-30"); defaults to the last 30 days. */
+function localRange(from?: string, to?: string) {
+  const day = (iso: string) => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d); };
+  const valid = (v?: string) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const end = valid(to) ? day(to!) : new Date(new Date().setHours(0, 0, 0, 0));
+  end.setDate(end.getDate() + 1);
+  const start = valid(from) ? day(from!) : new Date(end.getTime() - 30 * 86_400_000);
+  if (start >= end) throw new BadRequestException('"to" is before "from"');
+  return { start, end };
 }
 
 @Controller('stock')
@@ -108,6 +119,65 @@ class StockController {
       take: Math.min(Number(limit) || 200, 1000),
       include: { product: { select: { name: true, size: true } }, location: { select: { name: true } } },
     });
+  }
+
+  /**
+   * Stock history. With a product it is a stock card: saleable and damaged stock before the range,
+   * then each movement with the stock after it (for one location, or all together). Without a product
+   * it is the latest movements across the business. Each row names its document and who made it.
+   */
+  @Get('history')
+  async history(@Query() q: { productId?: string; locationId?: string; type?: string; from?: string; to?: string }) {
+    const { start, end } = localRange(q.from, q.to);
+    const types = q.type ? (q.type.split(',').filter((t) => t in MovementType) as MovementType[]) : undefined;
+    const where: Prisma.StockMovementWhereInput = { productId: q.productId || undefined, locationId: q.locationId || undefined };
+    const [rows, before] = await Promise.all([
+      this.prisma.stockMovement.findMany({
+        where: { ...where, createdAt: { gte: start, lt: end }, type: types ? { in: types } : undefined },
+        orderBy: { createdAt: q.productId ? 'asc' : 'desc' },
+        take: 1000,
+        include: { product: { select: { id: true, name: true, size: true, baseUnit: true } }, location: { select: { id: true, name: true } } },
+      }),
+      q.productId
+        ? this.prisma.stockMovement.groupBy({ by: ['status'], where: { ...where, createdAt: { lt: start } }, _sum: { qtyBase: true } })
+        : Promise.resolve([]),
+    ]);
+
+    // Document numbers for the refs, and who made each movement.
+    const ids = (t: string) => [...new Set(rows.filter((r) => r.refType === t && r.refId).map((r) => r.refId!))];
+    const [sales, purchases, returns, transfers, users] = await Promise.all([
+      this.prisma.sale.findMany({ where: { id: { in: ids('SALE') } }, select: { id: true, billNo: true, customer: { select: { name: true } } } }),
+      this.prisma.purchase.findMany({ where: { id: { in: ids('PURCHASE') } }, select: { id: true, purchaseNo: true, supplier: { select: { name: true } } } }),
+      this.prisma.purchaseReturn.findMany({ where: { id: { in: ids('PURCHASE_RETURN') } }, select: { id: true, returnNo: true, supplier: { select: { name: true } } } }),
+      this.prisma.stockTransfer.findMany({ where: { id: { in: ids('TRANSFER') } }, select: { id: true, transferNo: true, from: { select: { name: true } }, to: { select: { name: true } } } }),
+      this.prisma.appUser.findMany({ where: { id: { in: [...new Set(rows.map((r) => r.createdById))] } }, select: { id: true, username: true } }),
+    ]);
+    const docOf = (r: (typeof rows)[number]) => {
+      if (r.refType === 'SALE') { const x = sales.find((s) => s.id === r.refId); return x && { no: x.billNo, party: x.customer?.name ?? 'Walk-in', link: `/sales/${x.id}` }; }
+      if (r.refType === 'PURCHASE') { const x = purchases.find((s) => s.id === r.refId); return x && { no: x.purchaseNo, party: x.supplier.name, link: '/purchases' }; }
+      if (r.refType === 'PURCHASE_RETURN') { const x = returns.find((s) => s.id === r.refId); return x && { no: x.returnNo, party: x.supplier.name, link: '/purchases' }; }
+      if (r.refType === 'TRANSFER') { const x = transfers.find((s) => s.id === r.refId); return x && { no: x.transferNo, party: `${x.from.name} → ${x.to.name}`, link: '/stock' }; }
+      return null;
+    };
+
+    const sum = (st: StockStatus) => before.find((b) => b.status === st)?._sum.qtyBase ?? new Prisma.Decimal(0);
+    let ok = sum('OK');
+    let damaged = sum('DAMAGED');
+    const opening = { ok, damaged };
+    const out = rows.map((r) => {
+      if (r.status === 'OK') ok = ok.plus(r.qtyBase); else damaged = damaged.plus(r.qtyBase);
+      return {
+        id: r.id, at: r.createdAt, type: r.type, status: r.status, qtyBase: r.qtyBase, note: r.note,
+        product: r.product, location: r.location, doc: docOf(r) ?? null,
+        by: users.find((u) => u.id === r.createdById)?.username ?? null,
+        ...(q.productId ? { okAfter: ok, damagedAfter: damaged } : {}),
+      };
+    });
+    return {
+      from: q.from ?? null, to: q.to ?? null, truncated: rows.length === 1000,
+      ...(q.productId ? { opening, closing: { ok, damaged } } : {}),
+      rows: out,
+    };
   }
 
   @Get('transfers')

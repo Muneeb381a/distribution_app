@@ -14,7 +14,7 @@ export const rs = (v: string | number | null | undefined) => `Rs ${money(v)}`;
 /** Round to paisa, the precision every bill is stored in. */
 export const round2 = (v: number) => Math.round(v * 100) / 100;
 
-/** "36 (6 ctn)" for bottles that come in cartons, "50 kg" for rice, plain number otherwise. */
+/** "36 (6 peti)" for bottles that come in cartons, "50 kg" for rice, plain number otherwise. */
 export function formatQty(qtyBase: string | number, units: { unitName: string; factorToBase: string | number }[], baseUnit: string) {
   const q = Number(qtyBase);
   const carton = units.find((u) => u.unitName === 'CARTON');
@@ -22,7 +22,7 @@ export function formatQty(qtyBase: string | number, units: { unitName: string; f
     const f = Number(carton.factorToBase);
     const c = Math.trunc(q / f);
     const r = q - c * f;
-    return c ? `${q} (${c} ctn${r ? ` + ${r}` : ''})` : String(q);
+    return c ? `${q} (${c} peti${r ? ` + ${r}` : ''})` : String(q);
   }
   return `${q}${baseUnit === 'KG' ? ' kg' : ''}`;
 }

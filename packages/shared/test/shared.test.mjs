@@ -62,8 +62,8 @@ test('formats', () => {
   assert.equal(money(95.256), '95.26');
   assert.equal(rupees(72450.4), '72,450');
   assert.equal(money(null), '0');
-  assert.equal(formatQty(36, [{ unitName: 'CARTON', factorToBase: '6' }], 'BOTTLE'), '36 (6 ctn)');
-  assert.equal(formatQty(40, [{ unitName: 'CARTON', factorToBase: '6' }], 'BOTTLE'), '40 (6 ctn + 4)');
+  assert.equal(formatQty(36, [{ unitName: 'CARTON', factorToBase: '6' }], 'BOTTLE'), '36 (6 peti)');
+  assert.equal(formatQty(40, [{ unitName: 'CARTON', factorToBase: '6' }], 'BOTTLE'), '40 (6 peti + 4)');
   assert.equal(formatQty(50, [], 'KG'), '50 kg');
 });
 test('document numbers', () => {

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import Combobox from '@/components/Combobox';
 import { Choice, Field, FormActions, FormCard, FormSection } from '@/components/Form';
@@ -114,7 +115,9 @@ export default function StockPage() {
 
   return (
     <>
-      <div className="page-head"><div><h1>Stock</h1><p>{rows ? `${rows.length} product / location rows` : 'Loading…'}</p></div></div>
+      <div className="page-head"><div><h1>Stock</h1><p>{rows ? `${rows.length} product / location rows` : 'Loading…'}</p></div>
+        <div className="actions"><Link className="btn secondary" href="/stock/history"><Icon name="history" />Stock history</Link></div>
+      </div>
       {(error || lookupError) && <p className="error">{error || lookupError}</p>}
       <div className="list-head">
         <div className="filter"><Icon name="search" /><input aria-label="Search stock" placeholder="Search product…" value={filter.search} onChange={(e) => setFilter({ ...filter, search: e.target.value })} /></div>
@@ -142,7 +145,7 @@ export default function StockPage() {
           {!rows && <SkeletonRows cols={4} />}
           {page.map((r) => (
             <tr key={`${r.productId}|${r.locationId}`}>
-              <td><strong>{productLabel({ name: r.productName, size: r.size })}</strong></td>
+              <td><Link href={`/stock/history?product=${r.productId}&location=${r.locationId}`} title="Stock card"><strong>{productLabel({ name: r.productName, size: r.size })}</strong></Link></td>
               <td><span className="badge">{r.locationName}</span></td>
               <td className="num">{formatQty(r.ok, r.units, r.baseUnit)}</td>
               <td className="num">{Number(r.damaged) ? <span className="badge red">{Number(r.damaged)}</span> : <span className="muted">—</span>}</td>

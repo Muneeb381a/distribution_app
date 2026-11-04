@@ -1152,6 +1152,14 @@ tr.row-link.open td { background: var(--surface-hover); }
   .st-table tr.total-row td:nth-child(2) { grid-row: 1 / span 2; align-self: center; }
 }
 
+/* ---------- stock history ---------- */
+.history-filters { display: grid; grid-template-columns: minmax(260px, 1.6fr) minmax(160px, 1fr) auto; gap: 10px; margin-bottom: 10px; align-items: center; }
+.history-product { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.history-product > :first-child { flex: 1; min-width: 0; }
+.history-table td.nowrap { white-space: nowrap; }
+.history-table tr.damaged-row td { background: color-mix(in srgb, var(--danger-soft) 45%, transparent); }
+@media (max-width: 900px) { .history-filters { grid-template-columns: 1fr; } }
+
 @media print {
   :root, :root[data-theme='dark'] { color-scheme: light; --bg: #fff; --surface: #fff; --surface-2: #f7f8f6; --border: #e1e4de; --border-strong: #cfd4cc; --text: #000; --text-2: #222; --muted: #555; --danger: #c0341d; --success: #157a3c; }
   .sidebar, .topbar, .scrim, .no-print, .toasts, .modal-scrim, .skip-link, .offline-banner { display: none !important; }
