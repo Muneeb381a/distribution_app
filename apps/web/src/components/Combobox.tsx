@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
 
 export interface ComboOption {
@@ -110,6 +110,23 @@ const Combobox = forwardRef<ComboHandle, Props>(function Combobox(
     return () => window.removeEventListener('mousedown', click);
   });
 
+  // The list is position: fixed so tables and scroll boxes never clip it.
+  const [pos, setPos] = useState<{ left: number; top: number; width: number; up: boolean } | null>(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const r = input.current?.getBoundingClientRect();
+      if (!r) return;
+      const below = window.innerHeight - r.bottom;
+      const up = below < 240 && r.top > below;
+      setPos({ left: r.left, top: up ? r.top - 4 : r.bottom + 4, width: r.width, up });
+    };
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => { window.removeEventListener('scroll', place, true); window.removeEventListener('resize', place); };
+  }, [open]);
+
   useEffect(() => {
     list.current?.querySelector<HTMLElement>('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
   }, [active, open]);
@@ -173,7 +190,10 @@ const Combobox = forwardRef<ComboHandle, Props>(function Combobox(
         <span className="combo-caret" aria-hidden="true"><Icon name="chevronDown" /></span>
       )}
       {open && (
-        <ul className="combo-pop" role="listbox" id={listId} ref={list}>
+        <ul
+          className="combo-pop" role="listbox" id={listId} ref={list}
+          style={pos ? { left: Math.min(pos.left, window.innerWidth - Math.max(pos.width, 220) - 8), top: pos.up ? undefined : pos.top, bottom: pos.up ? window.innerHeight - pos.top : undefined, minWidth: pos.width } : { visibility: 'hidden' }}
+        >
           {shown.map((o, i) => {
             const head = 'recent' in o && o.recent && (i === 0 || !('recent' in shown[i - 1] && shown[i - 1].recent));
             const after = i > 0 && 'recent' in shown[i - 1] && shown[i - 1].recent && !('recent' in o && o.recent);
