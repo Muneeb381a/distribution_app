@@ -841,7 +841,10 @@ dl.totals { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 9px 
 .print-tabs .seg { margin: 0; }
 .print-stage { background: var(--surface-3); border-radius: 12px; padding: 24px; display: flex; justify-content: center; overflow-x: auto; }
 .print-stage .thermal-img, .print-stage .a4doc { margin: 0; background: #fff; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14); }
-.print-stage .thermal-img { width: calc(80mm + 40px); }
+.print-stage .thermal-img { width: auto; max-width: calc(80mm + 40px); }
+.a4-biz { text-align: center; margin: 2px 0 14px; line-height: 1.5; }
+.a4-foot { text-align: center; margin-top: 22px; }
+.a4-foot p { margin: 2px 0; }
 .paper-note { font-size: 12.5px; color: var(--muted); }
 .doc-preview { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
 .a4doc { width: 210mm; max-width: 100%; background: #fff; }
@@ -890,6 +893,7 @@ table.rates td { vertical-align: middle; }
 .slip-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 18px; }
 .slip-kicker { font-size: 12px; font-weight: 750; text-transform: uppercase; letter-spacing: 0.09em; color: #0b5e57; }
 .slip-head h1 { margin: 2px 0 0; }
+.slip-biz { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 6px; }
 .slip-meta { padding: 14px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin-bottom: 18px; }
 .slip-table { box-shadow: none; }
 .slip-table tr.minus td:last-child { color: var(--danger); }
@@ -1066,6 +1070,13 @@ tr.row-link.open td { background: var(--surface-hover); }
   .catalog-bar .actions { width: 100%; }
   .catalog-bar .actions > :last-child { flex: 1; }
 }
+
+/* ---------- settings ---------- */
+.settings-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
+.settings-preview { position: sticky; top: 76px; }
+.settings-roll { margin: 0 auto; background: #fff; border: 1px solid var(--border); border-radius: 6px; padding: 8px 0; box-shadow: var(--shadow-sm); }
+.settings-roll img { display: block; width: 100%; height: auto; }
+@media (max-width: 1100px) { .settings-grid { grid-template-columns: 1fr; } .settings-preview { position: static; } }
 
 @media print {
   :root, :root[data-theme='dark'] { color-scheme: light; --bg: #fff; --surface: #fff; --surface-2: #f7f8f6; --border: #e1e4de; --border-strong: #cfd4cc; --text: #000; --text-2: #222; --muted: #555; --danger: #c0341d; --success: #157a3c; }

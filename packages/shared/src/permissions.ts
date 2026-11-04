@@ -38,6 +38,7 @@ export const PERMISSION_GROUPS = [
       ['MASTER_DATA_EDIT', 'Edit products, customers, suppliers'],
       ['IMPORT_DATA', 'Import from Excel'],
       ['USER_MANAGE', 'Users and roles'],
+      ['SETTINGS_EDIT', 'Business settings and printing'],
     ],
   },
 ] as const;

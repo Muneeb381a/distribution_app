@@ -73,7 +73,7 @@ test('document numbers', () => {
   assert.ok(OFFLINE_RECEIPT_NO.test('RCP-D1-000001'));
 });
 test('permissions: one list, every one labelled, owner has all', () => {
-  assert.equal(PERMISSIONS.length, 17);
+  assert.equal(PERMISSIONS.length, 18);
   assert.equal(new Set(PERMISSIONS).size, PERMISSIONS.length);
   for (const p of PERMISSIONS) assert.ok(PERMISSION_LABEL[p]);
   assert.deepEqual([...DEFAULT_ROLES.Owner].sort(), [...PERMISSIONS].sort());
@@ -115,4 +115,17 @@ test('catalog: specs', () => {
   assert.ok(RICE_TREE.Basmati['Super Kernel'].includes('Sella'));
   assert.equal(productKey(' Coke ', '1.5  L'), productKey('coke', '1.5 l'));
   assert.equal(unitLabel('CARTON'), 'peti');
+});
+
+test('settings fall back to defaults and keep the thermal width valid', async () => {
+  const { withDefaults, DEFAULT_SETTINGS, contactLine, PERMISSIONS } = await import('../dist/index.js');
+  assert.deepEqual(withDefaults(null), DEFAULT_SETTINGS);
+  const s = withDefaults({ businessName: 'Ali Traders', thermalWidth: 72, bogus: 1 });
+  assert.equal(s.businessName, 'Ali Traders');
+  assert.equal(s.thermalWidth, 80);
+  assert.equal('bogus' in s, false);
+  assert.equal(withDefaults({ thermalWidth: 58 }).thermalWidth, 58);
+  assert.equal(contactLine({ address: ' Main Bazar ', phone: '' }), 'Main Bazar');
+  assert.equal(contactLine({ address: 'Main Bazar', phone: '0300-1' }), 'Main Bazar · 0300-1');
+  assert.ok(PERMISSIONS.includes('SETTINGS_EDIT'));
 });

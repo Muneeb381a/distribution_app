@@ -8,7 +8,8 @@ import { Icon } from '@/components/Icon';
 import { advanceState } from '@/lib/advances';
 import { api } from '@/lib/api';
 import { usePageTitle } from '@/lib/pageTitle';
-import { formatDate, money, monthName, rupees } from '@dist/shared';
+import { useSettings } from '@/lib/settings';
+import { contactLine, formatDate, money, monthName, rupees } from '@dist/shared';
 
 interface Recovery { id: string; date: string; amount: string; note: string | null; status: string; payrollRunId: string | null; payrollRun: { id: string; month: string } | null }
 interface AdvanceSlip {
@@ -21,6 +22,7 @@ interface AdvanceSlip {
 /** Printable record of one advance: what was given, how it is paid back, and every cut so far. */
 export default function AdvanceSlipPage() {
   const { id } = useParams<{ id: string }>();
+  const biz = useSettings();
   const toast = useToast();
   const prompt = usePrompt();
   const [a, setA] = useState<AdvanceSlip | null>(null);
@@ -69,6 +71,7 @@ export default function AdvanceSlipPage() {
         <article className="slip card paper">
           <header className="slip-head">
             <div>
+              <span className="slip-biz">{biz.businessName}{contactLine(biz) ? ` · ${contactLine(biz)}` : ''}</span>
               <span className="slip-kicker">Salary advance</span>
               <h1>Rs {money(a.amount)}</h1>
               <span className={`badge ${st.tone} no-print`} style={{ marginTop: 6 }}>{st.label}</span>

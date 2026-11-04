@@ -1,6 +1,9 @@
+'use client';
+
 import { urdu } from '@/lib/fonts';
 import type { BillData, ReceiptData } from '@/lib/saleImage';
-import { money, unitLabel } from '@dist/shared';
+import { useSettings } from '@/lib/settings';
+import { contactLine, money, unitLabel } from '@dist/shared';
 
 const name = (p: { name: string; size: string | null }) => (p.size ? `${p.name} (${p.size})` : p.name);
 
@@ -14,16 +17,34 @@ function Row({ en, ur, value, bold }: { en: string; ur: string; value: string; b
   );
 }
 
+/** Business name and contact from Settings, then the document number and time. */
 function Head({ title, no, when, cancelled }: { title: string; no: string; when: string; cancelled: boolean }) {
+  const s = useSettings();
+  const contact = contactLine(s);
   return (
     <>
-      <h1 className={urdu.className} dir="rtl" style={{ textAlign: 'center', margin: 0 }}>ڈسٹری بیوشن</h1>
+      {s.urduName && <h1 className={urdu.className} dir="rtl" style={{ textAlign: 'center', margin: 0 }}>{s.urduName}</h1>}
+      <p className="a4-biz">
+        <strong>{s.businessName}</strong>{s.tagline && <> · {s.tagline}</>}
+        {(contact || s.ntn) && <><br /><span className="muted">{[contact, s.ntn && `NTN ${s.ntn}`].filter(Boolean).join(' · ')}</span></>}
+      </p>
       <p style={{ display: 'flex', justifyContent: 'space-between' }}>
         <strong>{title} {no}</strong>
         <span>{new Date(when).toLocaleString('en-GB')}</span>
       </p>
       {cancelled && <p className="error"><strong>CANCELLED</strong></p>}
     </>
+  );
+}
+
+function Foot() {
+  const s = useSettings();
+  if (!s.footer && !s.note) return null;
+  return (
+    <div className="a4-foot">
+      {s.footer && <p className={urdu.className} dir="rtl">{s.footer}</p>}
+      {s.note && <p className="muted">{s.note}</p>}
+    </div>
   );
 }
 
@@ -71,6 +92,7 @@ export function BillA4({ b }: { b: BillData }) {
       {b.empties?.map((e) => (
         <p key={e.productName} className="muted">Empties {e.productName}: given {e.given}, collected {e.collected}, held {e.heldAfter}</p>
       ))}
+      <Foot />
     </div>
   );
 }
@@ -88,6 +110,7 @@ export function ReceiptA4({ r }: { r: ReceiptData }) {
         </tbody>
       </table>
       {r.recordedBy && <p className="muted">Received by {r.recordedBy}</p>}
+      <Foot />
     </div>
   );
 }

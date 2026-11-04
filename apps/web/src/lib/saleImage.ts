@@ -1,7 +1,7 @@
 // Draws bills and receipts as images for 80 mm thermal printers. Thermal printers cannot shape Urdu
 // (Nastaliq) text themselves, so everything is printed as a picture.
 
-import { money } from '@dist/shared';
+import { contactLine, money, unitLabel, type BusinessSettings } from '@dist/shared';
 
 export interface BillData {
   billNo: string;
@@ -35,33 +35,49 @@ export interface ReceiptData {
   recordedBy: string | null;
 }
 
-const WIDTH = 576; // 80 mm at 203 dpi
+/**
+ * Printer dots across the roll at 203 dpi: 80 mm rolls print 72 mm (576 dots), 58 mm rolls 48 mm (384).
+ * Layout is done on a wider logical page for 58 mm so the text stays readable, then scaled down.
+ */
+const ROLL = { 80: { dots: 576, layout: 576 }, 58: { dots: 384, layout: 460 } } as const;
 const PAD = 16;
+// Logical width of the bill being drawn. Set by makePen; all drawing after it is synchronous.
+let WIDTH = 576;
 const label = (p: { name: string; size: string | null }) => (p.size ? `${p.name} ${p.size}` : p.name);
 
 type Pen = ReturnType<typeof makePen>;
 
-function makePen(urduFamily: string) {
+function makePen(urduFamily: string, roll: 80 | 58) {
+  const { dots, layout } = ROLL[roll];
+  WIDTH = layout;
+  const scale = dots / layout;
   const canvas = document.createElement('canvas');
-  canvas.width = WIDTH;
-  canvas.height = 3000;
+  canvas.width = dots;
+  canvas.height = 3600;
   const ctx = canvas.getContext('2d')!;
   ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, WIDTH, canvas.height);
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.scale(scale, scale);
   ctx.fillStyle = '#000';
   ctx.textBaseline = 'top';
   let y = 16;
+  /** Shrinks the font until the text fits in maxWidth (long product names, addresses). */
+  const fit = (text: string, font: (size: number) => string, size: number, maxWidth: number) => {
+    let s = size;
+    ctx.font = font(s);
+    while (s > 12 && ctx.measureText(text).width > maxWidth) ctx.font = font(--s);
+  };
   return {
     get y() { return y; },
     gap(n: number) { y += n; },
-    urdu(text: string, size: number, x: number, align: CanvasTextAlign, dy = 0) {
-      ctx.font = `${size}px ${urduFamily}, sans-serif`;
+    urdu(text: string, size: number, x: number, align: CanvasTextAlign, dy = 0, maxWidth = WIDTH - PAD * 2) {
+      fit(text, (n) => `${n}px ${urduFamily}, sans-serif`, size, maxWidth);
       ctx.direction = 'rtl';
       ctx.textAlign = align;
       ctx.fillText(text, x, y + dy);
     },
-    latin(text: string, size: number, x: number, align: CanvasTextAlign, bold = false) {
-      ctx.font = `${bold ? 'bold ' : ''}${size}px sans-serif`;
+    latin(text: string, size: number, x: number, align: CanvasTextAlign, bold = false, maxWidth = WIDTH - PAD * 2) {
+      fit(text, (n) => `${bold ? 'bold ' : ''}${n}px sans-serif`, size, maxWidth);
       ctx.direction = 'ltr';
       ctx.textAlign = align;
       ctx.fillText(text, x, y);
@@ -72,8 +88,8 @@ function makePen(urduFamily: string) {
     },
     finish() {
       const out = document.createElement('canvas');
-      out.width = WIDTH;
-      out.height = y + 24;
+      out.width = dots;
+      out.height = Math.ceil((y + 24) * scale);
       out.getContext('2d')!.drawImage(canvas, 0, 0);
       return out.toDataURL('image/png');
     },
@@ -82,28 +98,58 @@ function makePen(urduFamily: string) {
 
 /** A label row: English left, Urdu centre, amount right. */
 function row(p: Pen, en: string, ur: string, value: string, bold = false) {
-  p.latin(en, 22, PAD, 'left', bold);
-  p.urdu(ur, 24, WIDTH / 2 + 50, 'center', -4);
-  p.latin(value, 22, WIDTH - PAD, 'right', bold);
+  const third = (WIDTH - PAD * 2) / 3;
+  p.latin(en, 22, PAD, 'left', bold, third + 20);
+  p.urdu(ur, 24, WIDTH / 2 + 50, 'center', -4, third - 30);
+  p.latin(value, 22, WIDTH - PAD, 'right', bold, third);
   p.gap(36);
 }
 
-function header(p: Pen, no: string, when: string, status: string) {
-  p.urdu('ڈسٹری بیوشن', 40, WIDTH / 2, 'center');
-  p.gap(70);
+/** Business name (Urdu, big), English name, address and phone, then the document number and time. */
+function header(p: Pen, s: BusinessSettings, no: string, when: string, status: string) {
+  if (s.urduName) {
+    p.urdu(s.urduName, 40, WIDTH / 2, 'center');
+    p.gap(66);
+  }
+  p.latin(s.businessName, s.urduName ? 22 : 30, WIDTH / 2, 'center', true);
+  p.gap(s.urduName ? 30 : 40);
+  const contact = contactLine(s);
+  if (contact) {
+    p.latin(contact, 18, WIDTH / 2, 'center');
+    p.gap(26);
+  }
+  if (s.ntn) {
+    p.latin(`NTN ${s.ntn}`, 18, WIDTH / 2, 'center');
+    p.gap(26);
+  }
+  p.gap(6);
+  p.rule();
   if (status === 'CANCELLED') {
     p.latin('*** CANCELLED ***', 26, WIDTH / 2, 'center', true);
     p.gap(36);
   }
-  p.latin(no, 22, PAD, 'left', true);
-  p.latin(new Date(when).toLocaleString('en-GB'), 20, WIDTH - PAD, 'right');
+  p.latin(no, 22, PAD, 'left', true, WIDTH / 2 - PAD);
+  p.latin(new Date(when).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' }), 20, WIDTH - PAD, 'right', false, WIDTH / 2 - PAD);
   p.gap(32);
 }
 
-export async function renderBillImage(b: BillData, urduFamily: string): Promise<string> {
-  await document.fonts.load(`24px ${urduFamily}`, 'ڈسٹری بیوشن').catch(() => []); // a missing local fallback font must not stop the print
-  const p = makePen(urduFamily);
-  header(p, b.billNo, b.createdAt, b.status);
+function footer(p: Pen, s: BusinessSettings) {
+  p.gap(10);
+  if (s.footer) {
+    p.urdu(s.footer, 26, WIDTH / 2, 'center');
+    p.gap(46);
+  }
+  if (s.note) {
+    p.latin(s.note, 17, WIDTH / 2, 'center');
+    p.gap(28);
+  }
+  p.gap(10);
+}
+
+export async function renderBillImage(b: BillData, urduFamily: string, s: BusinessSettings): Promise<string> {
+  await document.fonts.load(`24px ${urduFamily}`, `${s.urduName}${s.footer}گاہک`).catch(() => []); // a missing local fallback font must not stop the print
+  const p = makePen(urduFamily, s.thermalWidth);
+  header(p, s, b.billNo, b.createdAt, b.status);
 
   p.latin(b.customer ? b.customer.name : 'Cash sale', 24, PAD, 'left', true);
   p.urdu('گاہک', 24, WIDTH - PAD, 'right', -4);
@@ -119,10 +165,10 @@ export async function renderBillImage(b: BillData, urduFamily: string): Promise<
   p.rule();
 
   for (const l of b.items) {
-    p.latin(label(l.product), 22, PAD, 'left');
-    p.latin(money(l.lineTotal), 22, WIDTH - PAD, 'right', true);
+    p.latin(label(l.product), 22, PAD, 'left', false, WIDTH * 0.66 - PAD);
+    p.latin(money(l.lineTotal), 22, WIDTH - PAD, 'right', true, WIDTH * 0.3);
     p.gap(28);
-    p.latin(`${Number(l.qty)} ${l.unitName.toLowerCase()} x ${money(l.rate)}`, 20, PAD, 'left');
+    p.latin(`${Number(l.qty)} ${unitLabel(l.unitName)} x ${money(l.rate)}`, 20, PAD, 'left');
     p.gap(34);
   }
   if (b.returns.length) {
@@ -130,10 +176,10 @@ export async function renderBillImage(b: BillData, urduFamily: string): Promise<
     p.urdu('واپسی', 22, WIDTH - PAD, 'right', -4);
     p.gap(32);
     for (const r of b.returns) {
-      p.latin(`${label(r.product)} (${r.reason.toLowerCase()})`, 20, PAD, 'left');
-      p.latin(`-${money(r.creditAmount)}`, 22, WIDTH - PAD, 'right');
+      p.latin(`${label(r.product)} (${r.reason.toLowerCase()})`, 20, PAD, 'left', false, WIDTH * 0.66 - PAD);
+      p.latin(`-${money(r.creditAmount)}`, 22, WIDTH - PAD, 'right', false, WIDTH * 0.3);
       p.gap(28);
-      p.latin(`${Number(r.qty)} ${r.unitName.toLowerCase()}`, 20, PAD, 'left');
+      p.latin(`${Number(r.qty)} ${unitLabel(r.unitName)}`, 20, PAD, 'left');
       p.gap(32);
     }
   }
@@ -155,16 +201,14 @@ export async function renderBillImage(b: BillData, urduFamily: string): Promise<
     p.latin(`Empties ${e.productName}: given ${e.given}, collected ${e.collected}, held ${e.heldAfter}`, 19, PAD, 'left');
     p.gap(28);
   }
-  p.gap(10);
-  p.urdu('شکریہ', 26, WIDTH / 2, 'center');
-  p.gap(50);
+  footer(p, s);
   return p.finish();
 }
 
-export async function renderReceiptImage(r: ReceiptData, urduFamily: string): Promise<string> {
-  await document.fonts.load(`24px ${urduFamily}`, 'ڈسٹری بیوشن').catch(() => []); // a missing local fallback font must not stop the print
-  const p = makePen(urduFamily);
-  header(p, `Receipt ${r.receiptNo}`, r.createdAt, r.status);
+export async function renderReceiptImage(r: ReceiptData, urduFamily: string, s: BusinessSettings): Promise<string> {
+  await document.fonts.load(`24px ${urduFamily}`, `${s.urduName}${s.footer}رسید`).catch(() => []); // a missing local fallback font must not stop the print
+  const p = makePen(urduFamily, s.thermalWidth);
+  header(p, s, `Receipt ${r.receiptNo}`, r.createdAt, r.status);
   p.latin(r.customer.name, 24, PAD, 'left', true);
   p.urdu('رسید', 28, WIDTH - PAD, 'right', -6);
   p.gap(36);
@@ -181,8 +225,6 @@ export async function renderReceiptImage(r: ReceiptData, urduFamily: string): Pr
     p.latin(`Received by: ${r.recordedBy}`, 19, PAD, 'left');
     p.gap(28);
   }
-  p.gap(10);
-  p.urdu('شکریہ', 26, WIDTH / 2, 'center');
-  p.gap(50);
+  footer(p, s);
   return p.finish();
 }

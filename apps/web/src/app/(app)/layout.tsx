@@ -10,6 +10,7 @@ import type { Permission } from '@dist/shared';
 import { api, can, updateUser, useUser, type SessionUser } from '@/lib/api';
 import { startSync, useSyncState } from '@/lib/offline';
 import { PageTitleCtx } from '@/lib/pageTitle';
+import { getSettings, loadSettings, useSettings } from '@/lib/settings';
 
 interface NavItem { href: string; label: string; icon: IconName; permission: Permission | null }
 
@@ -49,6 +50,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
       { href: '/users', label: 'Users & roles', icon: 'users', permission: 'USER_MANAGE' },
       { href: '/import', label: 'Import', icon: 'import', permission: 'IMPORT_DATA' },
       { href: '/audit', label: 'Audit log', icon: 'history', permission: 'AUDIT_VIEW' },
+      { href: '/settings', label: 'Settings', icon: 'settings', permission: 'SETTINGS_EDIT' },
     ],
   },
 ];
@@ -61,7 +63,10 @@ const DETAIL: [RegExp, string][] = [
   [/^\/customers\/[^/]+$/, 'Customer rates'],
   [/^\/suppliers\/[^/]+$/, 'Supplier ledger'],
   [/^\/receipts\/[^/]+$/, 'Receipt'],
+  [/^\/payroll\/advances\/[^/]+$/, 'Advance slip'],
   [/^\/payroll\/[^/]+$/, 'Salary slip'],
+  [/^\/employees\/[^/]+$/, 'Employee ledger'],
+  [/^\/products\/catalog$/, 'Add from catalog'],
 ];
 const RECEIPT_PARENT = NAV[1].items[1];
 // /outbox is listed in the menu, so it needs no detail entry.
@@ -72,7 +77,7 @@ export interface Crumb { label: string; href?: string }
 function crumbsFor(pathname: string, detail?: string): Crumb[] {
   const all = NAV.flatMap((g) => g.items.map((i) => ({ ...i, group: g.title })));
   const item = pathname.startsWith('/receipts') ? { ...RECEIPT_PARENT, group: 'Selling' } : all.find((n) => pathname === n.href || pathname.startsWith(`${n.href}/`));
-  if (!item) return [{ label: detail ?? 'Distribution' }];
+  if (!item) return [{ label: detail ?? getSettings().businessName }];
   const sub = DETAIL.find(([re]) => re.test(pathname))?.[1];
   const out: Crumb[] = [{ label: item.group }, { label: item.label, href: sub ? item.href : undefined }];
   if (sub) out.push({ label: detail ?? sub });
@@ -119,9 +124,10 @@ const SIDEBAR_KEY = 'dist.sidebar';
 function TitledTopBar({ user, onMenu, detail }: { user: SessionUser; onMenu: () => void; detail: { path: string; title: string } | null }) {
   const pathname = usePathname();
   const crumbs = useMemo(() => crumbsFor(pathname, detail?.path === pathname ? detail.title : undefined), [pathname, detail]);
+  const { businessName } = useSettings();
   useEffect(() => {
-    document.title = `${crumbs[crumbs.length - 1].label} · Distribution`;
-  }, [crumbs]);
+    document.title = `${crumbs[crumbs.length - 1].label} · ${businessName}`;
+  }, [crumbs, businessName]);
   return <TopBar user={user} onMenu={onMenu} crumbs={crumbs} status={<SyncPill />} />;
 }
 
@@ -190,6 +196,12 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     if (ready && !user) router.replace('/login');
   }, [ready, user, router]);
 
+  // Business name, address and print settings for headers and bills (cached for offline).
+  useEffect(() => {
+    if (user) loadSettings();
+  }, [user]);
+  const biz = useSettings();
+
   // Pick up role / permission changes made since sign-in.
   const stored = user ? JSON.stringify([user.roleName, [...user.permissions].sort()]) : null;
   useEffect(() => {
@@ -215,7 +227,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           <nav className={`sidebar${open ? ' open' : ''}`} aria-label="Main menu">
             <div className="brand">
               <span className="logo"><Icon name="products" /></span>
-              <span className="brand-text">Distribution<small>Rice &amp; Beverages</small></span>
+              <span className="brand-text">{biz.businessName}{biz.tagline && <small>{biz.tagline}</small>}</span>
               <button className="collapse-btn" onClick={toggleSidebar} aria-label={collapsed ? 'Expand menu' : 'Collapse menu'} title={collapsed ? 'Expand menu' : 'Collapse menu'}>
                 <Icon name={collapsed ? 'chevronRight' : 'chevronLeft'} />
               </button>

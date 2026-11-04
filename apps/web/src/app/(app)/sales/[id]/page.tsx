@@ -11,6 +11,7 @@ import { api, can, useUser } from '@/lib/api';
 import { urdu } from '@/lib/fonts';
 import { usePageTitle } from '@/lib/pageTitle';
 import { renderBillImage, type BillData } from '@/lib/saleImage';
+import { useSettings } from '@/lib/settings';
 import { money, unitLabel } from '@dist/shared';
 
 type Bill = BillData & {
@@ -44,8 +45,6 @@ export default function BillPage() {
       const b = await api<Bill>(`/sales/${id}`);
       setBill(b);
       setError('');
-      // The bill shows even if the thermal picture cannot be drawn (e.g. font still loading).
-      renderBillImage(b, urdu.style.fontFamily).then((img) => { setImage(img); setImageError(''); }).catch((e) => setImageError((e as Error).message));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -55,6 +54,13 @@ export default function BillPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+
+  // The bill shows even if the thermal picture cannot be drawn (e.g. font still loading).
+  const settings = useSettings();
+  useEffect(() => {
+    if (!bill) return;
+    renderBillImage(bill, urdu.style.fontFamily, settings).then((img) => { setImage(img); setImageError(''); }).catch((e) => setImageError((e as Error).message));
+  }, [bill, settings]);
 
   // /sales/:id?print=thermal|a4 opens the print dialog once the preview is ready (used by the "Save & print" flow).
   useEffect(() => {

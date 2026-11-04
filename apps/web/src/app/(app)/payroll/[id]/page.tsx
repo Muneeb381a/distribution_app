@@ -6,7 +6,8 @@ import { useEffect, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { api } from '@/lib/api';
 import { usePageTitle } from '@/lib/pageTitle';
-import { formatDate, money, monthName } from '@dist/shared';
+import { useSettings } from '@/lib/settings';
+import { contactLine, formatDate, money, monthName } from '@dist/shared';
 
 interface Slip {
   month: string; base: string; commission: string; absenceDeduction: string; gross: string; advances: string; carryIn: string;
@@ -24,6 +25,7 @@ function attendanceText(a: Record<string, number>) {
 
 export default function SalarySlipPage() {
   const { id } = useParams<{ id: string }>();
+  const biz = useSettings();
   const [slip, setSlip] = useState<Slip | null>(null);
   const [error, setError] = useState('');
 
@@ -48,6 +50,7 @@ export default function SalarySlipPage() {
         <article className="slip card paper">
           <header className="slip-head">
             <div>
+              <span className="slip-biz">{biz.businessName}{contactLine(biz) ? ` · ${contactLine(biz)}` : ''}</span>
               <span className="slip-kicker">Salary slip</span>
               <h1>{monthName(slip.month)}</h1>
             </div>

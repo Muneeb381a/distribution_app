@@ -7,6 +7,7 @@ import { Icon } from '@/components/Icon';
 import PrintPanel, { usePrintMode, type PrintMode } from '@/components/PrintPanel';
 import { urdu } from '@/lib/fonts';
 import { renderBillImage, renderReceiptImage, type BillData, type ReceiptData } from '@/lib/saleImage';
+import { useSettings } from '@/lib/settings';
 
 /**
  * Print a bill or receipt that only exists on this PC (saved offline). Works with no server:
@@ -17,14 +18,15 @@ export default function DocPrintDialog({ bill, receipt, onClose, autoPrint }: { 
   const [image, setImage] = useState('');
   const [error, setError] = useState('');
 
+  const settings = useSettings();
   useEffect(() => {
-    const draw = bill ? renderBillImage(bill, urdu.style.fontFamily) : receipt ? renderReceiptImage(receipt, urdu.style.fontFamily) : null;
+    const draw = bill ? renderBillImage(bill, urdu.style.fontFamily, settings) : receipt ? renderReceiptImage(receipt, urdu.style.fontFamily, settings) : null;
     draw?.then((img) => {
       setImage(img);
       if (autoPrint) print(autoPrint);
     }).catch((e) => setError((e as Error).message));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bill, receipt]);
+  }, [bill, receipt, settings]);
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };

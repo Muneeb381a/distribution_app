@@ -11,6 +11,7 @@ import { api, can, useUser } from '@/lib/api';
 import { urdu } from '@/lib/fonts';
 import { usePageTitle } from '@/lib/pageTitle';
 import { renderReceiptImage, type ReceiptData } from '@/lib/saleImage';
+import { useSettings } from '@/lib/settings';
 import { money } from '@dist/shared';
 
 type Receipt = ReceiptData & { id: string; customerId: string; saleId: string | null; sale: { billNo: string } | null; customer: ReceiptData['customer'] & { phone: string | null } };
@@ -31,15 +32,18 @@ export default function ReceiptPage() {
   usePageTitle(receipt ? `Receipt ${receipt.receiptNo}` : null);
 
   const load = useCallback(() => api<Receipt>(`/payments/${id}`)
-    .then((r) => {
-      setReceipt(r);
-      renderReceiptImage(r, urdu.style.fontFamily).then(setImage).catch((e) => setImageError((e as Error).message));
-    })
+    .then(setReceipt)
     .catch((e) => setError(e.message)), [id]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  const settings = useSettings();
+  useEffect(() => {
+    if (!receipt) return;
+    renderReceiptImage(receipt, urdu.style.fontFamily, settings).then(setImage).catch((e) => setImageError((e as Error).message));
+  }, [receipt, settings]);
 
   async function cancel() {
     if (!receipt) return;

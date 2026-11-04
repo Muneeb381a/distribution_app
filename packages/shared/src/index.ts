@@ -5,3 +5,4 @@ export * from './format.js';
 export * from './documents.js';
 export * from './sale-rules.js';
 export * from './catalog.js';
+export * from './settings.js';
