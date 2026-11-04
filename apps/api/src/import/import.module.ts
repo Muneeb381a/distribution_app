@@ -17,6 +17,7 @@ import { BusinessLineCode, CustomerType, Prisma, UnitName } from '@prisma/client
 import { PrismaService } from '../prisma.service.js';
 import { AuditService } from '../audit/audit.module.js';
 import { StockService } from '../stock/stock.service.js';
+import { createProducts } from '../catalog/product-rows.js';
 import { CurrentUser, RequirePermissions, type AuthUser } from '../common/decorators.js';
 
 interface UploadedFileData {
@@ -246,47 +247,7 @@ class ImportController {
   }
 
   private async saveProducts(tx: Prisma.TransactionClient, rows: Parsed<ProductRow>[]) {
-    const lines = new Map((await tx.businessLine.findMany()).map((l) => [l.code, l.id]));
-    const cache = new Map<string, string>();
-    const categoryId = async (code: BusinessLineCode, path: string[]) => {
-      let parentId: string | null = null;
-      let key = code as string;
-      for (const name of path) {
-        key += `/${name}`;
-        let id: string | undefined = cache.get(key);
-        if (!id) {
-          const where: { businessLineId: string; parentId: string | null; name: string } = { businessLineId: lines.get(code)!, parentId, name };
-          const found: { id: string } | null = await tx.category.findFirst({ where });
-          id = found?.id ?? (await tx.category.create({ data: where })).id;
-          cache.set(key, id);
-        }
-        parentId = id;
-      }
-      return parentId!;
-    };
-    for (const { data: d } of rows) {
-      const bottles = d!.line === 'BOTTLES';
-      await tx.product.create({
-        data: {
-          categoryId: await categoryId(d!.line, d!.path),
-          name: d!.name,
-          brand: d!.brand,
-          size: d!.size,
-          baseUnit: bottles ? 'BOTTLE' : 'KG',
-          isPacked: !bottles && d!.bagKg != null,
-          returnableEmpty: d!.returnableEmpty,
-          units: {
-            create: bottles
-              ? [{ unitName: 'BOTTLE', factorToBase: 1 }, { unitName: 'CARTON', factorToBase: d!.packSize }]
-              : [
-                  { unitName: 'KG', factorToBase: 1 },
-                  { unitName: 'MAUND', factorToBase: 40 },
-                  ...(d!.bagKg != null ? [{ unitName: 'BAG' as const, factorToBase: d!.bagKg }] : []),
-                ],
-          },
-        },
-      });
-    }
+    await createProducts(tx, rows.map((r) => r.data!));
   }
 }
 

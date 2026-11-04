@@ -5,7 +5,9 @@ import { BusyButton, Empty, SkeletonRows, useConfirm, usePrompt, useToast } from
 import { Icon } from '@/components/Icon';
 import { LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
-import { money } from '@dist/shared';
+import Link from 'next/link';
+import { Affix, Field, Toggle } from '@/components/Form';
+import { DRINK_SIZE_PRESETS, defaultPack, money, unitLabel } from '@dist/shared';
 
 type Line = 'BOTTLES' | 'RICE';
 interface Category { id: string; name: string; parentId: string | null; businessLine: { code: Line } }
@@ -20,7 +22,6 @@ interface Price { productId: string; unitName: string; rate: string }
 
 const EMPTY = { name: '', brand: '', size: '', categoryId: '', packSize: '6', bagKg: '', returnableEmpty: true };
 type Form = typeof EMPTY;
-const unitLabel = (u: string) => u.toLowerCase();
 
 /** Units sent to the API for a bottle or rice product. */
 function unitsFor(line: Line, f: Form) {
@@ -124,6 +125,7 @@ export default function ProductsPage() {
         {canEdit && (
           <div className="actions">
             <button className="secondary btn-icon" onClick={addCategory}><Icon name="plus" />Category</button>
+            <Link className="btn secondary" href="/products/catalog"><Icon name="import" />Add from catalog</Link>
             <button className="btn-icon" onClick={() => setEditing('new')}><Icon name="plus" />Add product</button>
           </div>
         )}
@@ -226,6 +228,11 @@ function ProductDialog({ line, product, categories, prices, canEdit, canRate, on
   const [rates, setRates] = useState<Record<string, string>>(() => Object.fromEntries(prices.map((p) => [p.unitName, String(Number(p.rate))])));
   const [busy, setBusy] = useState(false);
   const set = (patch: Partial<Form>) => setForm({ ...form, ...patch });
+  /** Typing or picking a size fills bottles per peti and returnable from the usual pack. */
+  const setSize = (size: string) => {
+    const d = product ? null : defaultPack(size); // never change an existing product's peti by accident
+    set(d ? { size, packSize: String(d.pack), returnableEmpty: d.returnable } : { size });
+  };
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -264,37 +271,57 @@ function ProductDialog({ line, product, categories, prices, canEdit, canRate, on
             <span className="modal-icon info"><Icon name="products" /></span>
             <h2 id="product-title">{product ? `Edit ${product.name}` : `New ${line === 'BOTTLES' ? 'bottle' : 'rice'} product`}</h2>
           </div>
-          <fieldset disabled={!canEdit} style={{ border: 0, padding: 0, margin: '14px 0 0' }}>
-            <div className="form" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
-              <label style={{ gridColumn: '1 / -1' }}>Category
+          <fieldset disabled={!canEdit} className="plain-fieldset">
+            <div className="fgrid">
+              <Field label="Category" required span={12}>
                 <select required value={form.categoryId} onChange={(e) => set({ categoryId: e.target.value })}>
                   <option value="">Select category…</option>
                   {categories.map((o) => <option key={o.id} value={o.id}>{o.text}</option>)}
                 </select>
-              </label>
-              <label>Name<input required autoFocus value={form.name} onChange={(e) => set({ name: e.target.value })} /></label>
-              <label>Brand<input value={form.brand} placeholder="Optional" onChange={(e) => set({ brand: e.target.value })} /></label>
-              <label>Size<input value={form.size} placeholder={line === 'BOTTLES' ? '1.5 L' : '25 kg'} onChange={(e) => set({ size: e.target.value })} /></label>
+              </Field>
+              <Field label="Name" required span={6} hint={line === 'BOTTLES' ? 'Brand and flavour, e.g. "Pepsi" or "Shezan Mango"' : 'Variety and form, e.g. "Super Kernel Sella"'}>
+                <input required autoFocus value={form.name} onChange={(e) => set({ name: e.target.value })} />
+              </Field>
+              <Field label={line === 'BOTTLES' ? 'Company' : 'Brand'} optional span={6}>
+                <input value={form.brand} placeholder={line === 'BOTTLES' ? 'PepsiCo' : 'Guard, Falak…'} onChange={(e) => set({ brand: e.target.value })} />
+              </Field>
               {line === 'BOTTLES' ? (
                 <>
-                  <label>Bottles per carton<input type="number" min="1" step="1" required value={form.packSize} onChange={(e) => set({ packSize: e.target.value })} /></label>
-                  <label>Returnable empty
-                    <input type="checkbox" checked={form.returnableEmpty} onChange={(e) => set({ returnableEmpty: e.target.checked })} />
-                  </label>
+                  <Field label="Size" span={12} hint="Pick a common size to fill in bottles per peti, or type your own.">
+                    <input value={form.size} placeholder="1.5 L" onChange={(e) => setSize(e.target.value)} />
+                  </Field>
+                  <div className="span-12 size-chips" role="group" aria-label="Common sizes">
+                    {DRINK_SIZE_PRESETS.map((p) => (
+                      <button key={p.size} type="button" className={`size-chip${form.size === p.size ? ' on' : ''}`} aria-pressed={form.size === p.size} onClick={() => setSize(p.size)}>
+                        <b>{p.size}</b><span>{p.pack}/peti{p.returnable ? ' · ♻' : ''}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <Field label="Bottles per peti" required span={6} hint="How many bottles come in one carton/crate">
+                    <Affix suffix="bottles"><input type="number" min="1" step="1" required inputMode="numeric" value={form.packSize} onChange={(e) => set({ packSize: e.target.value })} /></Affix>
+                  </Field>
+                  <div className="fld span-6 toggle-fld">
+                    <Toggle checked={form.returnableEmpty} onChange={(v) => set({ returnableEmpty: v })} label="Returnable empty" description="Glass bottles — empties are tracked per customer" />
+                  </div>
                 </>
               ) : (
-                <label>Bag size (kg, if packed)<input type="number" step="any" min="0" placeholder="Loose" value={form.bagKg} onChange={(e) => set({ bagKg: e.target.value })} /></label>
+                <>
+                  <Field label="Size" optional span={6}><input value={form.size} placeholder="25 kg bag" onChange={(e) => set({ size: e.target.value })} /></Field>
+                  <Field label="Bag weight" optional span={6} hint="Leave empty for loose rice sold by kg and maund">
+                    <Affix suffix="kg"><input type="number" step="any" min="0" inputMode="decimal" placeholder="Loose" value={form.bagKg} onChange={(e) => set({ bagKg: e.target.value })} /></Affix>
+                  </Field>
+                </>
               )}
             </div>
           </fieldset>
           <h3 style={{ margin: '22px 0 4px' }}>Default sale rate</h3>
           <p className="card-sub" style={{ margin: '0 0 12px' }}>Used on bills when the customer has no fixed rate. {canRate ? 'Leave a unit empty to require a rate on the bill.' : 'You need the rate-edit permission to change these.'}</p>
-          <div className="form" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
+          <div className="fgrid">
             {units.map((u) => (
-              <label key={u.unitName}>Rs per {unitLabel(u.unitName)}
-                <input type="number" step="any" min="0" inputMode="decimal" disabled={!canRate} placeholder="—" value={rates[u.unitName] ?? ''} onChange={(e) => setRates({ ...rates, [u.unitName]: e.target.value })} />
-                {u.unitName === 'CARTON' && rates.BOTTLE && !rates.CARTON && <span className="hint">= {money(Number(rates.BOTTLE) * Number(form.packSize || 0))} at bottle rate</span>}
-              </label>
+              <Field key={u.unitName} span={4} label={`Per ${unitLabel(u.unitName)}`} optional
+                hint={u.unitName === 'CARTON' && rates.BOTTLE && !rates.CARTON ? `= Rs ${money(Number(rates.BOTTLE) * Number(form.packSize || 0))} at bottle rate` : undefined}>
+                <Affix prefix="Rs"><input type="number" step="any" min="0" inputMode="decimal" disabled={!canRate} placeholder="—" value={rates[u.unitName] ?? ''} onChange={(e) => setRates({ ...rates, [u.unitName]: e.target.value })} /></Affix>
+              </Field>
             ))}
           </div>
           <div className="modal-actions">

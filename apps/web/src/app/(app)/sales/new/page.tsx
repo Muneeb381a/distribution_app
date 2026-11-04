@@ -11,7 +11,7 @@ import { api, can, useUser } from '@/lib/api';
 import { customerOptions, productOptions, useLookups, type ProductOpt } from '@/lib/lookups';
 import { getSnapshot, isNetworkError, previewOffline, saveSaleOffline, useSyncState, type OutboxOp, type Preview, type Snapshot } from '@/lib/offline';
 import type { PrintMode } from '@/components/PrintPanel';
-import { money, PAYMENT_METHODS, RETURN_REASONS } from '@dist/shared';
+import { money, PAYMENT_METHODS, RETURN_REASONS, unitLabel } from '@dist/shared';
 
 interface Customer { id: string; name: string; shopName: string | null; area: string | null; phone: string | null; type: 'CASH' | 'CREDIT'; creditLimit: string | null }
 interface LastBill { id: string; billNo: string; date: string; net: string; rates: Record<string, string> }
@@ -224,10 +224,10 @@ export default function NewSalePage() {
             onChange={(v) => setLine(set, list, i, pick(v))}
             onPicked={() => setFocusTarget(lineSel(kind, i, 'qty'))}
           />
-          {last && <span className="line-hint">Last bill: {money(last)} / {l.unitName.toLowerCase()}</span>}
+          {last && <span className="line-hint">Last bill: {money(last)} / {unitLabel(l.unitName)}</span>}
         </div>
         <select aria-label="Unit" value={l.unitName} onChange={(e) => setLine(set, list, i, { unitName: e.target.value, rate: '' })} disabled={!p}>
-          {p?.units.map((u) => <option key={u.unitName} value={u.unitName}>{u.unitName.toLowerCase()}</option>)}
+          {p?.units.map((u) => <option key={u.unitName} value={u.unitName}>{unitLabel(u.unitName)}</option>)}
         </select>
         <input aria-label="Quantity" type="number" step="any" min="0" placeholder="0" inputMode="decimal" value={l.qty} onChange={(e) => setLine(set, list, i, { qty: e.target.value })} onKeyDown={(e) => nextLine(e, list, set, kind, i)} />
         <input

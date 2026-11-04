@@ -65,7 +65,11 @@ export const CUSTOMER_LEDGER_LABEL: Record<string, string> = { SALE: 'Bill', PAY
 /** Supplier ledger entry types. */
 export const SUPPLIER_LEDGER_LABEL: Record<string, string> = { PURCHASE: 'Purchase', PAYMENT: 'Payment', RETURN: 'Return', CANCEL: 'Cancelled purchase' };
 
-export const unitLabel = (u: string) => u.toLowerCase();
+/** Units as people say them: a carton of bottles is a "peti", a 50 kg rice bag a "bori". */
+const UNIT_WORD: Record<string, string> = { BOTTLE: 'bottle', CARTON: 'peti', KG: 'kg', MAUND: 'maund', BAG: 'bag' };
+export const unitLabel = (u: string) => UNIT_WORD[u] ?? u.toLowerCase();
+/** Longer form for pickers: "Peti (carton)". */
+export const unitTitle = (u: string) => ({ CARTON: 'Peti (carton)', MAUND: 'Maund (40 kg)', BAG: 'Bag / bori' } as Record<string, string>)[u] ?? unitLabel(u).replace(/^./, (c) => c.toUpperCase());
 export const productLabel = (p: { name: string; size: string | null }) => (p.size ? `${p.name} (${p.size})` : p.name);
 
 /** Badge for a document's state. */

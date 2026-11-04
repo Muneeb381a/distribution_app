@@ -1,9 +1,10 @@
 import { BadRequestException, Body, Controller, Get, Injectable, Module, Param, Patch, Post, Query } from '@nestjs/common';
 import { PartialType } from '@nestjs/mapped-types';
 import { Type } from 'class-transformer';
-import { ArrayNotEmpty, IsArray, IsBoolean, IsEnum, IsNumber, IsOptional, IsPositive, IsString, IsUUID, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsPositive, IsString, IsUUID, MaxLength, Min, ValidateNested } from 'class-validator';
 import { BaseUnit, BusinessLineCode, UnitName } from '@prisma/client';
 import { PrismaService } from '../prisma.service.js';
+import { createProducts } from './product-rows.js';
 import { AuditService } from '../audit/audit.module.js';
 import { CurrentUser, RequirePermissions, type AuthUser } from '../common/decorators.js';
 
@@ -29,6 +30,22 @@ class ProductDto {
   @IsArray() @ArrayNotEmpty() @ValidateNested({ each: true }) @Type(() => UnitDto) units: UnitDto[];
 }
 
+/** One product from the starter catalog (same shape as an Excel import row). */
+class ProductSpecDto {
+  @IsEnum(BusinessLineCode) line: BusinessLineCode;
+  @IsArray() @ArrayNotEmpty() @ArrayMaxSize(4) @IsString({ each: true }) @MaxLength(60, { each: true }) path: string[];
+  @IsString() @MaxLength(80) name: string;
+  @IsOptional() @IsString() @MaxLength(60) brand: string | null;
+  @IsOptional() @IsString() @MaxLength(30) size: string | null;
+  @IsInt() @Min(1) packSize: number;
+  @IsOptional() @IsNumber() @IsPositive() bagKg: number | null;
+  @IsBoolean() returnableEmpty: boolean;
+  @IsOptional() @IsBoolean() isPacked?: boolean;
+}
+class BulkProductsDto {
+  @IsArray() @ArrayNotEmpty() @ArrayMaxSize(300) @ValidateNested({ each: true }) @Type(() => ProductSpecDto) items: ProductSpecDto[];
+}
+
 class UpdateProductDto extends PartialType(ProductDto) {
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
@@ -42,7 +59,7 @@ interface ProductQuery {
 
 @Injectable()
 export class CatalogService {
-  constructor(private prisma: PrismaService, private audit: AuditService) {}
+  constructor(public prisma: PrismaService, public audit: AuditService) {}
 
   listCategories(line?: BusinessLineCode) {
     return this.prisma.category.findMany({
@@ -136,6 +153,14 @@ class CatalogController {
   @Post('products') @RequirePermissions('MASTER_DATA_EDIT')
   createProduct(@Body() dto: ProductDto, @CurrentUser() u: AuthUser) {
     return this.svc.createProduct(dto, u);
+  }
+
+  /** Many products at once, e.g. picked from the starter catalog. Existing name+size pairs are skipped. */
+  @Post('products/bulk') @RequirePermissions('MASTER_DATA_EDIT')
+  async bulk(@Body() dto: BulkProductsDto, @CurrentUser() u: AuthUser) {
+    const result = await this.svc.prisma.$transaction((tx) => createProducts(tx, dto.items), { timeout: 30_000 });
+    await this.svc.audit.log(u.id, 'CREATE', 'Product', undefined, undefined, { bulk: result.created.length, skipped: result.skipped.length });
+    return result;
   }
 
   @Patch('products/:id') @RequirePermissions('MASTER_DATA_EDIT')

@@ -1,6 +1,6 @@
 import { urdu } from '@/lib/fonts';
 import type { BillData, ReceiptData } from '@/lib/saleImage';
-import { money } from '@dist/shared';
+import { money, unitLabel } from '@dist/shared';
 
 const name = (p: { name: string; size: string | null }) => (p.size ? `${p.name} (${p.size})` : p.name);
 
@@ -42,7 +42,7 @@ export function BillA4({ b }: { b: BillData }) {
           {b.items.map((l, i) => (
             <tr key={i}>
               <td>{name(l.product)}</td>
-              <td style={{ textAlign: 'right' }}>{Number(l.qty)} {l.unitName.toLowerCase()}</td>
+              <td style={{ textAlign: 'right' }}>{Number(l.qty)} {unitLabel(l.unitName)}</td>
               <td style={{ textAlign: 'right' }}>{money(l.rate)}</td>
               <td style={{ textAlign: 'right' }}>{money(l.lineTotal)}</td>
             </tr>
@@ -50,7 +50,7 @@ export function BillA4({ b }: { b: BillData }) {
           {b.returns.map((r, i) => (
             <tr key={`r${i}`}>
               <td>Return: {name(r.product)} ({r.reason.toLowerCase()})</td>
-              <td style={{ textAlign: 'right' }}>{Number(r.qty)} {r.unitName.toLowerCase()}</td>
+              <td style={{ textAlign: 'right' }}>{Number(r.qty)} {unitLabel(r.unitName)}</td>
               <td />
               <td style={{ textAlign: 'right' }}>-{money(r.creditAmount)}</td>
             </tr>

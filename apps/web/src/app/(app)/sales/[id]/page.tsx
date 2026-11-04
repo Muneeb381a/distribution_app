@@ -11,7 +11,7 @@ import { api, can, useUser } from '@/lib/api';
 import { urdu } from '@/lib/fonts';
 import { usePageTitle } from '@/lib/pageTitle';
 import { renderBillImage, type BillData } from '@/lib/saleImage';
-import { money } from '@dist/shared';
+import { money, unitLabel } from '@dist/shared';
 
 type Bill = BillData & {
   id: string;
@@ -92,7 +92,7 @@ export default function BillPage() {
     const text = [
       `Bill ${bill.billNo} · ${new Date(bill.createdAt).toLocaleDateString('en-GB')}`,
       bill.customer ? `${bill.customer.name}${bill.customer.shopName ? ` (${bill.customer.shopName})` : ''}` : 'Cash sale',
-      ...bill.items.map((l) => `${label(l.product)} ${Number(l.qty)} ${l.unitName.toLowerCase()} × ${money(l.rate)} = ${money(l.lineTotal)}`),
+      ...bill.items.map((l) => `${label(l.product)} ${Number(l.qty)} ${unitLabel(l.unitName)} × ${money(l.rate)} = ${money(l.lineTotal)}`),
       `Total: Rs ${money(bill.net)}`,
       `Paid: Rs ${money(bill.paidNow)}`,
       ...(bill.customer ? [`Balance: Rs ${money(bill.newBalance)}`] : []),
@@ -192,7 +192,7 @@ export default function BillPage() {
                     {bill.items.map((l, i) => (
                       <tr key={i}>
                         <td><b>{label(l.product)}</b></td>
-                        <td className="num">{Number(l.qty)} {l.unitName.toLowerCase()}</td>
+                        <td className="num">{Number(l.qty)} {unitLabel(l.unitName)}</td>
                         <td className="num">{money(l.rate)}</td>
                         <td className="num"><b>{money(l.lineTotal)}</b></td>
                       </tr>
@@ -200,7 +200,7 @@ export default function BillPage() {
                     {bill.returns.map((r, i) => (
                       <tr key={`r${i}`}>
                         <td>Return · {label(r.product)} <span className="badge red">{r.reason.toLowerCase()}</span></td>
-                        <td className="num">{Number(r.qty)} {r.unitName.toLowerCase()}</td>
+                        <td className="num">{Number(r.qty)} {unitLabel(r.unitName)}</td>
                         <td className="num muted">—</td>
                         <td className="num amt-credit">-{money(r.creditAmount)}</td>
                       </tr>
