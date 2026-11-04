@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import Combobox from '@/components/Combobox';
-import { Empty, SkeletonRows, useToast } from '@/components/Feedback';
+import { Choice, Field, FormActions, FormCard, FormSection } from '@/components/Form';
+import { Icon } from '@/components/Icon';
+import { BusyButton, Empty, SkeletonRows, useToast } from '@/components/Feedback';
 import { LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
 import { formatQty, productLabel, productOptions, useLookups, type ProductOpt } from '@/lib/lookups';
-import { money } from '@dist/shared';
+import { money, unitLabel } from '@dist/shared';
 
 interface Row {
   productId: string; productName: string; size: string | null; line: string; baseUnit: string;
@@ -15,18 +17,19 @@ interface Row {
 }
 interface Line { productId: string; unitName: string; qty: string }
 const emptyLine: Line = { productId: '', unitName: '', qty: '' };
-const KINDS = [
-  ['ADD', 'Add stock (correction)'],
-  ['REMOVE', 'Remove stock (correction)'],
-  ['MARK_DAMAGED', 'Mark as damaged'],
-  ['RESTORE_DAMAGED', 'Return damaged to saleable (needs approval permission)'],
-  ['WRITE_OFF_DAMAGED', 'Write off damaged'],
+const KINDS: [string, string, string][] = [
+  ['MARK_DAMAGED', 'Mark as damaged', 'Saleable stock found broken or expired'],
+  ['WRITE_OFF_DAMAGED', 'Write off damaged', 'Damaged stock thrown away'],
+  ['RESTORE_DAMAGED', 'Damaged back to saleable', 'Checked and fine after all (needs approval permission)'],
+  ['ADD', 'Add stock (correction)', 'Count found more than the app shows'],
+  ['REMOVE', 'Remove stock (correction)', 'Count found less than the app shows'],
 ];
+const MOVE_COLS = 'minmax(180px, 2.4fr) 110px 90px 110px 36px';
 
 function UnitSelect({ product, value, onChange }: { product?: ProductOpt; value: string; onChange: (v: string) => void }) {
   return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} required>
-      {product?.units.map((u) => <option key={u.unitName} value={u.unitName}>{u.unitName}</option>)}
+    <select aria-label="Unit" value={value} disabled={!product} onChange={(e) => onChange(e.target.value)} required>
+      {product?.units.map((u) => <option key={u.unitName} value={u.unitName}>{unitLabel(u.unitName)}{Number(u.factorToBase) !== 1 ? ` (${Number(u.factorToBase)})` : ''}</option>)}
     </select>
   );
 }
@@ -61,32 +64,50 @@ export default function StockPage() {
     setTransfer({ ...transfer, lines: transfer.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) });
   const pickProduct = (id: string) => ({ productId: id, unitName: prod(id)?.units[0]?.unitName ?? '' });
 
-  async function run(path: string, json: unknown, done: string) {
+  // Unfiltered stock, so the forms can say what is available wherever the list is filtered.
+  const [allStock, setAllStock] = useState<Row[]>([]);
+  const loadAll = useCallback(() => api<Row[]>('/stock').then(setAllStock).catch(() => {}), []);
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
+  const onHand = (productId: string, locationId: string) => {
+    if (!productId || !locationId) return '—';
+    const r = allStock.find((x) => x.productId === productId && x.locationId === locationId);
+    return r ? formatQty(r.ok, r.units, r.baseUnit) : '0';
+  };
+
+  const [busy, setBusy] = useState<'' | 'transfer' | 'adjust'>('');
+  // Bumped after a save so the form remounts clean (no leftover 'invalid' marks on emptied fields).
+  const [fresh, setFresh] = useState({ transfer: 0, adjust: 0 });
+  async function run(key: 'transfer' | 'adjust', path: string, json: unknown, done: string) {
+    setBusy(key);
     try {
       await api(path, { method: 'POST', json });
       toast.success(done);
-      await load();
+      await Promise.all([load(), loadAll()]);
       return true;
     } catch (e) {
       toast.error((e as Error).message);
       return false;
+    } finally {
+      setBusy('');
     }
   }
 
   async function submitTransfer(e: FormEvent) {
     e.preventDefault();
-    const ok = await run('/stock/transfers', {
+    const ok = await run('transfer', '/stock/transfers', {
       fromLocationId: transfer.from,
       toLocationId: transfer.to,
       items: transfer.lines.map((l) => ({ productId: l.productId, unitName: l.unitName, qty: Number(l.qty) })),
     }, 'Transfer saved');
-    if (ok) setTransfer({ from: transfer.from, to: transfer.to, lines: [{ ...emptyLine }] });
+    if (ok) { setTransfer({ from: transfer.from, to: transfer.to, lines: [{ ...emptyLine }] }); setFresh((f) => ({ ...f, transfer: f.transfer + 1 })); }
   }
 
   async function submitAdjust(e: FormEvent) {
     e.preventDefault();
-    const ok = await run('/stock/adjustments', { ...adjust, qty: Number(adjust.qty) }, 'Adjustment saved');
-    if (ok) setAdjust({ ...adjust, qty: '', note: '' });
+    const ok = await run('adjust', '/stock/adjustments', { ...adjust, qty: Number(adjust.qty) }, 'Adjustment saved');
+    if (ok) { setAdjust({ ...adjust, qty: '', note: '' }); setFresh((f) => ({ ...f, adjust: f.adjust + 1 })); }
   }
 
   const showCost = !!rows?.some((r) => 'latestUnitCost' in r);
@@ -95,21 +116,17 @@ export default function StockPage() {
     <>
       <div className="page-head"><div><h1>Stock</h1><p>{rows ? `${rows.length} product / location rows` : 'Loading…'}</p></div></div>
       {(error || lookupError) && <p className="error">{error || lookupError}</p>}
-      <div className="card form">
-        <label>Location
-          <select value={filter.locationId} onChange={(e) => setFilter({ ...filter, locationId: e.target.value })}>
-            <option value="">All</option>
-            {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-        </label>
-        <label>Line
-          <select value={filter.line} onChange={(e) => setFilter({ ...filter, line: e.target.value })}>
-            <option value="">Both</option>
-            <option value="BOTTLES">Bottles</option>
-            <option value="RICE">Rice</option>
-          </select>
-        </label>
-        <label>Search<input value={filter.search} onChange={(e) => setFilter({ ...filter, search: e.target.value })} /></label>
+      <div className="list-head">
+        <div className="filter"><Icon name="search" /><input aria-label="Search stock" placeholder="Search product…" value={filter.search} onChange={(e) => setFilter({ ...filter, search: e.target.value })} /></div>
+        <select aria-label="Location" value={filter.locationId} onChange={(e) => setFilter({ ...filter, locationId: e.target.value })}>
+          <option value="">All locations</option>
+          {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+        </select>
+        <div className="chips">
+          {[['', 'All'], ['BOTTLES', 'Bottles'], ['RICE', 'Rice']].map(([v, l]) => (
+            <button key={v} type="button" className={`chip${filter.line === v ? ' on' : ''}`} aria-pressed={filter.line === v} onClick={() => setFilter({ ...filter, line: v })}>{l}</button>
+          ))}
+        </div>
       </div>
       <table className="sticky-head">
         <thead>
@@ -144,67 +161,87 @@ export default function StockPage() {
       </table>
       <LoadMore shown={page.length} total={sorted.length} onMore={loadMore} />
 
+      <div className="dash-grid stock-forms">
       {can(user, 'STOCK_TRANSFER') && (
-        <>
-          <h2>Transfer stock</h2>
-          <form className="card" onSubmit={submitTransfer}>
-            <div className="form">
-              {(['from', 'to'] as const).map((k) => (
-                <label key={k}>{k === 'from' ? 'From' : 'To'}
-                  <select required value={transfer[k]} onChange={(e) => setTransfer({ ...transfer, [k]: e.target.value })}>
-                    <option value="">—</option>
-                    {locations.map((l) => <option key={l.id} value={l.id}>{l.name} ({l.type.toLowerCase()})</option>)}
-                  </select>
-                </label>
-              ))}
+        <FormCard
+          key={`t${fresh.transfer}`}
+          onSubmit={submitTransfer}
+          title="Transfer stock"
+          description="Move stock between godowns, the shop and vehicles — e.g. load a van in the morning, unload it at night."
+          actions={<FormActions><BusyButton busy={busy === 'transfer'}><Icon name="refresh" />Transfer</BusyButton></FormActions>}
+        >
+          <FormSection>
+            <Field label="From" required span={5}>
+              <select required value={transfer.from} onChange={(e) => setTransfer({ ...transfer, from: e.target.value })}>
+                <option value="">Select location…</option>
+                {locations.map((l) => <option key={l.id} value={l.id} disabled={l.id === transfer.to}>{l.name} · {l.type.toLowerCase()}</option>)}
+              </select>
+            </Field>
+            <div className="fld span-2 swap-col">
+              <button type="button" className="secondary icon-only" title="Swap" aria-label="Swap from and to" onClick={() => setTransfer({ ...transfer, from: transfer.to, to: transfer.from })}><Icon name="refresh" /></button>
             </div>
-            {transfer.lines.map((l, i) => (
-              <div className="form" key={i} style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--border)' }}>
-                <div className="field">
-                  <label htmlFor={`transfer-product-${i}`}>Product</label>
-                  <Combobox id={`transfer-product-${i}`} required compact options={productOpts} value={l.productId} recentKey="product" placeholder="Type product name…" onChange={(v) => setLine(i, pickProduct(v))} />
-                </div>
-                <label>Unit<UnitSelect product={prod(l.productId)} value={l.unitName} onChange={(v) => setLine(i, { unitName: v })} /></label>
-                <label>Qty<input type="number" step="any" min="0" required value={l.qty} onChange={(e) => setLine(i, { qty: e.target.value })} /></label>
-                {transfer.lines.length > 1 && (
-                  <button type="button" className="secondary" onClick={() => setTransfer({ ...transfer, lines: transfer.lines.filter((_, j) => j !== i) })}>Remove</button>
-                )}
+            <Field label="To" required span={5}>
+              <select required value={transfer.to} onChange={(e) => setTransfer({ ...transfer, to: e.target.value })}>
+                <option value="">Select location…</option>
+                {locations.map((l) => <option key={l.id} value={l.id} disabled={l.id === transfer.from}>{l.name} · {l.type.toLowerCase()}</option>)}
+              </select>
+            </Field>
+            <div className="items" style={{ gridColumn: '1 / -1' }}>
+              <div className="items-head" style={{ gridTemplateColumns: MOVE_COLS }}><span>Product</span><span>Unit</span><span className="r">Qty</span><span className="r">Available</span><span /></div>
+              {transfer.lines.map((l, i) => {
+                const have = onHand(l.productId, transfer.from);
+                return (
+                  <div className="items-row" key={i} style={{ gridTemplateColumns: MOVE_COLS }}>
+                    <div className="item-product">
+                      <Combobox id={`transfer-product-${i}`} ariaLabel="Product" required compact options={productOpts} value={l.productId} recentKey="product" placeholder="Type product name…" onChange={(v) => setLine(i, pickProduct(v))} />
+                    </div>
+                    <UnitSelect product={prod(l.productId)} value={l.unitName} onChange={(v) => setLine(i, { unitName: v })} />
+                    <input aria-label="Quantity" className="r" type="number" step="any" min="0" required inputMode="decimal" placeholder="0" value={l.qty} onChange={(e) => setLine(i, { qty: e.target.value })} />
+                    <span className="r muted">{have}</span>
+                    <button type="button" className="icon-btn" aria-label="Remove item" disabled={transfer.lines.length === 1} onClick={() => setTransfer({ ...transfer, lines: transfer.lines.filter((_, j) => j !== i) })}><Icon name="x" /></button>
+                  </div>
+                );
+              })}
+              <div className="items-foot">
+                <button type="button" className="add" onClick={() => setTransfer({ ...transfer, lines: [...transfer.lines, { ...emptyLine }] })}><Icon name="plus" />Add item</button>
+                <span className="muted">{transfer.from ? `Available is at ${locations.find((x) => x.id === transfer.from)?.name}` : 'Choose “From” to see what is available'}</span>
               </div>
-            ))}
-            <div className="toolbar" style={{ marginTop: 12 }}>
-              <button type="button" className="secondary" onClick={() => setTransfer({ ...transfer, lines: [...transfer.lines, { ...emptyLine }] })}>+ Add item</button>
-              <button>Transfer</button>
             </div>
-          </form>
-        </>
+          </FormSection>
+        </FormCard>
       )}
 
       {can(user, 'STOCK_ADJUST') && (
-        <>
-          <h2>Adjust / damaged stock</h2>
-          <form className="card form" onSubmit={submitAdjust}>
-            <label>Location
+        <FormCard
+          key={`a${fresh.adjust}`}
+          onSubmit={submitAdjust}
+          title="Adjust or damaged stock"
+          description="Corrections after a count, and damaged stock. Every change needs a reason and shows in the audit log."
+          actions={<FormActions><BusyButton busy={busy === 'adjust'}>Save adjustment</BusyButton></FormActions>}
+        >
+          <FormSection>
+            <Field label="What happened" required span={12}>
+              <Choice name="kind" columns={1} value={adjust.kind} onChange={(v) => setAdjust({ ...adjust, kind: v })}
+                options={KINDS.filter(([v]) => v !== 'RESTORE_DAMAGED' || can(user, 'DAMAGED_APPROVE')).map(([value, label, description]) => ({ value, label, description }))} />
+            </Field>
+            <Field label="Location" required span={12}>
               <select required value={adjust.locationId} onChange={(e) => setAdjust({ ...adjust, locationId: e.target.value })}>
-                <option value="">—</option>
+                <option value="">Select location…</option>
                 {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
-            </label>
-            <div className="field">
-              <label htmlFor="adjust-product">Product</label>
+            </Field>
+            <Field label="Product" required span={12} htmlFor="adjust-product" hint={adjust.productId && adjust.locationId ? `At this location: ${onHand(adjust.productId, adjust.locationId)}` : undefined}>
               <Combobox id="adjust-product" required compact options={productOpts} value={adjust.productId} recentKey="product" placeholder="Type product name…" onChange={(v) => setAdjust({ ...adjust, ...pickProduct(v) })} />
-            </div>
-            <label>Unit<UnitSelect product={prod(adjust.productId)} value={adjust.unitName} onChange={(v) => setAdjust({ ...adjust, unitName: v })} /></label>
-            <label>Qty<input type="number" step="any" min="0" required value={adjust.qty} onChange={(e) => setAdjust({ ...adjust, qty: e.target.value })} /></label>
-            <label>What
-              <select value={adjust.kind} onChange={(e) => setAdjust({ ...adjust, kind: e.target.value })}>
-                {KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-            </label>
-            <label>Reason (required)<input required minLength={3} value={adjust.note} onChange={(e) => setAdjust({ ...adjust, note: e.target.value })} /></label>
-            <button>Save</button>
-          </form>
-        </>
+            </Field>
+            <Field label="Unit" required span={6}><UnitSelect product={prod(adjust.productId)} value={adjust.unitName} onChange={(v) => setAdjust({ ...adjust, unitName: v })} /></Field>
+            <Field label="Quantity" required span={6}><input type="number" step="any" min="0" required inputMode="decimal" placeholder="0" value={adjust.qty} onChange={(e) => setAdjust({ ...adjust, qty: e.target.value })} /></Field>
+            <Field label="Reason" required span={12} hint="At least 3 characters, e.g. “counted 2 short”, “bottles burst in van”.">
+              <input required minLength={3} value={adjust.note} onChange={(e) => setAdjust({ ...adjust, note: e.target.value })} />
+            </Field>
+          </FormSection>
+        </FormCard>
       )}
+      </div>
     </>
   );
 }

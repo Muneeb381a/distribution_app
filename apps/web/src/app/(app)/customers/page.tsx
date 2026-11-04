@@ -16,15 +16,23 @@ export default function CustomersPage() {
       path="/customers"
       editPermission="MASTER_DATA_EDIT"
       icon="customers"
+      formDescription="Shopkeepers you sell to. Their fixed rates are set on the customer's Rates page."
+      sections={[
+        { key: 'shop', title: 'Shop', description: 'Who the customer is and where to find them. Search finds them by name, shop, area or phone.' },
+        { key: 'account', title: 'Account', description: 'Cash customers pay every bill in full. Udhaar customers run a khata up to their credit limit.' },
+      ]}
       fields={[
-        { name: 'name', label: 'Name', required: true },
-        { name: 'shopName', label: 'Shop name' },
-        { name: 'phone', label: 'Phone' },
-        { name: 'area', label: 'Area / route' },
-        { name: 'address', label: 'Address' },
-        { name: 'type', label: 'Type', type: 'select', required: true, options: CUSTOMER_TYPES.map((t) => ({ value: t.value, label: t.value === 'CREDIT' ? 'Udhaar (credit)' : t.label })) },
-        { name: 'creditLimit', label: 'Credit limit', type: 'number', showWhen: (v) => v.type === 'CREDIT' },
-        { name: 'openingBalance', label: 'Opening balance (they owe)', type: 'number' },
+        { name: 'name', label: 'Owner name', required: true, section: 'shop', placeholder: 'e.g. Ahmed Sahib' },
+        { name: 'shopName', label: 'Shop name', section: 'shop', placeholder: 'e.g. Ahmed Kiryana' },
+        { name: 'phone', label: 'Phone', type: 'tel', section: 'shop', span: 4, placeholder: '03xx-xxxxxxx', hint: 'Used for WhatsApp bills' },
+        { name: 'area', label: 'Area / route', section: 'shop', span: 4, placeholder: 'e.g. Gulberg', hint: 'Groups customers by route' },
+        { name: 'address', label: 'Address', section: 'shop', span: 4 },
+        { name: 'type', label: 'Customer type', type: 'choice', required: true, section: 'account', initial: 'CASH', options: CUSTOMER_TYPES.map((t) => ({
+          value: t.value, label: t.long, icon: t.value === 'CREDIT' ? 'khata' : 'wallet',
+          description: t.value === 'CREDIT' ? 'Takes goods on khata and pays later' : 'Pays in full on every bill',
+        })) },
+        { name: 'creditLimit', label: 'Credit limit', type: 'number', prefix: 'Rs', section: 'account', showWhen: (v) => v.type === 'CREDIT', hint: 'Bills that would cross it need the override permission. Leave empty for no limit.' },
+        { name: 'openingBalance', label: 'Opening balance', type: 'number', prefix: 'Rs', section: 'account', hint: 'What they owe you today, from the old register' },
       ]}
       columns={[
         { header: 'Name', render: (r) => <b>{r.name}</b>, value: (r) => r.name },

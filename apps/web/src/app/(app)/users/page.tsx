@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import { SkeletonRows, useConfirm, usePrompt, useToast } from '@/components/Feedback';
+import { BusyButton, SkeletonRows, useConfirm, usePrompt, useToast } from '@/components/Feedback';
+import { Field, FormActions, FormCard, FormSection } from '@/components/Form';
 import { Icon } from '@/components/Icon';
 import { api, can, useUser } from '@/lib/api';
 import { PERMISSION_GROUPS } from '@dist/shared';
@@ -58,6 +59,7 @@ export default function UsersPage() {
   const toast = useToast();
   const me = useUser();
   const [loaded, setLoaded] = useState(false);
+  const [creating, setCreating] = useState(false);
   const prompt = usePrompt();
   const confirm = useConfirm();
 
@@ -80,6 +82,7 @@ export default function UsersPage() {
   async function create(e: FormEvent) {
     e.preventDefault();
     setError('');
+    setCreating(true);
     try {
       await api('/users', { method: 'POST', json: form });
       setForm({ username: '', password: '', roleId: '' });
@@ -88,6 +91,8 @@ export default function UsersPage() {
       await load();
     } catch (err) {
       toast.error((err as Error).message);
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -126,21 +131,32 @@ export default function UsersPage() {
       {error && <p className="error">{error}</p>}
 
       {adding && (
-        <form className="card form" onSubmit={create}>
-          <p className="form-title">New user</p>
-          <label>Username<input required minLength={3} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>
-          <label>Password<input required type="password" minLength={6} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
-          <label>Role
-            <select required value={form.roleId} onChange={(e) => setForm({ ...form, roleId: e.target.value })}>
-              <option value="">Select…</option>
-              {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
-          </label>
-          <div className="form-actions">
-            <button>Save user</button>
-            <button type="button" className="secondary" onClick={() => setAdding(false)}>Cancel</button>
-          </div>
-        </form>
+        <FormCard
+          onSubmit={create}
+          title="New user"
+          description="Each person signs in with their own account. What they can do comes from their role."
+          actions={
+            <FormActions>
+              <button type="button" className="secondary" onClick={() => setAdding(false)}>Cancel</button>
+              <BusyButton busy={creating}>Create user</BusyButton>
+            </FormActions>
+          }
+        >
+          <FormSection>
+            <Field label="Username" required span={4} hint="At least 3 characters, no spaces">
+              <input required minLength={3} pattern="\S+" autoComplete="off" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value.trim() })} />
+            </Field>
+            <Field label="Password" required span={4} hint="At least 6 characters. Ask them to remember it — the owner can reset it.">
+              <input required type="password" minLength={6} autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+            </Field>
+            <Field label="Role" required span={4} hint={form.roleId ? `${roles.find((r) => r.id === form.roleId)?.permissions.length ?? 0} permissions` : undefined}>
+              <select required value={form.roleId} onChange={(e) => setForm({ ...form, roleId: e.target.value })}>
+                <option value="">Select role…</option>
+                {roles.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </Field>
+          </FormSection>
+        </FormCard>
       )}
 
       <table>

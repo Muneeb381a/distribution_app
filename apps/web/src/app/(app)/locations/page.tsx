@@ -15,9 +15,13 @@ export default function LocationsPage() {
       path="/locations"
       editPermission="MASTER_DATA_EDIT"
       icon="locations"
+      formDescription="Places that hold stock. Every purchase, transfer and sale says which location it uses."
       fields={[
-        { name: 'name', label: 'Name', required: true },
-        { name: 'type', label: 'Type', type: 'select', required: true, options: LOCATION_TYPES.map(({ value, label }) => ({ value, label })) },
+        { name: 'name', label: 'Name', required: true, placeholder: 'e.g. Godown 2, Truck LHR-1' },
+        { name: 'type', label: 'Type', type: 'choice', required: true, initial: 'GODOWN', options: LOCATION_TYPES.map(({ value, label }) => ({
+          value, label, icon: value === 'VEHICLE' ? 'suppliers' : value === 'SHOP' ? 'sales' : 'stock',
+          description: value === 'GODOWN' ? 'Stores stock; no selling' : value === 'SHOP' ? 'Counter sales are made from here' : 'Delivery van; load it each morning',
+        })) },
       ]}
       columns={[
         { header: 'Name', render: (r) => <b>{r.name}</b>, value: (r) => r.name },

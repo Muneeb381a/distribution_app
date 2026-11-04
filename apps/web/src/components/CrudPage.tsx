@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { BusyButton, Empty, SkeletonRows, useConfirm, useToast } from '@/components/Feedback';
+import { Affix, Choice, Field as FormField, FormActions, FormCard, FormSection, type Span } from '@/components/Form';
 import { Icon, type IconName } from '@/components/Icon';
 import { LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import type { Permission } from '@dist/shared';
@@ -10,12 +11,25 @@ import { api, can, useUser } from '@/lib/api';
 export interface Field {
   name: string;
   label: string;
-  type?: 'text' | 'number' | 'select' | 'date';
-  options?: { value: string; label: string }[];
+  /** `choice` shows the options as cards (for 2–4 options); `select` as a dropdown. */
+  type?: 'text' | 'number' | 'select' | 'date' | 'tel' | 'choice' | 'textarea';
+  options?: { value: string; label: string; description?: string; icon?: IconName }[];
   required?: boolean;
   /** Only send/show for these values of another field, e.g. salary for monthly staff. */
   showWhen?: (values: Record<string, string>) => boolean;
+  /** Width out of 12 columns. Default 6. */
+  span?: Span;
+  hint?: string;
+  placeholder?: string;
+  prefix?: string;
+  suffix?: string;
+  /** Which `sections` entry the field sits in. */
+  section?: string;
+  /** Value for a new record, e.g. type CASH. */
+  initial?: string;
 }
+
+export interface FormSectionDef { key: string; title: string; description?: string }
 
 export interface Column<T> {
   header: string;
@@ -42,6 +56,10 @@ interface Props<T extends { id: string }> {
   icon?: IconName;
   /** Rows can be edited (PATCH path/:id). Default true. */
   editable?: boolean;
+  /** Groups for the form; fields name theirs with `section`. Without it the form is one group. */
+  sections?: FormSectionDef[];
+  /** One line under the form title, e.g. what the record is used for. */
+  formDescription?: string;
 }
 
 type Row = { id: string; isActive?: boolean } & Record<string, unknown>;
@@ -54,7 +72,7 @@ function textOf(v: unknown, f: Field): string {
   return String(v);
 }
 
-export default function CrudPage<T extends { id: string }>({ title, path, fields, columns, editPermission, toBody, extraRowActions, noun, icon = 'file', editable = true }: Props<T>) {
+export default function CrudPage<T extends { id: string }>({ title, path, fields, columns, editPermission, toBody, extraRowActions, noun, icon = 'file', editable = true, sections, formDescription }: Props<T>) {
   const [rows, setRows] = useState<T[] | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
@@ -65,7 +83,7 @@ export default function CrudPage<T extends { id: string }>({ title, path, fields
   const canEdit = can(useUser(), editPermission);
   const toast = useToast();
   const confirm = useConfirm();
-  const formRef = useRef<HTMLFormElement>(null);
+  const formRef = useRef<HTMLDivElement>(null);
   const singular = noun ?? title.replace(/s$/i, '').toLowerCase();
 
   const load = useCallback(
@@ -106,7 +124,7 @@ export default function CrudPage<T extends { id: string }>({ title, path, fields
   };
 
   function startAdd() {
-    setValues({});
+    setValues(Object.fromEntries(fields.filter((f) => f.initial !== undefined).map((f) => [f.name, f.initial!])));
     setMode('add');
   }
   function startEdit(r: T) {
@@ -172,35 +190,29 @@ export default function CrudPage<T extends { id: string }>({ title, path, fields
       </div>
       {error && <p className="error">{error}</p>}
       {canEdit && mode && (
-        <form className="card form" onSubmit={submit} ref={formRef} aria-label={editing ? `Edit ${singular}` : `New ${singular}`}>
-          <p className="form-title">{editing ? `Edit ${String((editing as unknown as Row).name ?? singular)}` : `New ${singular}`}</p>
-          {fields.filter((f) => !f.showWhen || f.showWhen(values)).map((f) => (
-            <label key={f.name}>
-              <span>{f.label}{f.required && <span className="error" aria-hidden="true"> *</span>}</span>
-              {f.type === 'select' ? (
-                <select value={values[f.name] ?? ''} required={f.required} onChange={(e) => setValues({ ...values, [f.name]: e.target.value })}>
-                  <option value="">Select…</option>
-                  {f.options?.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  type={f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text'}
-                  step="any"
-                  inputMode={f.type === 'number' ? 'decimal' : undefined}
-                  value={values[f.name] ?? ''}
-                  required={f.required}
-                  onChange={(e) => setValues({ ...values, [f.name]: e.target.value })}
-                />
-              )}
-            </label>
-          ))}
-          <div className="form-actions">
-            <BusyButton busy={busy}>{busy ? 'Saving…' : editing ? 'Save changes' : `Save ${singular}`}</BusyButton>
-            <button type="button" className="secondary" onClick={close}>Cancel</button>
-          </div>
-        </form>
+        <div ref={formRef}>
+          <FormCard
+            onSubmit={submit}
+            title={editing ? `Edit ${String((editing as unknown as Row).name ?? singular)}` : `New ${singular}`}
+            description={formDescription}
+            actions={
+              <FormActions note={<><span className="req">*</span> required</>}>
+                <button type="button" className="secondary" onClick={close}>Cancel</button>
+                <BusyButton busy={busy}>{busy ? 'Saving…' : editing ? 'Save changes' : `Save ${singular}`}</BusyButton>
+              </FormActions>
+            }
+          >
+            {(sections ?? [{ key: '', title: '' }]).map((sec) => {
+              const inSection = fields.filter((f) => (sections ? f.section === sec.key : true) && (!f.showWhen || f.showWhen(values)));
+              if (!inSection.length) return null;
+              return (
+                <FormSection key={sec.key} title={sec.title || undefined} description={sec.description}>
+                  {inSection.map((f) => <FieldInput key={f.name} f={f} value={values[f.name] ?? ''} onChange={(v) => setValues({ ...values, [f.name]: v })} />)}
+                </FormSection>
+              );
+            })}
+          </FormCard>
+        </div>
       )}
       <div className="list-head">
         <div className="filter">
@@ -258,5 +270,41 @@ export default function CrudPage<T extends { id: string }>({ title, path, fields
       </table>
       <LoadMore shown={page.length} total={sorted.length} onMore={loadMore} />
     </>
+  );
+}
+
+/** One configured field, drawn with the form kit. */
+function FieldInput({ f, value, onChange }: { f: Field; value: string; onChange: (v: string) => void }) {
+  let control: ReactNode;
+  if (f.type === 'choice') {
+    control = <Choice name={f.name} value={value} onChange={onChange} options={(f.options ?? []).map((o) => ({ value: o.value, label: o.label, description: o.description, icon: o.icon }))} />;
+  } else if (f.type === 'select') {
+    control = (
+      <select value={value} required={f.required} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{f.placeholder ?? 'Select…'}</option>
+        {f.options?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    );
+  } else if (f.type === 'textarea') {
+    control = <textarea value={value} required={f.required} placeholder={f.placeholder} rows={2} onChange={(e) => onChange(e.target.value)} />;
+  } else {
+    const input = (
+      <input
+        type={f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : f.type === 'tel' ? 'tel' : 'text'}
+        step={f.type === 'number' ? 'any' : undefined}
+        min={f.type === 'number' ? 0 : undefined}
+        inputMode={f.type === 'number' ? 'decimal' : f.type === 'tel' ? 'tel' : undefined}
+        placeholder={f.placeholder}
+        value={value}
+        required={f.required}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+    control = f.prefix || f.suffix ? <Affix prefix={f.prefix} suffix={f.suffix}>{input}</Affix> : input;
+  }
+  return (
+    <FormField label={f.label} required={f.required} optional={!f.required && f.type !== 'choice'} hint={f.hint} span={f.type === 'choice' ? (f.span ?? 12) : (f.span ?? 6)}>
+      {control}
+    </FormField>
   );
 }
