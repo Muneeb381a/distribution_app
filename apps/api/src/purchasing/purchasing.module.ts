@@ -1,6 +1,8 @@
 import { BadRequestException, Body, Controller, Get, Module, NotFoundException, Param, Post } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import { ArrayNotEmpty, IsArray, IsEnum, IsISO8601, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Min, ValidateNested } from 'class-validator';
+import { ArrayNotEmpty, IsArray, IsEnum, IsIn, IsISO8601, IsNumber, IsOptional, IsPositive, IsString, IsUUID, MaxLength, Min, ValidateNested } from 'class-validator';
+import { PAYMENT_METHODS } from '@dist/shared';
+import { chequeOf } from '../sales/sales.service.js';
 import { Prisma, StockStatus, UnitName } from '@prisma/client';
 import { PrismaService } from '../prisma.service.js';
 import { withSupplierBalances } from '../common/balances.js';
@@ -23,7 +25,11 @@ class PurchaseDto {
   @IsUUID() locationId: string;
   @IsOptional() @IsISO8601() date?: string;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) paidNow?: number;
-  @IsOptional() @IsString() method?: string;
+  @IsOptional() @IsIn(PAYMENT_METHODS.map((m) => m.value)) method?: string;
+  /** Required when method is CHEQUE. */
+  @IsOptional() @IsString() @MaxLength(30) chequeNo?: string;
+  @IsOptional() @IsString() @MaxLength(60) chequeBank?: string;
+  @IsOptional() @IsISO8601() chequeDate?: string;
   @IsOptional() @IsString() note?: string;
   @IsArray() @ArrayNotEmpty() @ValidateNested({ each: true }) @Type(() => PurchaseItemDto) items: PurchaseItemDto[];
 }
@@ -43,7 +49,11 @@ class PurchaseReturnDto {
 class PaymentDto {
   @IsUUID() supplierId: string;
   @IsNumber({ maxDecimalPlaces: 2 }) @IsPositive() amount: number;
-  @IsOptional() @IsString() method?: string;
+  @IsOptional() @IsIn(PAYMENT_METHODS.map((m) => m.value)) method?: string;
+  /** Required when method is CHEQUE. */
+  @IsOptional() @IsString() @MaxLength(30) chequeNo?: string;
+  @IsOptional() @IsString() @MaxLength(60) chequeBank?: string;
+  @IsOptional() @IsISO8601() chequeDate?: string;
   @IsOptional() @IsISO8601() date?: string;
   @IsOptional() @IsString() note?: string;
 }
@@ -112,7 +122,7 @@ class PurchasingController {
       await tx.supplierLedger.create({
         data: { supplierId: dto.supplierId, date, amount: total, refType: 'PURCHASE', refId: purchase.id, createdById: user.id, note: purchaseNo },
       });
-      if (paid.gt(0)) await this.recordPayment(tx, { supplierId: dto.supplierId, amount: paid, method: dto.method, date, note: `With ${purchaseNo}`, userId: user.id });
+      if (paid.gt(0)) await this.recordPayment(tx, { supplierId: dto.supplierId, amount: paid, method: dto.method, cheque: chequeOf(dto), date, note: `With ${purchaseNo}`, userId: user.id });
       return purchase;
     });
     await this.audit.log(user.id, 'CREATE', 'Purchase', result.id, undefined, result);
@@ -203,7 +213,7 @@ class PurchasingController {
     const payment = await this.prisma.$transaction(async (tx) => {
       const supplier = await tx.supplier.findUnique({ where: { id: dto.supplierId } });
       if (!supplier) throw new BadRequestException('Unknown supplier');
-      return this.recordPayment(tx, { supplierId: dto.supplierId, amount: new D(dto.amount), method: dto.method, date: dayOf(dto.date), note: dto.note, userId: user.id });
+      return this.recordPayment(tx, { supplierId: dto.supplierId, amount: new D(dto.amount), method: dto.method, cheque: chequeOf(dto), date: dayOf(dto.date), note: dto.note, userId: user.id });
     });
     await this.audit.log(user.id, 'CREATE', 'SupplierPayment', payment.id, undefined, payment);
     return payment;
@@ -248,13 +258,16 @@ class PurchasingController {
     return out;
   }
 
-  private async recordPayment(tx: Tx, p: { supplierId: string; amount: Prisma.Decimal; method?: string; date: Date; note?: string; userId: string }) {
+  private async recordPayment(tx: Tx, p: { supplierId: string; amount: Prisma.Decimal; method?: string; cheque: ReturnType<typeof chequeOf>; date: Date; note?: string; userId: string }) {
     const paymentNo = await this.stock.nextNo(tx, 'SUPPLIER_PAYMENT', 'SP');
     const payment = await tx.supplierPayment.create({
-      data: { paymentNo, supplierId: p.supplierId, amount: p.amount, method: p.method ?? 'CASH', date: p.date, note: p.note, createdById: p.userId },
+      data: {
+        paymentNo, supplierId: p.supplierId, amount: p.amount, method: p.method ?? 'CASH', date: p.date, note: p.note, createdById: p.userId,
+        ...(p.cheque ? { chequeNo: p.cheque.no, chequeBank: p.cheque.bank, chequeDate: p.cheque.date } : {}),
+      },
     });
     await tx.supplierLedger.create({
-      data: { supplierId: p.supplierId, date: p.date, amount: p.amount.neg(), refType: 'PAYMENT', refId: payment.id, createdById: p.userId, note: paymentNo },
+      data: { supplierId: p.supplierId, date: p.date, amount: p.amount.neg(), refType: 'PAYMENT', refId: payment.id, createdById: p.userId, note: p.cheque ? `${paymentNo} · cheque ${p.cheque.no}` : paymentNo },
     });
     return payment;
   }

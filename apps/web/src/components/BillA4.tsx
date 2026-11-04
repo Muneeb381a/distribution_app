@@ -1,7 +1,7 @@
 'use client';
 
 import { urdu } from '@/lib/fonts';
-import type { BillData, ReceiptData } from '@/lib/saleImage';
+import { chequeText, type BillData, type ReceiptData } from '@/lib/saleImage';
 import { useSettings } from '@/lib/settings';
 import { contactLine, money, unitLabel } from '@dist/shared';
 
@@ -109,6 +109,7 @@ export function ReceiptA4({ r }: { r: ReceiptData }) {
           <Row en="New balance" ur="کل بقایا" value={money(r.newBalance)} bold />
         </tbody>
       </table>
+      {r.chequeNo && <p>{chequeText(r)} <span className="muted">— subject to the cheque clearing</span></p>}
       {r.recordedBy && <p className="muted">Received by {r.recordedBy}</p>}
       <Foot />
     </div>

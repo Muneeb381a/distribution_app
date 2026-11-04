@@ -10,6 +10,15 @@ export const PAYMENT_METHODS = [
   { value: 'BANK', label: 'Bank' },
   { value: 'EASYPAISA', label: 'Easypaisa' },
   { value: 'JAZZCASH', label: 'JazzCash' },
+  { value: 'CHEQUE', label: 'Cheque' },
+] as const;
+/** Methods that can be taken with a bill. Cheques go through the khata, where they can be cleared or bounced. */
+export const BILL_PAYMENT_METHODS = PAYMENT_METHODS.filter((m) => m.value !== 'CHEQUE');
+/** Where a customer's cheque stands. */
+export const CHEQUE_STATUSES = [
+  { value: 'PENDING', label: 'Pending', tone: 'amber' },
+  { value: 'CLEARED', label: 'Cleared', tone: 'green' },
+  { value: 'BOUNCED', label: 'Bounced', tone: 'red' },
 ] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number]['value'];
 export const methodLabel = (m: string | null | undefined) => PAYMENT_METHODS.find((x) => x.value === m)?.label ?? (m ? m.charAt(0) + m.slice(1).toLowerCase() : '');
@@ -61,7 +70,7 @@ export const ATTENDANCE_STATUSES = [
 ] as const;
 
 /** Customer khata entry types. */
-export const CUSTOMER_LEDGER_LABEL: Record<string, string> = { SALE: 'Bill', PAYMENT: 'Payment', SALE_CANCEL: 'Bill cancelled', PAYMENT_CANCEL: 'Payment cancelled' };
+export const CUSTOMER_LEDGER_LABEL: Record<string, string> = { SALE: 'Bill', PAYMENT: 'Payment', SALE_CANCEL: 'Bill cancelled', PAYMENT_CANCEL: 'Payment cancelled', CHEQUE_BOUNCED: 'Cheque bounced' };
 /** Supplier ledger entry types. */
 export const SUPPLIER_LEDGER_LABEL: Record<string, string> = { PURCHASE: 'Purchase', PAYMENT: 'Payment', RETURN: 'Return', CANCEL: 'Cancelled purchase' };
 

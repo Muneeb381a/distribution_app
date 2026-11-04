@@ -33,7 +33,14 @@ export interface ReceiptData {
   previousBalance: string;
   newBalance: string;
   recordedBy: string | null;
+  chequeNo?: string | null;
+  chequeBank?: string | null;
+  chequeDate?: string | null;
 }
+
+/** "Cheque 000123 · HBL · 15/12/2026" for receipts paid by cheque. */
+export const chequeText = (r: Pick<ReceiptData, 'chequeNo' | 'chequeBank' | 'chequeDate'>) =>
+  [`Cheque ${r.chequeNo}`, r.chequeBank, r.chequeDate && new Date(r.chequeDate).toLocaleDateString('en-GB', { timeZone: 'UTC' })].filter(Boolean).join(' · ');
 
 /**
  * Printer dots across the roll at 203 dpi: 80 mm rolls print 72 mm (576 dots), 58 mm rolls 48 mm (384).
@@ -219,6 +226,12 @@ export async function renderReceiptImage(r: ReceiptData, urduFamily: string, s: 
   p.rule();
   row(p, 'Previous balance', 'پچھلا بقایا', money(r.previousBalance));
   row(p, `Received (${r.method.toLowerCase()})`, 'وصول', `-${money(r.amount)}`, true);
+  if (r.chequeNo) {
+    p.latin(chequeText(r), 19, PAD, 'left');
+    p.gap(26);
+    p.latin('Subject to the cheque clearing', 17, PAD, 'left');
+    p.gap(26);
+  }
   p.rule();
   row(p, 'New balance', 'کل بقایا', money(r.newBalance), true);
   if (r.recordedBy) {

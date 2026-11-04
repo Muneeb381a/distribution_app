@@ -370,6 +370,9 @@ model SupplierPayment {
   note        String?
   createdById String
   createdAt   DateTime @default(now())
+  chequeNo    String?
+  chequeBank  String?
+  chequeDate  DateTime? @db.Date
   supplier    Supplier @relation(fields: [supplierId], references: [id])
 }
 
@@ -432,6 +435,7 @@ enum CustomerLedgerRef {
   PAYMENT
   SALE_CANCEL
   PAYMENT_CANCEL
+  CHEQUE_BOUNCED
 }
 
 /// List price used when the customer has no fixed rate.
@@ -544,11 +548,20 @@ model Payment {
   status          DocStatus @default(ACTIVE)
   createdById     String
   createdAt       DateTime  @default(now())
+  /// Cheque details when method = CHEQUE. The khata is credited on receipt; a bounce puts it back.
+  chequeNo        String?
+  chequeBank      String?
+  /// Date written on the cheque (often post-dated): when it can be deposited.
+  chequeDate      DateTime? @db.Date
+  /// PENDING until deposited and cleared, then CLEARED or BOUNCED.
+  chequeStatus    String?
+  chequeSettledAt DateTime?
   customer        Customer  @relation(fields: [customerId], references: [id])
   sale            Sale?     @relation(fields: [saleId], references: [id])
 
   @@index([customerId, date])
   @@index([createdById, date])
+  @@index([chequeStatus, chequeDate])
 }
 
 /// Returnable empties (counted in bottles). Cancelling a bill adds an offsetting row.

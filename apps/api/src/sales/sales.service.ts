@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsEnum, IsInt, IsISO8601, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsISO8601, IsNumber, IsOptional, IsPositive, IsString, IsUUID, MaxLength, Min, ValidateNested } from 'class-validator';
 import { BusinessLineCode, Prisma, ReturnReason, SaleType, UnitName } from '@prisma/client';
 import { PrismaService } from '../prisma.service.js';
 import { AuditService } from '../audit/audit.module.js';
@@ -9,7 +9,7 @@ import type { AuthUser } from '../common/decorators.js';
 import { StockService, type Tx } from '../stock/stock.service.js';
 import { customerBalance } from '../common/balances.js';
 import {
-  DOC_PREFIX, RuleError, billPrefix, checkHasLines, checkOneLine, checkPayment, checkSaleHead, chooseRate, creditBlock, defaultPaid,
+  BILL_PAYMENT_METHODS, DOC_PREFIX, PAYMENT_METHODS, RuleError, billPrefix, checkHasLines, checkOneLine, checkPayment, checkSaleHead, chooseRate, creditBlock, defaultPaid,
   emptiesGiven, saleLocationTypes, shortageText,
 } from '@dist/shared';
 
@@ -43,13 +43,26 @@ export class EmptiesCollectedDto {
   @IsInt() @Min(1) qty: number;
 }
 
+/** Cheque details from a payment, checked; null when the payment is not by cheque. */
+export function chequeOf(dto: { method?: string; date?: string; chequeNo?: string; chequeBank?: string; chequeDate?: string }) {
+  if (dto.method !== 'CHEQUE') return null;
+  const no = dto.chequeNo?.trim();
+  if (!no) throw new BadRequestException('Enter the cheque number');
+  return { no, bank: dto.chequeBank?.trim() || null, date: dayOf(dto.chequeDate ?? dto.date) };
+}
+
 export class PaymentDto {
   @IsOptional() @IsUUID() clientId?: string;
   @IsUUID() customerId: string;
   @IsNumber({ maxDecimalPlaces: 2 }) @IsPositive() amount: number;
-  @IsOptional() @IsString() method?: string;
+  @IsOptional() @IsIn(PAYMENT_METHODS.map((m) => m.value)) method?: string;
   @IsOptional() @IsISO8601() date?: string;
   @IsOptional() @IsString() note?: string;
+  /** Required when method is CHEQUE. */
+  @IsOptional() @IsString() @MaxLength(30) chequeNo?: string;
+  @IsOptional() @IsString() @MaxLength(60) chequeBank?: string;
+  /** Date on the cheque; defaults to the payment date. */
+  @IsOptional() @IsISO8601() chequeDate?: string;
 }
 
 export class SaleDto {
@@ -63,7 +76,7 @@ export class SaleDto {
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => SaleLineDto) items?: SaleLineDto[];
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => SaleReturnLineDto) returns?: SaleReturnLineDto[];
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) paidNow?: number;
-  @IsOptional() @IsString() method?: string;
+  @IsOptional() @IsIn(BILL_PAYMENT_METHODS.map((m) => m.value), { message: 'Take cheques as a payment on the khata, not with the bill' }) method?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => EmptiesCollectedDto) emptiesCollected?: EmptiesCollectedDto[];
   /** Save even though the credit limit would be crossed. Needs CREDIT_OVERRIDE. */
   @IsOptional() @IsBoolean() overrideCredit?: boolean;
@@ -427,6 +440,7 @@ export class SalesService {
    * already printed on an offline receipt; otherwise the server numbers it.
    */
   async recordPayment(dto: PaymentDto, user: AuthUser, offline?: { receiptNo: string }) {
+    const cheque = chequeOf(dto);
     if (dto.clientId) {
       const existing = await this.prisma.payment.findUnique({ where: { clientId: dto.clientId }, select: { id: true } });
       if (existing) return existing.id;
@@ -444,6 +458,7 @@ export class SalesService {
           data: {
             receiptNo, clientId: dto.clientId, customerId: dto.customerId, amount, method: dto.method ?? 'CASH', date,
             previousBalance: previous, newBalance: previous.minus(amount), note: dto.note, createdById: user.id,
+            ...(cheque ? { chequeNo: cheque.no, chequeBank: cheque.bank, chequeDate: cheque.date, chequeStatus: 'PENDING' } : {}),
           },
         });
         await tx.customerLedger.create({

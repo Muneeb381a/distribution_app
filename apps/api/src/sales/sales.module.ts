@@ -102,6 +102,55 @@ class SalesController {
       });
   }
 
+  // -------------------------------------------------------------- cheques
+
+  /** Customer cheques: pending ones by the date on the cheque (soonest first), or cleared / bounced. */
+  @Get('cheques') @RequirePermissions('PAYMENT_RECORD')
+  cheques(@Query('status') status?: string) {
+    const st = status === 'CLEARED' || status === 'BOUNCED' ? status : 'PENDING';
+    return this.prisma.payment.findMany({
+      where: { method: 'CHEQUE', chequeStatus: st },
+      orderBy: st === 'PENDING' ? [{ chequeDate: 'asc' }, { createdAt: 'asc' }] : [{ chequeSettledAt: 'desc' }],
+      take: 300,
+      include: { customer: { select: { id: true, name: true, shopName: true, phone: true } } },
+    });
+  }
+
+  /** The bank paid the cheque. Nothing changes in the khata: it was credited when received. */
+  @Post('cheques/:id/clear') @RequirePermissions('PAYMENT_RECORD')
+  async clearCheque(@Param('id') id: string, @CurrentUser() u: AuthUser) {
+    const p = await this.pendingCheque(id);
+    const row = await this.prisma.payment.update({ where: { id }, data: { chequeStatus: 'CLEARED', chequeSettledAt: new Date() } });
+    await this.audit.log(u.id, 'CHEQUE_CLEARED', 'Payment', id, { chequeStatus: p.chequeStatus }, { chequeStatus: 'CLEARED' });
+    return row;
+  }
+
+  /** The cheque bounced: the receipt is cancelled and the amount goes back on the customer's khata. */
+  @Post('cheques/:id/bounce') @RequirePermissions('SALE_CANCEL')
+  async bounceCheque(@Param('id') id: string, @Body() body: { note?: string }, @CurrentUser() u: AuthUser) {
+    await this.prisma.$transaction(async (tx) => {
+      const p = await this.pendingCheque(id, tx);
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'customer:' + p.customerId}))`;
+      await tx.payment.update({ where: { id }, data: { status: 'CANCELLED', chequeStatus: 'BOUNCED', chequeSettledAt: new Date() } });
+      await tx.customerLedger.create({
+        data: {
+          customerId: p.customerId, date: dayOf(), amount: p.amount, refType: 'CHEQUE_BOUNCED', refId: p.id,
+          note: `Cheque ${p.chequeNo}${p.chequeBank ? ` (${p.chequeBank})` : ''} bounced · ${p.receiptNo}${typeof body?.note === 'string' && body.note.trim() ? ` · ${body.note.trim().slice(0, 120)}` : ''}`,
+          createdById: u.id,
+        },
+      });
+    });
+    await this.audit.log(u.id, 'CHEQUE_BOUNCED', 'Payment', id);
+    return this.receipt(id);
+  }
+
+  private async pendingCheque(id: string, db: Pick<PrismaService, 'payment'> = this.prisma) {
+    const p = await db.payment.findUnique({ where: { id } });
+    if (!p || p.method !== 'CHEQUE') throw new NotFoundException('Not a cheque payment');
+    if (p.chequeStatus !== 'PENDING' || p.status !== 'ACTIVE') throw new ConflictException(`This cheque is already ${(p.chequeStatus ?? 'settled').toLowerCase()}`);
+    return p;
+  }
+
   /** Cancels a standalone receipt. A receipt that came with a bill is cancelled with the bill. */
   @Post('payments/:id/cancel') @RequirePermissions('SALE_CANCEL')
   async cancelPayment(@Param('id') id: string, @CurrentUser() u: AuthUser) {

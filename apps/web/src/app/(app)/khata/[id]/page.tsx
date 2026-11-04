@@ -8,6 +8,7 @@ import { Icon } from '@/components/Icon';
 import { rowLink } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
 import { usePageTitle } from '@/lib/pageTitle';
+import ChequeFields, { chequeJson, EMPTY_CHEQUE } from '@/components/ChequeFields';
 import { CUSTOMER_LEDGER_LABEL, money, PAYMENT_METHODS } from '@dist/shared';
 
 interface Ledger {
@@ -30,6 +31,7 @@ export default function CustomerKhataPage() {
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [info, setInfo] = useState<CustomerInfo | null>(null);
   const [pay, setPay] = useState({ amount: '', method: 'CASH', note: '' });
+  const [cheque, setCheque] = useState(EMPTY_CHEQUE);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [showAll, setShowAll] = useState(false);
@@ -49,7 +51,7 @@ export default function CustomerKhataPage() {
     try {
       const r = await api<{ id: string; receiptNo?: string }>('/payments', {
         method: 'POST',
-        json: { clientId, customerId: id, amount: Number(pay.amount), method: pay.method, note: pay.note || undefined },
+        json: { clientId, customerId: id, amount: Number(pay.amount), method: pay.method, note: pay.note || undefined, ...chequeJson(pay.method, cheque) },
       });
       setClientId(crypto.randomUUID());
       toast.success(`Rs ${money(pay.amount)} received${r.receiptNo ? ` · ${r.receiptNo}` : ''}`);
@@ -60,6 +62,7 @@ export default function CustomerKhataPage() {
     }
   }
 
+  // Bills open the bill; payments, cancelled payments and bounced cheques open the receipt.
   const href = (e: Ledger['entries'][number]) => (e.refType === 'SALE' || e.refType === 'SALE_CANCEL' ? `/sales/${e.refId}` : `/receipts/${e.refId}`);
   const balance = Number(ledger?.balance ?? 0);
   const limit = ledger?.customer.creditLimit ? Number(ledger.customer.creditLimit) : null;
@@ -177,6 +180,7 @@ export default function CustomerKhataPage() {
                   ))}
                 </div>
               </div>
+              {pay.method === 'CHEQUE' && <ChequeFields value={cheque} onChange={setCheque} />}
               <label>Note<input value={pay.note} placeholder="Optional" onChange={(e) => setPay({ ...pay, note: e.target.value })} /></label>
               {after !== null && (
                 <dl className="totals">

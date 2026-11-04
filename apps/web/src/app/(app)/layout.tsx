@@ -21,6 +21,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
     items: [
       { href: '/sales', label: 'Sales', icon: 'sales', permission: 'SALE_CREATE' },
       { href: '/khata', label: 'Khata', icon: 'khata', permission: 'PAYMENT_RECORD' },
+      { href: '/cheques', label: 'Cheques', icon: 'wallet', permission: 'PAYMENT_RECORD' },
       { href: '/outbox', label: 'Offline outbox', icon: 'cloud', permission: 'SALE_CREATE' },
       { href: '/customers', label: 'Customers', icon: 'customers', permission: null },
     ],

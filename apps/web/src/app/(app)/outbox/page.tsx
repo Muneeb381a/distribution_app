@@ -13,9 +13,10 @@ import {
   type OutboxOp, type Snapshot,
 } from '@/lib/offline';
 import { usePageTitle } from '@/lib/pageTitle';
-import { formatDate, money, PAYMENT_METHODS, timeAgo } from '@dist/shared';
+import { formatDate, money, BILL_PAYMENT_METHODS, timeAgo } from '@dist/shared';
 
-const METHODS = PAYMENT_METHODS.map((m) => [m.value, m.label] as const);
+// Cheques are taken on the khata page, where they can later be cleared or bounced.
+const METHODS = BILL_PAYMENT_METHODS.map((m) => [m.value, m.label] as const);
 
 export default function OutboxPage() {
   usePageTitle('Offline outbox');

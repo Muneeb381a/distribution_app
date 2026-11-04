@@ -11,7 +11,7 @@ import { api, can, useUser } from '@/lib/api';
 import { customerOptions, productOptions, useLookups, type ProductOpt } from '@/lib/lookups';
 import { getSnapshot, isNetworkError, previewOffline, saveSaleOffline, useSyncState, type OutboxOp, type Preview, type Snapshot } from '@/lib/offline';
 import type { PrintMode } from '@/components/PrintPanel';
-import { money, PAYMENT_METHODS, RETURN_REASONS, unitLabel } from '@dist/shared';
+import { money, BILL_PAYMENT_METHODS, RETURN_REASONS, unitLabel } from '@dist/shared';
 
 interface Customer { id: string; name: string; shopName: string | null; area: string | null; phone: string | null; type: 'CASH' | 'CREDIT'; creditLimit: string | null }
 interface LastBill { id: string; billNo: string; date: string; net: string; rates: Record<string, string> }
@@ -21,7 +21,8 @@ interface Collected { productId: string; qty: string }
 type Priced = { rate: string; amount: string } | undefined;
 
 const blank = (): Line => ({ productId: '', unitName: '', qty: '', rate: '', reason: 'DAMAGED' });
-const METHODS = PAYMENT_METHODS.map((m) => [m.value, m.label] as const);
+// Cheques are taken on the khata page, where they can later be cleared or bounced.
+const METHODS = BILL_PAYMENT_METHODS.map((m) => [m.value, m.label] as const);
 
 export default function NewSalePage() {
   const search = useSearchParams();

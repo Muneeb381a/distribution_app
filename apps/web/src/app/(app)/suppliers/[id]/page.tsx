@@ -9,6 +9,7 @@ import { Icon } from '@/components/Icon';
 import { api, can, useUser } from '@/lib/api';
 import { productOptions, useLookups } from '@/lib/lookups';
 import { usePageTitle } from '@/lib/pageTitle';
+import ChequeFields, { chequeJson, EMPTY_CHEQUE } from '@/components/ChequeFields';
 import { money, PAYMENT_METHODS, SUPPLIER_LEDGER_LABEL } from '@dist/shared';
 
 interface Ledger {
@@ -30,6 +31,7 @@ export default function SupplierLedgerPage() {
   const { products, locations } = useLookups();
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [pay, setPay] = useState({ amount: '', method: 'CASH', note: '' });
+  const [cheque, setCheque] = useState(EMPTY_CHEQUE);
   const [ret, setRet] = useState({ locationId: '', productId: '', unitName: '', qty: '', unitPrice: '', fromStatus: 'DAMAGED', note: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<'' | 'pay' | 'ret' | 'emp'>('');
@@ -71,8 +73,9 @@ export default function SupplierLedgerPage() {
 
   async function submitPay(e: FormEvent) {
     e.preventDefault();
-    if (await post('pay', '/supplier-payments', { supplierId: id, amount: Number(pay.amount), method: pay.method, note: pay.note || undefined }, `Paid Rs ${money(pay.amount)} to ${ledger?.supplier.name}`)) {
+    if (await post('pay', '/supplier-payments', { supplierId: id, amount: Number(pay.amount), method: pay.method, note: pay.note || undefined, ...chequeJson(pay.method, cheque) }, `Paid Rs ${money(pay.amount)} to ${ledger?.supplier.name}`)) {
       setPay({ ...pay, amount: '', note: '' });
+      setCheque(EMPTY_CHEQUE);
     }
   }
 
@@ -225,6 +228,7 @@ export default function SupplierLedgerPage() {
                   {METHODS.map(([v, l]) => <button type="button" role="radio" aria-checked={pay.method === v} key={v} className={`chip${pay.method === v ? ' on' : ''}`} onClick={() => setPay({ ...pay, method: v })}>{l}</button>)}
                 </div>
               </div>
+              {pay.method === 'CHEQUE' && <ChequeFields id="sp-cheque" value={cheque} onChange={setCheque} />}
               <label>Note<input value={pay.note} placeholder="Optional" onChange={(e) => setPay({ ...pay, note: e.target.value })} /></label>
               <BusyButton type="submit" busy={busy === 'pay'}>Record payment</BusyButton>
             </form>
