@@ -5,8 +5,9 @@ import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Combobox from '@/components/Combobox';
 import DocPrintDialog from '@/components/DocPrintDialog';
-import { BusyButton, useToast } from '@/components/Feedback';
+import { BusyButton, useConfirm, useToast } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
+import { readBillDefaults, rememberBillDefaults } from '@/lib/billDefaults';
 import { api, can, useUser } from '@/lib/api';
 import { customerOptions, productOptions, useLookups, type ProductOpt } from '@/lib/lookups';
 import { getSnapshot, isNetworkError, previewOffline, saveSaleOffline, useSyncState, type OutboxOp, type Preview, type Snapshot } from '@/lib/offline';
@@ -14,7 +15,7 @@ import type { PrintMode } from '@/components/PrintPanel';
 import { money, BILL_PAYMENT_METHODS, RETURN_REASONS, unitLabel } from '@dist/shared';
 
 interface Customer { id: string; name: string; shopName: string | null; area: string | null; phone: string | null; type: 'CASH' | 'CREDIT'; creditLimit: string | null }
-interface LastBill { id: string; billNo: string; date: string; net: string; rates: Record<string, string> }
+interface LastBill { id: string; billNo: string; date: string; net: string; rates: Record<string, string>; items: { productId: string; unitName: string; qty: string }[] }
 interface Saved { id: string | null; billNo: string; net: string; offline?: OutboxOp }
 interface Line { productId: string; unitName: string; qty: string; rate: string; reason: string }
 interface Collected { productId: string; qty: string }
@@ -28,6 +29,7 @@ export default function NewSalePage() {
   const search = useSearchParams();
   const user = useUser();
   const toast = useToast();
+  const confirm = useConfirm();
   const sync = useSyncState();
   const offline = !sync.reachable;
   const [snap, setSnap] = useState<Snapshot | null>(null);
@@ -70,6 +72,21 @@ export default function NewSalePage() {
     getSnapshot().then(setSnap);
   }, [offline, sync.snapshotAt]);
 
+  // Start from where this user last billed (location and salesman), unless the link says otherwise.
+  const defaultsApplied = useRef(false);
+  useEffect(() => {
+    if (defaultsApplied.current || !user || !locations.length || search.get('location')) return;
+    defaultsApplied.current = true;
+    const d = readBillDefaults(user.id)[head.saleType as 'COUNTER' | 'DELIVERY'];
+    if (!d) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHead((h) => ({
+      ...h,
+      locationId: h.locationId || (d.locationId && locations.some((l) => l.id === d.locationId) ? d.locationId : ''),
+      salesmanId: h.salesmanId || (d.salesmanId && salesmen.some((x) => x.id === d.salesmanId) ? d.salesmanId : ''),
+    }));
+  }, [user, locations, salesmen, search, head.saleType]);
+
   // Last bill of the chosen customer, for the "last rate" hints.
   useEffect(() => {
     if (!head.customerId) return;
@@ -77,8 +94,11 @@ export default function NewSalePage() {
     api<{ id: string }[]>(`/sales?customerId=${head.customerId}&status=ACTIVE&limit=1`)
       .then(async ([b]) => {
         if (!b) return null;
-        const full = await api<{ id: string; billNo: string; date: string; net: string; items: { productId: string; unitName: string; rate: string }[] }>(`/sales/${b.id}`);
-        return { id: full.id, billNo: full.billNo, date: full.date, net: full.net, rates: Object.fromEntries(full.items.map((i) => [`${i.productId}|${i.unitName}`, i.rate])) };
+        const full = await api<{ id: string; billNo: string; date: string; net: string; items: { productId: string; unitName: string; qty: string; rate: string }[] }>(`/sales/${b.id}`);
+        return {
+          id: full.id, billNo: full.billNo, date: full.date, net: full.net, rates: Object.fromEntries(full.items.map((i) => [`${i.productId}|${i.unitName}`, i.rate])),
+          items: full.items.map((i) => ({ productId: i.productId, unitName: i.unitName, qty: String(Number(i.qty)) })),
+        };
       })
       .then((lb) => { if (!stale) setLastBill(lb); })
       .catch(() => { if (!stale) setLastBill(null); });
@@ -97,6 +117,14 @@ export default function NewSalePage() {
   const productOpts = useMemo(() => productOptions(products), [products]);
   const prod = (id: string) => products.find((p) => p.id === id);
   const customer = customers.find((c) => c.id === head.customerId);
+  // Items of the last bill that can still be sold (product active and on this screen's list).
+  const repeatable = (lastBill?.items ?? []).filter((i) => prod(i.productId));
+  async function repeatLast() {
+    const filled = items.filter((l) => l.productId);
+    if (filled.length && !(await confirm({ title: 'Replace the items on this bill?', body: <p>The {filled.length} item{filled.length === 1 ? '' : 's'} already added are replaced with the {repeatable.length} from {lastBill?.billNo}.</p>, confirmLabel: 'Replace', cancelLabel: 'Keep mine' }))) return;
+    setItems([...repeatable.map((i) => ({ ...blank(), productId: i.productId, unitName: i.unitName, qty: i.qty })), blank()]);
+    toast.info(`${repeatable.length} item${repeatable.length === 1 ? '' : 's'} from ${lastBill?.billNo} added — check quantities`);
+  }
   const delivery = head.saleType === 'DELIVERY';
   const places = locations.filter((l) => (delivery ? l.type === 'VEHICLE' : l.type !== 'VEHICLE'));
   const returnable = products.filter((p) => p.returnableEmpty);
@@ -153,6 +181,7 @@ export default function NewSalePage() {
       const op = await saveSaleOffline(s, { ...body, overrideCredit: override || undefined }, p, clientId, salesmen.find((x) => x.id === head.salesmanId)?.name ?? null);
       setClientId(crypto.randomUUID());
       setSaved({ id: null, billNo: op.number, net: p.net, offline: op });
+      rememberBillDefaults(user?.id, head.saleType, head.locationId, head.salesmanId);
       toast.info(`Bill ${op.number} saved on this PC — it syncs when the connection is back`);
     };
     try {
@@ -162,6 +191,7 @@ export default function NewSalePage() {
         const bill = await api<Saved>('/sales', { method: 'POST', json: { ...body, clientId, overrideCredit: override || undefined } });
         setClientId(crypto.randomUUID());
         setSaved({ id: bill.id, billNo: bill.billNo, net: bill.net ?? preview?.net ?? '0' });
+        rememberBillDefaults(user?.id, head.saleType, head.locationId, head.salesmanId);
         toast.success(`Bill ${bill.billNo ?? ''} saved`);
       }
     } catch (err) {
@@ -320,7 +350,10 @@ export default function NewSalePage() {
             <div className="step"><span className="step-no">1</span><h2>Sale details</h2></div>
             <div className="seg" role="tablist">
               {[['COUNTER', 'Counter sale'], ['DELIVERY', 'Delivery (vehicle)']].map(([v, l]) => (
-                <button type="button" key={v} className={head.saleType === v ? 'on' : ''} onClick={() => setHead({ ...head, saleType: v, locationId: '' })}>{l}</button>
+                <button type="button" key={v} className={head.saleType === v ? 'on' : ''} onClick={() => {
+                  const d = readBillDefaults(user?.id)[v as 'COUNTER' | 'DELIVERY'];
+                  setHead({ ...head, saleType: v, locationId: d?.locationId && locations.some((l) => l.id === d.locationId) ? d.locationId : '', salesmanId: head.salesmanId || d?.salesmanId || '' });
+                }}>{l}</button>
               ))}
             </div>
             <div className="form">
@@ -356,7 +389,14 @@ export default function NewSalePage() {
                 <span className={`badge ${customer.type === 'CREDIT' ? 'amber' : 'green'}`}>{customer.type === 'CREDIT' ? 'Udhaar customer' : 'Cash customer'}</span>
                 {preview && <span className="badge">Owes Rs {money(preview.previousBalance)}</span>}
                 {lastBill && (
-                  <span className="last-bill">Last bill <Link href={`/sales/${lastBill.id}`}>{lastBill.billNo}</Link> · {new Date(lastBill.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · Rs {money(lastBill.net)}</span>
+                  <span className="last-bill">
+                    Last bill <Link href={`/sales/${lastBill.id}`}>{lastBill.billNo}</Link> · {new Date(lastBill.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · Rs {money(lastBill.net)}
+                    {repeatable.length > 0 && (
+                      <button type="button" className="chip repeat-chip" onClick={repeatLast} title="Fill the items of the last bill; rates are today's">
+                        <Icon name="refresh" />Repeat ({repeatable.length} item{repeatable.length === 1 ? '' : 's'})
+                      </button>
+                    )}
+                  </span>
                 )}
               </div>
             )}
