@@ -137,6 +137,7 @@ model Product {
   saleItems           SaleItem[]
   saleReturnItems     SaleReturnItem[]
   emptiesLedger       EmptiesLedger[]
+  tripLines           VehicleTripLine[]
   supplierEmpties     SupplierEmptiesLedger[]
 
   @@index([categoryId])
@@ -163,6 +164,7 @@ model Location {
   transfersTo     StockTransfer[]  @relation("TransferTo")
   sales           Sale[]
   expenses        Expense[]
+  trips           VehicleTrip[]
 }
 
 model Employee {
@@ -181,6 +183,7 @@ model Employee {
   attendance        Attendance[]
   advances          SalaryAdvance[]
   payrollRuns       PayrollRun[]
+  trips             VehicleTrip[]
 }
 
 model Customer {
@@ -718,4 +721,52 @@ model Setting {
   value       Json
   updatedAt   DateTime @updatedAt
   updatedById String?
+}
+
+/**
+ * One day's round of a vehicle: loaded from the godown in the morning, sells on the route, and is
+ * settled in the evening (stock counted, cash handed over, the rest unloaded).
+ */
+model VehicleTrip {
+  id            String            @id @default(uuid())
+  tripNo        String            @unique
+  vehicleId     String
+  salesmanId    String?
+  date          DateTime          @db.Date
+  /// OPEN while on the road; SETTLED once counted and cash is in.
+  status        String            @default("OPEN")
+  openedAt      DateTime          @default(now())
+  openedById    String
+  settledAt     DateTime?
+  settledById   String?
+  /// Cash taken with bills on this trip (from the bills), and what the salesman handed over.
+  cashExpected  Decimal?          @db.Decimal(14, 2)
+  cashReceived  Decimal?          @db.Decimal(14, 2)
+  note          String?
+  /// Advance created for a cash shortage, recovered from the salesman's salary.
+  advanceId     String?
+  vehicle       Location          @relation(fields: [vehicleId], references: [id])
+  salesman      Employee?         @relation(fields: [salesmanId], references: [id])
+  lines         VehicleTripLine[]
+
+  @@index([vehicleId, status])
+  @@index([date])
+}
+
+/// Per product at settlement: what the stock should be on the vehicle and what was counted.
+model VehicleTripLine {
+  id        String      @id @default(uuid())
+  tripId    String
+  productId String
+  loaded    Decimal     @db.Decimal(14, 3)
+  sold      Decimal     @db.Decimal(14, 3)
+  expected  Decimal     @db.Decimal(14, 3)
+  counted   Decimal     @db.Decimal(14, 3)
+  /// counted - expected: negative is a shortage, positive is extra.
+  diff      Decimal     @db.Decimal(14, 3)
+  unloaded  Decimal     @db.Decimal(14, 3)
+  trip      VehicleTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  product   Product     @relation(fields: [productId], references: [id])
+
+  @@unique([tripId, productId])
 }

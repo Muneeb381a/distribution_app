@@ -1160,6 +1160,23 @@ tr.row-link.open td { background: var(--surface-hover); }
 .history-table tr.damaged-row td { background: color-mix(in srgb, var(--danger-soft) 45%, transparent); }
 @media (max-width: 900px) { .history-filters { grid-template-columns: 1fr; } }
 
+/* ---------- vehicle trips ---------- */
+.trip-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; margin-bottom: 22px; }
+.trip-card { display: flex; flex-direction: column; gap: 4px; margin: 0; color: var(--text); text-decoration: none; transition: border-color 0.12s, box-shadow 0.12s; }
+.trip-card:hover { text-decoration: none; border-color: var(--accent); box-shadow: var(--shadow-md, var(--shadow-sm)); }
+.trip-card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 12.5px; }
+.trip-vehicle { font-size: 18px; }
+.trip-go { margin-top: 10px; display: inline-flex; align-items: center; gap: 4px; color: var(--accent-text); font-weight: 650; font-size: 13.5px; }
+.trip-go svg { width: 15px; height: 15px; }
+.trip-table td { vertical-align: middle; }
+.trip-table tr.row-short td { background: color-mix(in srgb, var(--danger-soft) 55%, transparent); }
+.trip-table tr.row-extra td { background: color-mix(in srgb, var(--success-soft) 55%, transparent); }
+.count-input { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; min-width: 190px; }
+.count-input.one { grid-template-columns: 1fr; min-width: 120px; }
+.count-input input { min-width: 0; text-align: right; }
+.trip-cash { margin: 18px 0 6px; }
+.trip-cash-sum { max-width: 360px; margin-left: auto; }
+
 @media print {
   :root, :root[data-theme='dark'] { color-scheme: light; --bg: #fff; --surface: #fff; --surface-2: #f7f8f6; --border: #e1e4de; --border-strong: #cfd4cc; --text: #000; --text-2: #222; --muted: #555; --danger: #c0341d; --success: #157a3c; }
   .sidebar, .topbar, .scrim, .no-print, .toasts, .modal-scrim, .skip-link, .offline-banner { display: none !important; }

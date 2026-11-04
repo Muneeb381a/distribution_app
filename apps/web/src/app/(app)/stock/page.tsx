@@ -5,11 +5,12 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import Combobox from '@/components/Combobox';
 import { Choice, Field, FormActions, FormCard, FormSection } from '@/components/Form';
 import { Icon } from '@/components/Icon';
+import MoveLines, { UnitSelect } from '@/components/MoveLines';
 import { BusyButton, Empty, SkeletonRows, useToast } from '@/components/Feedback';
 import { LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
-import { formatQty, productLabel, productOptions, useLookups, type ProductOpt } from '@/lib/lookups';
-import { money, unitLabel } from '@dist/shared';
+import { formatQty, productLabel, productOptions, useLookups } from '@/lib/lookups';
+import { money } from '@dist/shared';
 
 interface Row {
   productId: string; productName: string; size: string | null; line: string; baseUnit: string;
@@ -25,15 +26,6 @@ const KINDS: [string, string, string][] = [
   ['ADD', 'Add stock (correction)', 'Count found more than the app shows'],
   ['REMOVE', 'Remove stock (correction)', 'Count found less than the app shows'],
 ];
-const MOVE_COLS = 'minmax(180px, 2.4fr) 110px 90px 110px 36px';
-
-function UnitSelect({ product, value, onChange }: { product?: ProductOpt; value: string; onChange: (v: string) => void }) {
-  return (
-    <select aria-label="Unit" value={value} disabled={!product} onChange={(e) => onChange(e.target.value)} required>
-      {product?.units.map((u) => <option key={u.unitName} value={u.unitName}>{unitLabel(u.unitName)}{Number(u.factorToBase) !== 1 ? ` (${Number(u.factorToBase)})` : ''}</option>)}
-    </select>
-  );
-}
 
 export default function StockPage() {
   const user = useUser();
@@ -61,8 +53,6 @@ export default function StockPage() {
     k === 'product' ? productLabel({ name: r.productName, size: r.size }) : k === 'location' ? r.locationName : k === 'ok' ? r.ok : k === 'damaged' ? r.damaged : r.value);
   const { page, loadMore } = usePaged(sorted, 50);
   const prod = (id: string) => products.find((p) => p.id === id);
-  const setLine = (i: number, patch: Partial<Line>) =>
-    setTransfer({ ...transfer, lines: transfer.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) });
   const pickProduct = (id: string) => ({ productId: id, unitName: prod(id)?.units[0]?.unitName ?? '' });
 
   // Unfiltered stock, so the forms can say what is available wherever the list is filtered.
@@ -189,27 +179,9 @@ export default function StockPage() {
                 {locations.map((l) => <option key={l.id} value={l.id} disabled={l.id === transfer.from}>{l.name} · {l.type.toLowerCase()}</option>)}
               </select>
             </Field>
-            <div className="items" style={{ gridColumn: '1 / -1' }}>
-              <div className="items-head" style={{ gridTemplateColumns: MOVE_COLS }}><span>Product</span><span>Unit</span><span className="r">Qty</span><span className="r">Available</span><span /></div>
-              {transfer.lines.map((l, i) => {
-                const have = onHand(l.productId, transfer.from);
-                return (
-                  <div className="items-row" key={i} style={{ gridTemplateColumns: MOVE_COLS }}>
-                    <div className="item-product">
-                      <Combobox id={`transfer-product-${i}`} ariaLabel="Product" required compact options={productOpts} value={l.productId} recentKey="product" placeholder="Type product name…" onChange={(v) => setLine(i, pickProduct(v))} />
-                    </div>
-                    <UnitSelect product={prod(l.productId)} value={l.unitName} onChange={(v) => setLine(i, { unitName: v })} />
-                    <input aria-label="Quantity" className="r" type="number" step="any" min="0" required inputMode="decimal" placeholder="0" value={l.qty} onChange={(e) => setLine(i, { qty: e.target.value })} />
-                    <span className="r muted">{have}</span>
-                    <button type="button" className="icon-btn" aria-label="Remove item" disabled={transfer.lines.length === 1} onClick={() => setTransfer({ ...transfer, lines: transfer.lines.filter((_, j) => j !== i) })}><Icon name="x" /></button>
-                  </div>
-                );
-              })}
-              <div className="items-foot">
-                <button type="button" className="add" onClick={() => setTransfer({ ...transfer, lines: [...transfer.lines, { ...emptyLine }] })}><Icon name="plus" />Add item</button>
-                <span className="muted">{transfer.from ? `Available is at ${locations.find((x) => x.id === transfer.from)?.name}` : 'Choose “From” to see what is available'}</span>
-              </div>
-            </div>
+            <MoveLines id="transfer" products={products} lines={transfer.lines} onChange={(lines) => setTransfer({ ...transfer, lines })}
+              available={(pid) => onHand(pid, transfer.from)}
+              note={transfer.from ? `Available is at ${locations.find((x) => x.id === transfer.from)?.name}` : 'Choose “From” to see what is available'} />
           </FormSection>
         </FormCard>
       )}

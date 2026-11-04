@@ -42,7 +42,11 @@ export default function NewSalePage() {
   const customers: Customer[] = fromSnap ? snap.customers : onlineCustomers;
   const salesmen = fromSnap ? snap.salesmen : onlineSalesmen;
   const lookupError = offline ? '' : lookups.error;
-  const [head, setHead] = useState({ saleType: 'COUNTER', customerId: search.get('customer') ?? '', locationId: '', salesmanId: '', paidNow: '', method: 'CASH', note: '' });
+  // ?location=<vehicle>&salesman=<id> (from a vehicle trip) starts a delivery bill from that vehicle.
+  const [head, setHead] = useState({
+    saleType: search.get('location') ? 'DELIVERY' : 'COUNTER', customerId: search.get('customer') ?? '', locationId: search.get('location') ?? '',
+    salesmanId: search.get('salesman') ?? '', paidNow: '', method: 'CASH', note: '',
+  });
   const [lastBill, setLastBill] = useState<LastBill | null>(null);
   const [saved, setSaved] = useState<Saved | null>(null);
   const [focusTarget, setFocusTarget] = useState<string | null>(null);

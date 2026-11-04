@@ -20,6 +20,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
     title: 'Selling',
     items: [
       { href: '/sales', label: 'Sales', icon: 'sales', permission: 'SALE_CREATE' },
+      { href: '/trips', label: 'Vehicle trips', icon: 'suppliers', permission: 'STOCK_TRANSFER' },
       { href: '/khata', label: 'Khata', icon: 'khata', permission: 'PAYMENT_RECORD' },
       { href: '/cheques', label: 'Cheques', icon: 'wallet', permission: 'PAYMENT_RECORD' },
       { href: '/outbox', label: 'Offline outbox', icon: 'cloud', permission: 'SALE_CREATE' },
@@ -70,8 +71,9 @@ const DETAIL: [RegExp, string][] = [
   [/^\/employees\/[^/]+$/, 'Employee ledger'],
   [/^\/products\/catalog$/, 'Add from catalog'],
   [/^\/stock\/history$/, 'Stock history'],
+  [/^\/trips\/[^/]+$/, 'Trip'],
 ];
-const RECEIPT_PARENT = NAV[1].items[1];
+const RECEIPT_PARENT = NAV[1].items.find((i) => i.href === '/khata')!;
 // /outbox is listed in the menu, so it needs no detail entry.
 
 export interface Crumb { label: string; href?: string }
