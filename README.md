@@ -26,6 +26,12 @@ cd apps/web && pnpm dev              # web on :3100
 
 Ports 3000/3001/5433 were already taken on the development machine, hence 3010, 3100 and 5440.
 
+## Backups
+
+`pnpm backup` saves the whole database to `backups/` (checked, with 14 daily + 12 monthly kept, and an
+optional copy to a USB / Google Drive folder); `pnpm restore <file>` restores into a separate database
+to check, or `--replace-live-data` to replace. Schedule it daily — see [docs/BACKUP.md](docs/BACKUP.md).
+
 ## Offline billing
 
 The shop PC keeps billing when the server can't be reached (plan §3.10, §9).
