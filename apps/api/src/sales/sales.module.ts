@@ -1,24 +1,14 @@
 import { BadRequestException, Body, ConflictException, Controller, Get, Module, NotFoundException, Param, Post, Put, Query } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import { IsArray, IsEnum, IsISO8601, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Min, ValidateNested } from 'class-validator';
-import { BusinessLineCode, Prisma, UnitName } from '@prisma/client';
+import { IsArray, IsEnum, IsNumber, Min, ValidateNested } from 'class-validator';
+import { BusinessLineCode, UnitName } from '@prisma/client';
 import { PrismaService } from '../prisma.service.js';
 import { AuditService } from '../audit/audit.module.js';
 import { CurrentUser, RequirePermissions, type AuthUser } from '../common/decorators.js';
 import { dayOf } from '../common/dates.js';
 import { StockService } from '../stock/stock.service.js';
-import { SaleDto, SalesService } from './sales.service.js';
+import { PaymentDto, SaleDto, SalesService } from './sales.service.js';
 
-const D = Prisma.Decimal;
-
-class PaymentDto {
-  @IsOptional() @IsUUID() clientId?: string;
-  @IsUUID() customerId: string;
-  @IsNumber({ maxDecimalPlaces: 2 }) @IsPositive() amount: number;
-  @IsOptional() @IsString() method?: string;
-  @IsOptional() @IsISO8601() date?: string;
-  @IsOptional() @IsString() note?: string;
-}
 
 class PriceDto {
   @IsEnum(UnitName) unitName: UnitName;
@@ -86,31 +76,7 @@ class SalesController {
   /** Money received from a customer outside a bill. The receipt shows the balance before and after. */
   @Post('payments') @RequirePermissions('PAYMENT_RECORD')
   async pay(@Body() dto: PaymentDto, @CurrentUser() u: AuthUser) {
-    if (dto.clientId) {
-      const existing = await this.prisma.payment.findUnique({ where: { clientId: dto.clientId } });
-      if (existing) return this.receipt(existing.id);
-    }
-    const id = await this.prisma.$transaction(async (tx) => {
-      const customer = await tx.customer.findUnique({ where: { id: dto.customerId } });
-      if (!customer?.isActive) throw new BadRequestException('Unknown or inactive customer');
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'customer:' + dto.customerId}))`;
-      const previous = await this.sales.balance(tx, dto.customerId);
-      const amount = new D(dto.amount);
-      const date = dayOf(dto.date);
-      const receiptNo = await this.stock.nextNo(tx, 'RECEIPT', 'RCP');
-      const payment = await tx.payment.create({
-        data: {
-          receiptNo, clientId: dto.clientId, customerId: dto.customerId, amount, method: dto.method ?? 'CASH', date,
-          previousBalance: previous, newBalance: previous.minus(amount), note: dto.note, createdById: u.id,
-        },
-      });
-      await tx.customerLedger.create({
-        data: { customerId: dto.customerId, date, amount: amount.neg(), refType: 'PAYMENT', refId: payment.id, note: receiptNo, createdById: u.id },
-      });
-      return payment.id;
-    });
-    await this.audit.log(u.id, 'CREATE', 'Payment', id);
-    return this.receipt(id);
+    return this.receipt(await this.sales.recordPayment(dto, u));
   }
 
   /** Collections log: who recorded which payment, when. */
@@ -219,5 +185,5 @@ class SalesController {
   }
 }
 
-@Module({ controllers: [SalesController], providers: [SalesService] })
+@Module({ controllers: [SalesController], providers: [SalesService], exports: [SalesService] })
 export class SalesModule {}
