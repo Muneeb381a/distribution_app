@@ -40,7 +40,7 @@ export default function SalarySlipPage() {
       {error && <p className="error">{error}</p>}
       {!slip && !error && <span className="skeleton" style={{ display: 'block', maxWidth: 560, height: 420, margin: '0 auto' }} />}
       {slip && (
-        <article className="slip card">
+        <article className="slip card paper">
           <header className="slip-head">
             <div>
               <span className="slip-kicker">Salary slip</span>

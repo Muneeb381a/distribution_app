@@ -80,7 +80,7 @@ export default function StackedColumns({ data, series, caption, highlight }: { d
                   const last = j === segs.length - 1;
                   return last
                     ? <path key={s.key} d={topRounded(cx - barW / 2, top, barW, h, R)} fill={s.color} />
-                    : <rect key={s.key} x={cx - barW / 2} y={top} width={barW} height={h} fill={s.color} />;
+                    : <rect key={s.key} className="seg-fill" x={cx - barW / 2} y={top} width={barW} height={h} fill={s.color} />;
                 })}
                 {(i % every === 0 || d.label === highlight) && (
                   <text x={cx} y={H - 8} textAnchor="middle" className={`chart-tick${d.label === highlight ? ' strong' : ''}`}>{d.label}</text>
@@ -111,6 +111,6 @@ export default function StackedColumns({ data, series, caption, highlight }: { d
 }
 
 export const LINE_SERIES: Series[] = [
-  { key: 'BOTTLES', label: 'Bottles', color: '#2a78d6' },
-  { key: 'RICE', label: 'Rice', color: '#eb6834' },
+  { key: 'BOTTLES', label: 'Bottles', color: 'var(--series-1)' },
+  { key: 'RICE', label: 'Rice', color: 'var(--series-2)' },
 ];

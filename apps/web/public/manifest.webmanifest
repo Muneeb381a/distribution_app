@@ -1,0 +1,14 @@
+{
+  "name": "Distribution — Rice & Beverages",
+  "short_name": "Distribution",
+  "description": "Billing, khata, stock and reports for a rice and bottle distributor. Works offline for billing.",
+  "start_url": "/sales/new",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f6f3",
+  "theme_color": "#0f766e",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

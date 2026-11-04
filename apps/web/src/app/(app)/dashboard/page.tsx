@@ -12,6 +12,7 @@ interface StockRow { productId: string; productName: string; size: string | null
 interface Collections { rows: { byMethod: Record<string, string>; total: string; count: number }[] }
 
 const iso = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+const SERIES = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)'];
 const METHOD_LABEL: Record<string, string> = { CASH: 'Cash', BANK: 'Bank', EASYPAISA: 'Easypaisa', JAZZCASH: 'JazzCash' };
 /** Low stock: under 5 cartons for bottles, under 100 kg for rice. */
 function isLow(r: StockRow) {
@@ -159,10 +160,10 @@ export default function DashboardPage() {
               <div className="label"><span className="icon green"><Icon name="wallet" /></span>Collected today</div>
               <div className="value"><small>Rs</small>{n(collectedTotal)}</div>
               <div className="method-bar" aria-hidden="true">
-                {byMethod.map(([m, v], i) => <span key={m} style={{ flex: v, background: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100'][i] }} />)}
+                {byMethod.map(([m, v], i) => <span key={m} style={{ flex: v, background: SERIES[i % 4] }} />)}
               </div>
               <div className="sub method-list">
-                {byMethod.length ? byMethod.map(([m, v], i) => <span key={m}><i style={{ background: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100'][i] }} />{METHOD_LABEL[m] ?? m} {n(v)}</span>) : 'No receipts yet today'}
+                {byMethod.length ? byMethod.map(([m, v], i) => <span key={m}><i style={{ background: SERIES[i % 4] }} />{METHOD_LABEL[m] ?? m} {n(v)}</span>) : 'No receipts yet today'}
               </div>
             </div>
           </div>
