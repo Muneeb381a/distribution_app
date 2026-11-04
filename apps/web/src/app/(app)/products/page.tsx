@@ -6,6 +6,7 @@ import { Icon } from '@/components/Icon';
 import { LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
 import Link from 'next/link';
+import ChangeRatesDialog from '@/components/ChangeRatesDialog';
 import { Affix, Field, Toggle } from '@/components/Form';
 import { DRINK_SIZE_PRESETS, defaultPack, money, round2, unitLabel } from '@dist/shared';
 
@@ -48,6 +49,7 @@ export default function ProductsPage() {
   const [filter, setFilter] = useState('');
   const [showInactive, setShowInactive] = useState(false);
   const [editing, setEditing] = useState<Product | 'new' | null>(null);
+  const [changingRates, setChangingRates] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -139,6 +141,11 @@ export default function ProductsPage() {
         </div>
         <div className="filter"><Icon name="search" /><input aria-label="Filter products" placeholder="Filter by name, brand, size, category…" value={filter} onChange={(e) => { setFilter(e.target.value); reset(); }} /></div>
         {inactiveCount > 0 && <button type="button" className={`chip${showInactive ? ' on' : ''}`} aria-pressed={showInactive} onClick={() => setShowInactive(!showInactive)}>Show inactive ({inactiveCount})</button>}
+        {canRate && shown.some((p) => p.isActive) && (
+          <button type="button" className="secondary btn-icon" style={{ marginLeft: 'auto' }} onClick={() => setChangingRates(true)} title="Change the list rates of the products shown">
+            <Icon name="trend" />Change rates{filter ? ` (${shown.filter((p) => p.isActive).length})` : ''}
+          </button>
+        )}
       </div>
 
       {missingRate > 0 && (
@@ -196,6 +203,11 @@ export default function ProductsPage() {
         </tbody>
       </table>
       <LoadMore shown={page.length} total={sorted.length} onMore={loadMore} />
+
+      {changingRates && (
+        <ChangeRatesDialog line={line} productIds={shown.filter((p) => p.isActive).map((p) => p.id)} onClose={() => setChangingRates(false)}
+          onDone={(n) => { setChangingRates(false); toast.success(`${n} rate${n === 1 ? '' : 's'} changed`); load(); }} />
+      )}
 
       {editing && (
         <ProductDialog

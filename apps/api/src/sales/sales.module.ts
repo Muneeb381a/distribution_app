@@ -1,6 +1,6 @@
 import { BadRequestException, Body, ConflictException, Controller, Get, Module, NotFoundException, Param, Post, Put, Query } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import { IsArray, IsEnum, IsNumber, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsBoolean, IsEnum, IsIn, IsNumber, IsOptional, IsUUID, Max, Min, ValidateNested } from 'class-validator';
 import { BusinessLineCode, Prisma, UnitName } from '@prisma/client';
 import { PrismaService } from '../prisma.service.js';
 import { AuditService } from '../audit/audit.module.js';
@@ -17,6 +17,22 @@ class PriceDto {
 }
 class PricesDto {
   @IsArray() @ValidateNested({ each: true }) @Type(() => PriceDto) prices: PriceDto[];
+}
+
+/**
+ * Change many list prices at once: by a percentage (every unit), or by a fixed amount per one unit
+ * (e.g. +Rs 50 a peti), which moves the product's other units in proportion (+Rs 8.33 a bottle).
+ */
+class ChangePricesDto {
+  @IsArray() @ArrayNotEmpty() @ArrayMaxSize(1000) @IsUUID('all', { each: true }) productIds: string[];
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(-90) @Max(500) percent?: number;
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) amount?: number;
+  /** The unit the fixed amount is for. */
+  @IsOptional() @IsEnum(UnitName) unitName?: UnitName;
+  /** Round new rates to the nearest 1, 5 or 10 rupees (default 1). */
+  @IsOptional() @IsIn([0.01, 1, 5, 10]) roundTo?: number;
+  /** Only work out the new rates; change nothing. */
+  @IsOptional() @IsBoolean() preview?: boolean;
 }
 
 interface SaleQuery {
@@ -262,6 +278,41 @@ class SalesController {
   @Get('product-prices')
   prices(@Query('productId') productId?: string) {
     return this.prisma.productPrice.findMany({ where: { productId } });
+  }
+
+  @Post('product-prices/change') @RequirePermissions('RATE_EDIT')
+  async changePrices(@Body() dto: ChangePricesDto, @CurrentUser() u: AuthUser) {
+    const pct = dto.percent ?? 0;
+    const amt = dto.amount ?? 0;
+    if (!pct && !amt) throw new BadRequestException('Give a percentage or an amount');
+    if (pct && amt) throw new BadRequestException('Give a percentage or an amount, not both');
+    if (amt && !dto.unitName) throw new BadRequestException('Say which unit the amount is for');
+    const step = new Prisma.Decimal(dto.roundTo ?? 1);
+    const [prices, products] = await Promise.all([
+      this.prisma.productPrice.findMany({ where: { productId: { in: dto.productIds } } }),
+      this.prisma.product.findMany({ where: { id: { in: dto.productIds } }, select: { id: true, name: true, size: true, units: { select: { unitName: true, factorToBase: true } } } }),
+    ]);
+    const rows = prices.map((p) => {
+      const product = products.find((x) => x.id === p.productId)!;
+      const factor = (unit: string) => product.units.find((x) => x.unitName === unit)?.factorToBase;
+      let next: Prisma.Decimal;
+      if (pct) next = p.rate.mul(new Prisma.Decimal(100).plus(pct)).div(100);
+      else {
+        const per = factor(dto.unitName!);
+        // A product without the chosen unit is left as it is.
+        if (!per) return { productId: p.productId, name: product.name, size: product.size, unitName: p.unitName, from: p.rate, to: p.rate, skipped: true };
+        next = p.rate.plus(new Prisma.Decimal(amt).div(per).mul(factor(p.unitName) ?? 1));
+      }
+      next = next.div(step).toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP).mul(step).toDecimalPlaces(2);
+      if (next.lt(0)) throw new BadRequestException(`${product.name}: the ${p.unitName.toLowerCase()} rate would go below zero`);
+      return { productId: p.productId, name: product.name, size: product.size, unitName: p.unitName, from: p.rate, to: next, skipped: false };
+    }).sort((a, b) => a.name.localeCompare(b.name) || a.unitName.localeCompare(b.unitName));
+    const changed = rows.filter((r) => !r.to.equals(r.from));
+    if (!dto.preview && changed.length) {
+      await this.prisma.$transaction(changed.map((r) => this.prisma.productPrice.update({ where: { productId_unitName: { productId: r.productId, unitName: r.unitName } }, data: { rate: r.to } })));
+      await this.audit.log(u.id, 'CHANGE_PRICES', 'Product', undefined, undefined, { percent: dto.percent, amount: dto.amount, unitName: dto.unitName, roundTo: dto.roundTo, rates: changed.map((r) => [r.name, r.unitName, r.from, r.to]) });
+    }
+    return { applied: !dto.preview, changed: changed.length, withoutRate: dto.productIds.filter((id) => !prices.some((p) => p.productId === id)).length, rows };
   }
 
   @Put('product-prices/:productId') @RequirePermissions('RATE_EDIT')

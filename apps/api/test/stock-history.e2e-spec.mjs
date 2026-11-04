@@ -54,3 +54,25 @@ describe('reorder level', () => {
     expect(ok(await t.owner.get('/stock/low')).some((p) => p.productId === w.product.id)).toBe(false);
   });
 });
+
+describe('changing many rates at once', () => {
+  it('raises by a percentage or by an amount per peti, previews first, and keeps bottle rates in step', async () => {
+    const a = await stockedWorld(t.owner, 5); // bottle 125, carton 750 (6 a carton)
+    const b = await stockedWorld(t.owner, 5);
+    const ids = [a.product.id, b.product.id];
+    const rate = async (pid, unit) => Number(ok(await t.owner.get(`/product-prices?productId=${pid}`)).find((p) => p.unitName === unit).rate);
+
+    const pv = ok(await t.owner.post('/product-prices/change', { productIds: ids, percent: 10, preview: true }));
+    expect(pv.applied).toBe(false);
+    expect(pv.rows.filter((r) => r.productId === a.product.id).map((r) => [r.unitName, Number(r.from), Number(r.to)])).toEqual([['BOTTLE', 125, 138], ['CARTON', 750, 825]]);
+    expect(await rate(a.product.id, 'CARTON')).toBe(750); // preview changes nothing
+
+    ok(await t.owner.post('/product-prices/change', { productIds: ids, amount: 60, unitName: 'CARTON' }));
+    expect(await rate(a.product.id, 'CARTON')).toBe(810);
+    expect(await rate(b.product.id, 'BOTTLE')).toBe(135); // +60 a peti = +10 a bottle
+
+    expect((await t.owner.post('/product-prices/change', { productIds: ids, amount: 60 })).status).toBe(400); // unit needed
+    expect((await t.owner.post('/product-prices/change', { productIds: ids, percent: 5, amount: 5, unitName: 'CARTON' })).status).toBe(400);
+    expect((await t.owner.post('/product-prices/change', { productIds: ids, amount: -2000, unitName: 'CARTON' })).status).toBe(400); // below zero
+  });
+});
