@@ -12,7 +12,7 @@ import { urdu } from '@/lib/fonts';
 import { usePageTitle } from '@/lib/pageTitle';
 import { renderBillImage, type BillData } from '@/lib/saleImage';
 import { useSettings } from '@/lib/settings';
-import { money, unitLabel } from '@dist/shared';
+import { money, unitLabel, waPhone } from '@dist/shared';
 
 type Bill = BillData & {
   id: string;
@@ -118,8 +118,7 @@ export default function BillPage() {
     } catch (e) {
       if ((e as Error).name === 'AbortError') return;
     }
-    const phone = bill.customer?.phone?.replace(/\D/g, '').replace(/^0/, '92');
-    window.open(`https://wa.me/${phone ?? ''}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+    window.open(`https://wa.me/${waPhone(bill.customer?.phone)}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
   }
 
   if (error && !bill) {

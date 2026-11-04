@@ -129,3 +129,10 @@ test('settings fall back to defaults and keep the thermal width valid', async ()
   assert.equal(contactLine({ address: 'Main Bazar', phone: '0300-1' }), 'Main Bazar · 0300-1');
   assert.ok(PERMISSIONS.includes('SETTINGS_EDIT'));
 });
+
+test('whatsapp numbers', async () => {
+  const { waPhone } = await import('../dist/index.js');
+  assert.equal(waPhone('0300-1234567'), '923001234567');
+  assert.equal(waPhone('+92 300 1234567'), '923001234567');
+  assert.equal(waPhone(null), '');
+});

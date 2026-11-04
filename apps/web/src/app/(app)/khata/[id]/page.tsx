@@ -93,6 +93,7 @@ export default function CustomerKhataPage() {
                       <span className={`badge ${ledger.customer.type === 'CREDIT' ? 'amber' : 'green'}`}>{ledger.customer.type === 'CREDIT' ? 'Udhaar' : 'Cash'}</span>
                     </p>
                   </div>
+                  <Link className="btn secondary no-print party-statement" href={`/khata/${id}/statement`}><Icon name="file" />Statement</Link>
                   <div className="party-bal">
                     <span>{balance > 0 ? 'Owes you' : balance < 0 ? 'In credit' : 'Balance'}</span>
                     <b className={balance > 0 ? 'owe' : balance < 0 ? 'credit' : ''}>Rs {money(Math.abs(balance))}</b>

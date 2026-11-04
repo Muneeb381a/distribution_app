@@ -1,7 +1,7 @@
 import { BadRequestException, Body, ConflictException, Controller, Get, Module, NotFoundException, Param, Post, Put, Query } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import { IsArray, IsEnum, IsNumber, Min, ValidateNested } from 'class-validator';
-import { BusinessLineCode, UnitName } from '@prisma/client';
+import { BusinessLineCode, Prisma, UnitName } from '@prisma/client';
 import { PrismaService } from '../prisma.service.js';
 import { AuditService } from '../audit/audit.module.js';
 import { CurrentUser, RequirePermissions, type AuthUser } from '../common/decorators.js';
@@ -184,6 +184,53 @@ class SalesController {
         };
       })
       .sort((a, b) => b.balance.comparedTo(a.balance));
+  }
+
+  /**
+   * Customer statement for a date range: balance brought forward, every bill, payment and
+   * correction in the range (bills with what was in them), and the closing balance.
+   */
+  @Get('khata/:customerId/statement') @RequirePermissions('PAYMENT_RECORD')
+  async statement(@Param('customerId') customerId: string, @Query('from') fromQ?: string, @Query('to') toQ?: string) {
+    const customer = await this.prisma.customer.findUnique({ where: { id: customerId } });
+    if (!customer) throw new NotFoundException();
+    const to = dayOf(toQ);
+    const from = fromQ ? dayOf(fromQ) : new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), 1));
+    if (to < from) throw new BadRequestException('"to" is before "from"');
+    const [before, entries] = await Promise.all([
+      this.prisma.customerLedger.aggregate({ where: { customerId, date: { lt: from } }, _sum: { amount: true } }),
+      this.prisma.customerLedger.findMany({ where: { customerId, date: { gte: from, lte: to } }, orderBy: [{ date: 'asc' }, { createdAt: 'asc' }] }),
+    ]);
+    const saleIds = entries.filter((e) => e.refType === 'SALE' || e.refType === 'SALE_CANCEL').map((e) => e.refId);
+    const payIds = entries.filter((e) => e.refType !== 'SALE' && e.refType !== 'SALE_CANCEL').map((e) => e.refId);
+    const [sales, payments] = await Promise.all([
+      this.prisma.sale.findMany({
+        where: { id: { in: saleIds } },
+        select: { id: true, billNo: true, paidNow: true, items: { select: { qty: true, unitName: true, lineTotal: true, product: { select: { name: true, size: true } } } } },
+      }),
+      this.prisma.payment.findMany({ where: { id: { in: payIds } }, select: { id: true, receiptNo: true, method: true, chequeNo: true } }),
+    ]);
+    const opening = customer.openingBalance.plus(before._sum.amount ?? 0);
+    let running = opening;
+    let debit = new Prisma.Decimal(0);
+    let credit = new Prisma.Decimal(0);
+    const rows = entries.map((e) => {
+      running = running.plus(e.amount);
+      if (e.amount.gt(0)) debit = debit.plus(e.amount); else credit = credit.plus(e.amount.neg());
+      const sale = sales.find((x) => x.id === e.refId);
+      const pay = payments.find((x) => x.id === e.refId);
+      return {
+        id: e.id, date: e.date, refType: e.refType, refId: e.refId, note: e.note, amount: e.amount, balance: running,
+        ref: sale?.billNo ?? pay?.receiptNo ?? e.note,
+        method: pay?.method ?? null, chequeNo: pay?.chequeNo ?? null,
+        items: e.refType === 'SALE' && sale ? sale.items.map((i) => ({ name: i.product.size ? `${i.product.name} ${i.product.size}` : i.product.name, qty: i.qty, unitName: i.unitName, lineTotal: i.lineTotal })) : undefined,
+      };
+    });
+    return {
+      customer: { id: customer.id, name: customer.name, shopName: customer.shopName, phone: customer.phone, area: customer.area, address: customer.address, creditLimit: customer.creditLimit },
+      from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10),
+      opening, debit, credit, closing: running, entries: rows,
+    };
   }
 
   @Get('khata/:customerId') @RequirePermissions('PAYMENT_RECORD')

@@ -60,6 +60,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
 const DETAIL: [RegExp, string][] = [
   [/^\/sales\/new$/, 'New bill'],
   [/^\/sales\/[^/]+$/, 'Bill'],
+  [/^\/khata\/[^/]+\/statement$/, 'Statement'],
   [/^\/khata\/[^/]+$/, 'Customer khata'],
   [/^\/customers\/[^/]+$/, 'Customer rates'],
   [/^\/suppliers\/[^/]+$/, 'Supplier ledger'],

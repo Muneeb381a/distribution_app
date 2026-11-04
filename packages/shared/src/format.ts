@@ -26,3 +26,6 @@ export function formatQty(qtyBase: string | number, units: { unitName: string; f
   }
   return `${q}${baseUnit === 'KG' ? ' kg' : ''}`;
 }
+
+/** A Pakistani number as WhatsApp wants it: "0300-1234567" → "923001234567"; "" if there is none. */
+export const waPhone = (phone: string | null | undefined) => (phone ?? '').replace(/\D/g, '').replace(/^0/, '92');

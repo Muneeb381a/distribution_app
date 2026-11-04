@@ -45,16 +45,42 @@ describe('cheques', () => {
     const w = await stockedWorld(t.owner, 5);
     const c = ok(await t.owner.post('/customers', { name: uniq('Walk'), type: 'CREDIT', creditLimit: 100000 }));
     const res = await t.owner.post('/sales', {
-      saleType: 'CREDIT', customerId: c.id, locationId: w.godown.id, method: 'CHEQUE', paidNow: 100,
+      saleType: 'COUNTER', customerId: c.id, locationId: w.godown.id, method: 'CHEQUE', paidNow: 100,
       items: [{ productId: w.product.id, unitName: 'BOTTLE', qty: 1 }],
     });
     expect(res.status).toBe(400);
-    expect(JSON.stringify(res.body)).toContain('khata');
+    expect(res.body.message).toEqual(['Take cheques as a payment on the khata, not with the bill']);
 
     expect((await t.owner.post('/supplier-payments', { supplierId: w.supplier.id, amount: 500, method: 'CHEQUE' })).status).toBe(400);
     const sp = ok(await t.owner.post('/supplier-payments', { supplierId: w.supplier.id, amount: 500, method: 'CHEQUE', chequeNo: 'MCB-55', chequeBank: 'MCB' }));
     expect(sp).toMatchObject({ chequeNo: 'MCB-55', chequeBank: 'MCB' });
     const led = ok(await t.owner.get(`/suppliers/${w.supplier.id}/ledger`));
     expect(led.entries.at(-1).note).toContain('cheque MCB-55');
+  });
+});
+
+describe('customer statement', () => {
+  it('brings the balance forward, lists the range with bill items, and closes on the khata balance', async () => {
+    const w = await stockedWorld(t.owner, 10);
+    const c = ok(await t.owner.post('/customers', { name: uniq('Statement shop'), type: 'CREDIT', openingBalance: 1000, creditLimit: 100000 }));
+    ok(await t.owner.post('/payments', { customerId: c.id, amount: 400, date: '2026-09-10' }));
+    const bill = ok(await t.owner.post('/sales', {
+      saleType: 'COUNTER', customerId: c.id, locationId: w.godown.id, date: '2026-10-05', paidNow: 0,
+      items: [{ productId: w.product.id, unitName: 'CARTON', qty: 2 }],
+    }));
+    ok(await t.owner.post('/payments', { customerId: c.id, amount: 500, method: 'EASYPAISA', date: '2026-10-20' }));
+
+    const s = ok(await t.owner.get(`/khata/${c.id}/statement?from=2026-10-01&to=2026-10-31`));
+    expect(Number(s.opening)).toBe(600); // 1000 opening - 400 paid in September
+    expect(s.entries.map((e) => e.refType)).toEqual(['SALE', 'PAYMENT']);
+    expect(s.entries[0].ref).toBe(bill.billNo);
+    expect(s.entries[0].items[0]).toMatchObject({ unitName: 'CARTON' });
+    expect(Number(s.entries[0].items[0].qty)).toBe(2);
+    expect(s.entries[1].method).toBe('EASYPAISA');
+    expect(Number(s.debit)).toBe(Number(bill.net));
+    expect(Number(s.credit)).toBe(500);
+    expect(Number(s.closing)).toBe(600 + Number(bill.net) - 500);
+    expect(Number(s.closing)).toBe(Number(ok(await t.owner.get(`/khata/${c.id}`)).balance));
+    expect((await t.owner.get(`/khata/${c.id}/statement?from=2026-10-31&to=2026-10-01`)).status).toBe(400);
   });
 });
