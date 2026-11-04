@@ -1,11 +1,14 @@
 'use client';
 
+import Link from 'next/link';
 import CrudPage from '@/components/CrudPage';
+import { can, useUser } from '@/lib/api';
 import { money } from '@dist/shared';
 
 interface Employee { id: string; isActive: boolean; name: string; phone: string | null; type: string; monthlySalary: string | null; dailyWage: string | null; commissionPercent: string | null }
 
 export default function EmployeesPage() {
+  const canPayroll = can(useUser(), 'PAYROLL_MANAGE');
   return (
     <CrudPage<Employee>
       title="Employees"
@@ -30,7 +33,7 @@ export default function EmployeesPage() {
         { name: 'commissionPercent', label: 'Commission', type: 'number', suffix: '%', section: 'pay', span: 4, hint: 'Of their own sales, paid on top (salesmen)' },
       ]}
       columns={[
-        { header: 'Name', render: (r) => <b>{r.name}</b>, value: (r) => r.name },
+        { header: 'Name', render: (r) => (canPayroll ? <Link href={`/employees/${r.id}`}><b>{r.name}</b></Link> : <b>{r.name}</b>), value: (r) => r.name },
         { header: 'Phone', render: (r) => r.phone ?? '' },
         { header: 'Type', value: (r) => r.type, render: (r) => <span className="badge blue">{r.type === 'DAILY' ? 'Daily' : 'Monthly'}</span> },
         { header: 'Pay', num: true, value: (r) => r.monthlySalary ?? r.dailyWage, render: (r) => money(r.monthlySalary ?? r.dailyWage ?? 0) },

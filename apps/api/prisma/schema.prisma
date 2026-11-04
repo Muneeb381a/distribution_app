@@ -603,21 +603,42 @@ model Attendance {
   @@id([employeeId, date])
 }
 
+/// Money given to an employee ahead of salary. It is recovered from salary (all at once, or a fixed
+/// instalment each month) and/or repaid in cash; what is left is amount − active recoveries.
 model SalaryAdvance {
-  id           String      @id @default(uuid())
+  id           String            @id @default(uuid())
   employeeId   String
-  date         DateTime    @db.Date
-  amount       Decimal     @db.Decimal(14, 2)
+  date         DateTime          @db.Date
+  amount       Decimal           @db.Decimal(14, 2)
+  /// Cut from each salary until recovered. Null = recover the whole remainder from the next salary.
+  installment  Decimal?          @db.Decimal(14, 2)
   note         String?
-  /// Set when a payroll run has deducted this advance.
-  payrollRunId String?
-  status       DocStatus   @default(ACTIVE)
+  status       DocStatus         @default(ACTIVE)
   createdById  String
-  createdAt    DateTime    @default(now())
-  employee     Employee    @relation(fields: [employeeId], references: [id])
-  payrollRun   PayrollRun? @relation(fields: [payrollRunId], references: [id])
+  createdAt    DateTime          @default(now())
+  employee     Employee          @relation(fields: [employeeId], references: [id])
+  recoveries   AdvanceRecovery[]
 
   @@index([employeeId, date])
+}
+
+/// One repayment of an advance: a cut from a payroll run, or cash handed back. Cancelling the run cancels its cuts.
+model AdvanceRecovery {
+  id           String        @id @default(uuid())
+  advanceId    String
+  /// The payroll run that deducted it; null for a cash repayment.
+  payrollRunId String?
+  date         DateTime      @db.Date
+  amount       Decimal       @db.Decimal(14, 2)
+  note         String?
+  status       DocStatus     @default(ACTIVE)
+  createdById  String
+  createdAt    DateTime      @default(now())
+  advance      SalaryAdvance @relation(fields: [advanceId], references: [id])
+  payrollRun   PayrollRun?   @relation(fields: [payrollRunId], references: [id])
+
+  @@index([advanceId])
+  @@index([payrollRunId])
 }
 
 /// One finalised salary calculation for an employee and month ("2026-11").
@@ -644,7 +665,7 @@ model PayrollRun {
   cancelledAt      DateTime?
   cancelReason     String?
   employee         Employee        @relation(fields: [employeeId], references: [id])
-  advanceItems     SalaryAdvance[]
+  recoveries       AdvanceRecovery[]
 
   /// One ACTIVE run per employee and month is enforced by a partial unique index (see the cancel_payroll migration).
   @@index([employeeId, month])

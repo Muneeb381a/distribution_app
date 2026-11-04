@@ -507,6 +507,8 @@ tbody tr:hover td:has(> .empty-state) { background: var(--surface); }
 .modal-field { margin-top: 14px; }
 .modal-field input { width: 100%; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+.modal-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.modal-actions button svg { width: 16px; height: 16px; flex-shrink: 0; }
 .modal.success { max-width: 480px; }
 .success-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 18px; }
 .success-actions .btn, .success-actions button { justify-content: center; display: inline-flex; align-items: center; gap: 8px; }
@@ -869,6 +871,10 @@ dl.totals { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 9px 
 .ledger tr.opening td { background: var(--surface-2); color: var(--muted); font-style: italic; }
 .ledger tr.cancel td { color: var(--muted); }
 .ledger tr.struck td:not(:last-child) { text-decoration: line-through; }
+.slip-table tr.struck td { color: var(--muted); text-decoration: line-through; }
+.link-btn { background: none; border: 0; padding: 0 0 0 8px; min-height: 0; color: var(--accent-text); font-weight: 600; font-size: 12.5px; text-decoration: underline; }
+.link-btn:hover:not(:disabled) { background: none; color: var(--accent); }
+.fin-table td { padding-top: 8px; padding-bottom: 8px; }
 table.rates td { vertical-align: middle; }
 
 /* salary slip */
@@ -880,9 +886,13 @@ table.rates td { vertical-align: middle; }
 .slip-table { box-shadow: none; }
 .slip-table tr.minus td:last-child { color: var(--danger); }
 .slip-table tr.subtotal td { font-weight: 750; background: var(--surface-2); }
-.slip-net { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 18px; border-radius: 11px; background: #e3f3f0; }
+.slip-net { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 18px; border-radius: 11px; background: var(--accent-soft); color: var(--text); }
 .slip-net span { font-weight: 700; }
-.slip-net b { font-size: 26px; color: #0b5e57; font-variant-numeric: tabular-nums; }
+/* the slip itself is white paper in both themes */
+.paper .slip-net { background: #e3f3f0; color: #121815; }
+.paper .slip-net b { color: #0b5e57; }
+.slip-table td:first-child { white-space: normal; }
+.slip-net b { font-size: 26px; color: var(--accent-text); font-variant-numeric: tabular-nums; }
 .slip-sign { display: flex; justify-content: space-between; gap: 40px; margin-top: 56px; }
 .slip-sign span { flex: 1; border-top: 1px solid var(--border-strong); padding-top: 6px; font-size: 12.5px; color: var(--muted); }
 
