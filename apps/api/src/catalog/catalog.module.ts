@@ -27,6 +27,8 @@ class ProductDto {
   @IsEnum(BaseUnit) baseUnit: BaseUnit;
   @IsOptional() @IsBoolean() isPacked?: boolean;
   @IsOptional() @IsBoolean() returnableEmpty?: boolean;
+  /** Alert when saleable stock everywhere falls to this many base units; null stops watching. */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) reorderLevel?: number | null;
   @IsArray() @ArrayNotEmpty() @ValidateNested({ each: true }) @Type(() => UnitDto) units: UnitDto[];
 }
 

@@ -367,6 +367,8 @@ button.icon-only svg { width: 15px; height: 15px; }
 .chip.on:hover:not(:disabled) { background: var(--text); color: var(--surface); }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .fld input.big { font-size: 19px; font-weight: 700; }
+a.stat-link { color: inherit; text-decoration: none; transition: border-color 0.12s; }
+a.stat-link:hover { border-color: var(--accent); text-decoration: none; }
 .chip-count { margin-left: 6px; font-weight: 500; opacity: 0.75; font-variant-numeric: tabular-nums; }
 .chip.on[data-tone='green'] { background: var(--success); color: var(--surface); }
 .chip.on[data-tone='red'] { background: var(--danger); color: var(--surface); }

@@ -13,15 +13,6 @@ interface StockRow { productId: string; productName: string; size: string | null
 interface Collections { rows: { byMethod: Record<string, string>; total: string; count: number }[] }
 
 const SERIES = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)'];
-/** Low stock: under 5 cartons for bottles, under 100 kg for rice. */
-function isLow(r: StockRow) {
-  const q = Number(r.ok);
-  if (r.baseUnit === 'BOTTLE') {
-    const f = Number(r.units.find((u) => u.unitName === 'CARTON')?.factorToBase ?? 1);
-    return q < 5 * f;
-  }
-  return q < 100;
-}
 
 interface Summary {
   today: { bills: number; netSales: string; cashWithBills: string; receipts: string; udhaar: string; expenses: string; grossProfit: string; netProfit: string };
@@ -30,6 +21,10 @@ interface Summary {
   khata: { receivable: string; customersOwing: number; overLimit: number; topDebtors: { id: string; name: string; shopName: string | null; area: string | null; balance: string; overLimit: boolean }[] };
   payable: string;
   damagedProducts: number;
+  /** Products at or below their own reorder level (all locations together). */
+  lowStock: { productId: string; name: string; size: string | null; baseUnit: string; units: { unitName: string; factorToBase: string }[]; reorderLevel: string; onHand: string; where: { name: string; qtyBase: string }[] }[];
+  lowStockCount: number;
+  chequesDue: { count: number; amount: string };
   recentSales: { id: string; billNo: string; date: string; net: string; paidNow: string; businessLine: string; customer: string | null }[];
 }
 
@@ -98,7 +93,7 @@ export default function DashboardPage() {
   }, [collections]);
   const collectedTotal = byMethod.reduce((s, [, v]) => s + v, 0);
   const damaged = (stock ?? []).filter((r) => Number(r.damaged) > 0);
-  const low = (stock ?? []).filter(isLow).sort((a, b) => Number(a.ok) - Number(b.ok));
+  const low = data?.lowStock ?? [];
 
   if (!user) return null;
   if (!allowed) return <Welcome name={user.username} canSell={can(user, 'SALE_CREATE')} />;
@@ -154,6 +149,13 @@ export default function DashboardPage() {
           <div className="stats" style={{ marginTop: 20 }}>
             <Stat label="Customers owe us" value={rupees(data.khata.receivable)} sub={`${data.khata.customersOwing} customers${data.khata.overLimit ? ` · ${data.khata.overLimit} over limit` : ''}`} icon="customers" tone="amber" />
             <Stat label="We owe suppliers" value={rupees(data.payable)} sub="open supplier balances" icon="suppliers" tone="red" />
+            {data.chequesDue.count > 0 && (
+              <Link href="/cheques" className="stat stat-link">
+                <div className="label"><span className="icon amber"><Icon name="wallet" /></span>Cheques to deposit</div>
+                <div className="value"><small>Rs</small>{rupees(data.chequesDue.amount)}</div>
+                <div className="sub">{data.chequesDue.count} dated today or earlier</div>
+              </Link>
+            )}
             <div className="stat">
               <div className="label"><span className="icon green"><Icon name="wallet" /></span>Collected today</div>
               <div className="value"><small>Rs</small>{rupees(collectedTotal)}</div>
@@ -166,7 +168,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {stock && (low.length > 0 || damaged.length > 0) && (
+          {stock && (low.length > 0 || damaged.length > 0) && data && (
             <div className="card alert-card">
               <div className="card-head">
                 <h2><Icon name="alert" /> Stock needs attention</h2>
@@ -174,17 +176,20 @@ export default function DashboardPage() {
               </div>
               <div className="alert-cols">
                 <div>
-                  <h3>Low stock <span className="badge amber">{low.length}</span></h3>
+                  <h3>Reorder now <span className="badge amber">{data.lowStockCount}</span></h3>
                   <ul className="list">
                     {low.slice(0, 5).map((r) => (
-                      <li key={`${r.productId}|${r.locationId}`}>
-                        <span className="who-line"><b>{productLabel({ name: r.productName, size: r.size })}</b><span>{r.locationName}</span></span>
-                        <span className={`amt${Number(r.ok) <= 0 ? ' error' : ''}`}>{formatQty(r.ok, r.units, r.baseUnit)}</span>
+                      <li key={r.productId}>
+                        <span className="who-line">
+                          <Link href={`/stock/history?product=${r.productId}`}><b>{productLabel(r)}</b></Link>
+                          <span>{r.where.length ? r.where.map((w) => w.name).join(', ') : 'out of stock everywhere'} · reorder at {formatQty(r.reorderLevel, r.units, r.baseUnit)}</span>
+                        </span>
+                        <span className={`amt${Number(r.onHand) <= 0 ? ' error' : ''}`}>{formatQty(r.onHand, r.units, r.baseUnit)}</span>
                       </li>
                     ))}
-                    {!low.length && <li className="muted">Nothing is running low.</li>}
+                    {!low.length && <li className="muted">Nothing is at its reorder level.</li>}
                   </ul>
-                  {low.length > 5 && <p className="muted" style={{ margin: '8px 0 0', fontSize: 13 }}>+{low.length - 5} more</p>}
+                  {data.lowStockCount > 5 && <p className="muted" style={{ margin: '8px 0 0', fontSize: 13 }}><Link href="/stock?low=1">+{data.lowStockCount - 5} more</Link></p>}
                 </div>
                 <div>
                   <h3>Damaged stock <span className="badge red">{damaged.length}</span></h3>
@@ -199,7 +204,7 @@ export default function DashboardPage() {
                   </ul>
                 </div>
               </div>
-              <p className="muted" style={{ margin: '12px 0 0', fontSize: 12.5 }}>Low = under 5 cartons (bottles) or 100 kg (rice) at a location.</p>
+              <p className="muted" style={{ margin: '12px 0 0', fontSize: 12.5 }}>Reorder levels are set per product (all locations together) on the Products page.</p>
             </div>
           )}
 

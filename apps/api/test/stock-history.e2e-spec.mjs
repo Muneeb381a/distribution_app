@@ -34,3 +34,23 @@ describe('stock history', () => {
     expect((await t.owner.get('/stock/history?from=2026-11-05&to=2026-11-01')).status).toBe(400);
   });
 });
+
+describe('reorder level', () => {
+  it('lists products at or below their level across all locations, and the dashboard counts them', async () => {
+    const w = await stockedWorld(t.owner, 5); // 30 bottles
+    expect(ok(await t.owner.get('/stock/low')).some((p) => p.productId === w.product.id)).toBe(false); // not watched
+    ok(await t.owner.patch(`/products/${w.product.id}`, { reorderLevel: 24 }));
+    expect(ok(await t.owner.get('/stock/low')).some((p) => p.productId === w.product.id)).toBe(false); // 30 > 24
+    ok(await t.owner.post('/stock/transfers', { fromLocationId: w.godown.id, toLocationId: w.shop.id, items: [{ productId: w.product.id, unitName: 'BOTTLE', qty: 10 }] }));
+    expect(ok(await t.owner.get('/stock/low')).some((p) => p.productId === w.product.id)).toBe(false); // still 30 in total
+    ok(await t.owner.post('/stock/adjustments', { productId: w.product.id, locationId: w.godown.id, unitName: 'BOTTLE', qty: 6, kind: 'MARK_DAMAGED', note: 'burst' }));
+    const low = ok(await t.owner.get('/stock/low')).find((p) => p.productId === w.product.id);
+    expect(Number(low.onHand)).toBe(24); // damaged stock does not count
+    expect(low.where.map((x) => Number(x.qtyBase)).sort((a, b) => a - b)).toEqual([10, 14]);
+    const dash = ok(await t.owner.get('/dashboard/summary'));
+    expect(dash.lowStockCount).toBeGreaterThan(0);
+    expect(dash.chequesDue).toHaveProperty('count');
+    ok(await t.owner.patch(`/products/${w.product.id}`, { reorderLevel: null }));
+    expect(ok(await t.owner.get('/stock/low')).some((p) => p.productId === w.product.id)).toBe(false);
+  });
+});

@@ -124,6 +124,8 @@ model Product {
   isPacked            Boolean              @default(false)
   returnableEmpty     Boolean              @default(false)
   isActive            Boolean              @default(true)
+  /// Order more when saleable stock in all locations together falls to this (base units). Null = not watched.
+  reorderLevel        Decimal?             @db.Decimal(14, 3)
   createdAt           DateTime             @default(now())
   category            Category             @relation(fields: [categoryId], references: [id])
   units               ProductUnit[]

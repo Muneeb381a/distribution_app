@@ -1,5 +1,6 @@
 import { Controller, Get, Module } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { lowStock } from '../stock/low-stock.js';
 import { PrismaService } from '../prisma.service.js';
 import { RequirePermissions } from '../common/decorators.js';
 import { dayOf } from '../common/dates.js';
@@ -82,7 +83,11 @@ class DashboardController {
     }
     for (const r of receipts) if (iso(r.date) === todayKey) t.receipts = t.receipts.plus(r.amount);
 
-    const [customers, suppliers] = await Promise.all([withCustomerBalances(this.prisma, customerRows), withSupplierBalances(this.prisma, supplierRows)]);
+    const [customers, suppliers, low, chequesDue] = await Promise.all([
+      withCustomerBalances(this.prisma, customerRows), withSupplierBalances(this.prisma, supplierRows), lowStock(this.prisma),
+      // Customer cheques that can be deposited now (dated today or earlier) and are still pending.
+      this.prisma.payment.aggregate({ where: { method: 'CHEQUE', chequeStatus: 'PENDING', status: 'ACTIVE', chequeDate: { lte: today } }, _count: true, _sum: { amount: true } }),
+    ]);
     const owing = customers.filter((c) => c.balance.gt(0));
     const receivable = owing.reduce((s: Dec, c) => s.plus(c.balance), ZERO());
     const topDebtors = [...owing].sort((a, b) => b.balance.comparedTo(a.balance)).slice(0, 6).map((c) => ({
@@ -102,6 +107,9 @@ class DashboardController {
       khata: { receivable, customersOwing: owing.length, overLimit: topDebtors.filter((d) => d.overLimit).length, topDebtors },
       payable: payable.gt(0) ? payable : ZERO(),
       damagedProducts: damaged.filter((d) => (d._sum.qtyBase ?? ZERO()).gt(0)).length,
+      lowStock: low.slice(0, 8),
+      lowStockCount: low.length,
+      chequesDue: { count: chequesDue._count, amount: chequesDue._sum.amount ?? ZERO() },
       recentSales: recent.map((s) => ({ id: s.id, billNo: s.billNo, date: s.date, net: s.net, paidNow: s.paidNow, businessLine: s.businessLine, customer: s.customer?.name ?? null })),
     };
   }

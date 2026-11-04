@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import Combobox from '@/components/Combobox';
 import { Choice, Field, FormActions, FormCard, FormSection } from '@/components/Form';
@@ -18,6 +19,7 @@ interface Row {
   ok: string; damaged: string; latestUnitCost?: string | null; value?: string | null;
 }
 interface Line { productId: string; unitName: string; qty: string }
+interface LowRow { productId: string; name: string; size: string | null; baseUnit: string; units: { unitName: string; factorToBase: string }[]; reorderLevel: string; onHand: string; where: { name: string; qtyBase: string }[] }
 const emptyLine: Line = { productId: '', unitName: '', qty: '' };
 const KINDS: [string, string, string][] = [
   ['MARK_DAMAGED', 'Mark as damaged', 'Saleable stock found broken or expired'],
@@ -33,6 +35,10 @@ export default function StockPage() {
   const [rows, setRows] = useState<Row[] | null>(null);
   const toast = useToast();
   const [filter, setFilter] = useState({ locationId: '', line: '', search: '' });
+  const search = useSearchParams();
+  const [showLow, setShowLow] = useState(search.get('low') === '1');
+  const [low, setLow] = useState<LowRow[] | null>(null);
+  useEffect(() => { api<LowRow[]>('/stock/low').then(setLow).catch(() => setLow([])); }, []);
   const [transfer, setTransfer] = useState({ from: '', to: '', lines: [{ ...emptyLine }] });
   const [adjust, setAdjust] = useState({ locationId: '', ...emptyLine, kind: 'MARK_DAMAGED', note: '' });
   const [error, setError] = useState('');
@@ -119,8 +125,33 @@ export default function StockPage() {
           {[['', 'All'], ['BOTTLES', 'Bottles'], ['RICE', 'Rice']].map(([v, l]) => (
             <button key={v} type="button" className={`chip${filter.line === v ? ' on' : ''}`} aria-pressed={filter.line === v} onClick={() => setFilter({ ...filter, line: v })}>{l}</button>
           ))}
+          <button type="button" className={`chip${showLow ? ' on' : ''}`} data-tone="amber" aria-pressed={showLow} onClick={() => setShowLow(!showLow)}>
+            Reorder now{low && low.length ? <span className="chip-count">{low.length}</span> : null}
+          </button>
         </div>
       </div>
+      {showLow && (
+        <section className="card alert-card">
+          <div className="card-head"><h2><Icon name="alert" /> At or below reorder level</h2><span className="muted" style={{ fontSize: 13 }}>All locations together. Set the level on each product.</span></div>
+          {!low ? <span className="skeleton" style={{ display: 'block', height: 80 }} /> : low.length ? (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Product</th><th className="num">In stock</th><th className="num">Reorder at</th><th>Where</th></tr></thead>
+                <tbody>
+                  {low.map((r) => (
+                    <tr key={r.productId}>
+                      <td><Link href={`/stock/history?product=${r.productId}`}><b>{productLabel(r)}</b></Link></td>
+                      <td className={`num${Number(r.onHand) <= 0 ? ' error' : ''}`}><b>{formatQty(r.onHand, r.units, r.baseUnit)}</b></td>
+                      <td className="num muted">{formatQty(r.reorderLevel, r.units, r.baseUnit)}</td>
+                      <td className="muted">{r.where.map((w) => `${w.name} ${formatQty(w.qtyBase, r.units, r.baseUnit)}`).join(' · ') || 'Out of stock'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : <p className="muted" style={{ margin: 0 }}>Nothing is at its reorder level. Set “Reorder when stock falls to” on a product to watch it.</p>}
+        </section>
+      )}
       <table className="sticky-head">
         <thead>
           <tr>

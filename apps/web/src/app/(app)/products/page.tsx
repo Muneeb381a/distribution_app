@@ -7,20 +7,20 @@ import { LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
 import Link from 'next/link';
 import { Affix, Field, Toggle } from '@/components/Form';
-import { DRINK_SIZE_PRESETS, defaultPack, money, unitLabel } from '@dist/shared';
+import { DRINK_SIZE_PRESETS, defaultPack, money, round2, unitLabel } from '@dist/shared';
 
 type Line = 'BOTTLES' | 'RICE';
 interface Category { id: string; name: string; parentId: string | null; businessLine: { code: Line } }
 interface Unit { unitName: string; factorToBase: string }
 interface Product {
   id: string; name: string; brand: string | null; size: string | null; returnableEmpty: boolean; isActive: boolean; isPacked: boolean;
-  categoryId: string; baseUnit: 'BOTTLE' | 'KG';
+  categoryId: string; baseUnit: 'BOTTLE' | 'KG'; reorderLevel: string | null;
   units: Unit[];
   category: { name: string; businessLine: { code: Line } };
 }
 interface Price { productId: string; unitName: string; rate: string }
 
-const EMPTY = { name: '', brand: '', size: '', categoryId: '', packSize: '6', bagKg: '', returnableEmpty: true };
+const EMPTY = { name: '', brand: '', size: '', categoryId: '', packSize: '6', bagKg: '', returnableEmpty: true, reorder: '' };
 type Form = typeof EMPTY;
 
 /** Units sent to the API for a bottle or rice product. */
@@ -223,6 +223,8 @@ function ProductDialog({ line, product, categories, prices, canEdit, canRate, on
   const [form, setForm] = useState<Form>(() => (product ? {
     name: product.name, brand: product.brand ?? '', size: product.size ?? '', categoryId: product.categoryId,
     packSize: String(Number(factor('CARTON') ?? 6)), bagKg: factor('BAG') ? String(Number(factor('BAG'))) : '', returnableEmpty: product.returnableEmpty,
+    // Shown in peti for bottles, kg for rice; stored in base units.
+    reorder: product.reorderLevel == null ? '' : String(round2(Number(product.reorderLevel) / (product.baseUnit === 'BOTTLE' ? Number(factor('CARTON') ?? 1) : 1))),
   } : EMPTY));
   const units = unitsFor(line, form);
   const [rates, setRates] = useState<Record<string, string>>(() => Object.fromEntries(prices.map((p) => [p.unitName, String(Number(p.rate))])));
@@ -241,6 +243,7 @@ function ProductDialog({ line, product, categories, prices, canEdit, canRate, on
     const body = {
       categoryId: form.categoryId, name: form.name.trim(), brand: form.brand || undefined, size: form.size || undefined,
       isPacked: !bottles && !!form.bagKg, returnableEmpty: bottles && form.returnableEmpty, units,
+      reorderLevel: form.reorder === '' ? null : Number(form.reorder) * (bottles ? Number(form.packSize) || 1 : 1),
     };
     try {
       // Someone with only the rate permission edits rates, not the product itself.
@@ -312,6 +315,9 @@ function ProductDialog({ line, product, categories, prices, canEdit, canRate, on
                   </Field>
                 </>
               )}
+              <Field label="Reorder when stock falls to" optional span={6} hint="All locations together. Shows on the dashboard and Stock page when reached.">
+                <Affix suffix={line === 'BOTTLES' ? 'peti' : 'kg'}><input type="number" step="any" min="0" inputMode="decimal" placeholder="Not watched" value={form.reorder} onChange={(e) => set({ reorder: e.target.value })} /></Affix>
+              </Field>
             </div>
           </fieldset>
           <h3 style={{ margin: '22px 0 4px' }}>Default sale rate</h3>

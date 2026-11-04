@@ -7,6 +7,7 @@ import { AuditService } from '../audit/audit.module.js';
 import { CurrentUser, RequirePermissions, type AuthUser } from '../common/decorators.js';
 import { dayOf } from '../common/dates.js';
 import { StockService } from './stock.service.js';
+import { lowStock } from './low-stock.js';
 
 class TransferItemDto {
   @IsUUID() productId: string;
@@ -180,6 +181,12 @@ class StockController {
       ...(q.productId ? { opening, closing: { ok, damaged } } : {}),
       rows: out,
     };
+  }
+
+  /** Products at or below their reorder level. */
+  @Get('low')
+  low() {
+    return lowStock(this.prisma);
   }
 
   @Get('transfers')
