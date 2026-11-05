@@ -5,9 +5,9 @@ import { BusyButton, useToast } from '@/components/Feedback';
 import { Affix, Choice, Field } from '@/components/Form';
 import { Icon } from '@/components/Icon';
 import { api } from '@/lib/api';
-import { money, productLabel, unitLabel } from '@dist/shared';
+import { money, productLabel, tierLabel, unitLabel } from '@dist/shared';
 
-interface Row { productId: string; name: string; size: string | null; unitName: string; from: string; to: string; skipped: boolean }
+interface Row { productId: string; name: string; size: string | null; unitName: string; tier: string; from: string; to: string; skipped: boolean }
 interface Result { applied: boolean; changed: number; withoutRate: number; rows: Row[] }
 
 /**
@@ -22,12 +22,13 @@ export default function ChangeRatesDialog({ productIds, line, onClose, onDone }:
   const [value, setValue] = useState('');
   const [unit, setUnit] = useState(line === 'BOTTLES' ? 'CARTON' : 'KG');
   const [roundTo, setRoundTo] = useState(1);
+  const [tier, setTier] = useState<'' | 'RETAIL' | 'WHOLESALE'>('');
   const [preview, setPreview] = useState<Result | null>(null);
   const [busy, setBusy] = useState(false);
   const units = line === 'BOTTLES' ? [['CARTON', 'peti'], ['BOTTLE', 'bottle']] : [['KG', 'kg'], ['MAUND', 'maund'], ['BAG', 'bag']];
 
   const body = () => ({
-    productIds, roundTo,
+    productIds, roundTo, tier: tier || undefined,
     ...(mode === 'percent' ? { percent: Number(value) } : { amount: Number(value), unitName: unit }),
   });
 
@@ -76,7 +77,14 @@ export default function ChangeRatesDialog({ productIds, line, onClose, onDone }:
                 </Field>
               </>
             )}
-            <Field label="Round new rates to" span={12}>
+            <Field label="Price list" span={6}>
+              <div className="chips">
+                {([['', 'Both'], ['RETAIL', 'Retail'], ['WHOLESALE', 'Wholesale']] as const).map(([v, l]) => (
+                  <button key={l} type="button" className={`chip${tier === v ? ' on' : ''}`} aria-pressed={tier === v} onClick={() => { setTier(v); reset(); }}>{l}</button>
+                ))}
+              </div>
+            </Field>
+            <Field label="Round new rates to" span={6}>
               <div className="chips">
                 {[[0.01, 'Paisa'], [1, 'Rs 1'], [5, 'Rs 5'], [10, 'Rs 10']].map(([v, l]) => (
                   <button key={v} type="button" className={`chip${roundTo === v ? ' on' : ''}`} aria-pressed={roundTo === v} onClick={() => { setRoundTo(Number(v)); reset(); }}>{l}</button>
@@ -92,11 +100,11 @@ export default function ChangeRatesDialog({ productIds, line, onClose, onDone }:
               </p>
               <div className="table-wrap" style={{ maxHeight: 280, overflowY: 'auto' }}>
                 <table>
-                  <thead><tr><th>Product</th><th>Unit</th><th className="num">Now</th><th className="num">New</th></tr></thead>
+                  <thead><tr><th>Product</th><th>Unit</th><th>List</th><th className="num">Now</th><th className="num">New</th></tr></thead>
                   <tbody>
                     {preview.rows.map((r) => (
-                      <tr key={`${r.productId}|${r.unitName}`} className={r.skipped ? 'inactive' : ''}>
-                        <td>{productLabel(r)}</td><td>{unitLabel(r.unitName)}</td>
+                      <tr key={`${r.productId}|${r.unitName}|${r.tier}`} className={r.skipped ? 'inactive' : ''}>
+                        <td>{productLabel(r)}</td><td>{unitLabel(r.unitName)}</td><td>{tierLabel(r.tier)}</td>
                         <td className="num muted">{money(r.from)}</td>
                         <td className="num"><b className={Number(r.to) > Number(r.from) ? 'amt-debit' : Number(r.to) < Number(r.from) ? 'amt-credit' : ''}>{r.skipped ? 'no such unit' : money(r.to)}</b></td>
                       </tr>

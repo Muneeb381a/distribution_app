@@ -5,7 +5,7 @@
 
 import { useSyncExternalStore } from 'react';
 import {
-  billPrefix, checkHasLines, checkOneLine, checkPayment, checkSaleHead, chooseRate, creditBlock, DOC_PREFIX, defaultPaid,
+  billPrefix, checkHasLines, checkOneLine, checkPayment, checkSaleHead, chooseRate, creditBlock, DOC_PREFIX, defaultPaid, listRate,
   emptiesGiven, localDay, offlineNumber, round2, shortageText, type DocPrefix,
 } from '@dist/shared';
 import { api, ApiError, getUser } from './api';
@@ -18,11 +18,11 @@ export interface SnapProduct {
   units: { unitName: string; factorToBase: string }[];
   category: { name: string; businessLine: { code: 'BOTTLES' | 'RICE' } };
 }
-export interface SnapCustomer { id: string; name: string; shopName: string | null; area: string | null; phone: string | null; type: 'CASH' | 'CREDIT'; creditLimit: string | null; balance: string }
+export interface SnapCustomer { id: string; name: string; shopName: string | null; area: string | null; phone: string | null; type: 'CASH' | 'CREDIT'; creditLimit: string | null; balance: string; priceTier?: string }
 export interface Snapshot {
   at: string;
   products: SnapProduct[];
-  prices: { productId: string; unitName: string; rate: string }[];
+  prices: { productId: string; unitName: string; tier?: string; rate: string }[];
   locations: { id: string; name: string; type: string }[];
   salesmen: { id: string; name: string }[];
   customers: SnapCustomer[];
@@ -334,7 +334,7 @@ export async function previewOffline(s: Snapshot, b: SaleBody, perms: string[]):
     const f = factor(p, l.unitName);
     if (!f) throw new Error(`${p.name} has no unit ${l.unitName}`);
     const fixed = customer && s.rates.find((r) => r.customerId === customer.id && r.productId === p.id && r.unitName === l.unitName)?.rate;
-    const list = s.prices.find((r) => r.productId === p.id && r.unitName === l.unitName)?.rate;
+    const list = listRate(s.prices, p.id, l.unitName, customer?.priceTier);
     const rate = Number(chooseRate({ productName: p.name, unitName: l.unitName, fixed: fixed ?? null, list: list ?? null, entered: l.rate ?? null, canEditRate: perms.includes('RATE_EDIT') }));
     return { p, qtyBase: l.qty * f, rate, amount: round2(l.qty * rate) };
   };

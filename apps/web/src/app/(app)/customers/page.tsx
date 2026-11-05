@@ -2,11 +2,11 @@
 
 import Link from 'next/link';
 import CrudPage from '@/components/CrudPage';
-import { CUSTOMER_TYPES, money } from '@dist/shared';
+import { CUSTOMER_TYPES, money, PRICE_TIERS } from '@dist/shared';
 
 interface Customer {
   id: string; name: string; shopName: string | null; phone: string | null; area: string | null;
-  type: 'CASH' | 'CREDIT'; creditLimit: string | null; openingBalance: string;
+  type: 'CASH' | 'CREDIT'; creditLimit: string | null; openingBalance: string; priceTier: string;
 }
 
 export default function CustomersPage() {
@@ -31,6 +31,9 @@ export default function CustomersPage() {
           value: t.value, label: t.long, icon: t.value === 'CREDIT' ? 'khata' : 'wallet',
           description: t.value === 'CREDIT' ? 'Takes goods on khata and pays later' : 'Pays in full on every bill',
         })) },
+        { name: 'priceTier', label: 'Price list', type: 'choice', section: 'account', initial: 'RETAIL', options: PRICE_TIERS.map((t) => ({
+          value: t.value, label: t.label, description: t.description, icon: t.value === 'WHOLESALE' ? 'stock' : 'sales',
+        })), hint: 'Which list rates their bills use. Fixed rates on the Rates page still come first.' },
         { name: 'creditLimit', label: 'Credit limit', type: 'number', prefix: 'Rs', section: 'account', showWhen: (v) => v.type === 'CREDIT', hint: 'Bills that would cross it need the override permission. Leave empty for no limit.' },
         { name: 'openingBalance', label: 'Opening balance', type: 'number', prefix: 'Rs', section: 'account', hint: 'What they owe you today, from the old register' },
       ]}
@@ -39,6 +42,7 @@ export default function CustomersPage() {
         { header: 'Shop', render: (r) => r.shopName ?? '', value: (r) => r.shopName },
         { header: 'Area', render: (r) => r.area ?? '', value: (r) => r.area },
         { header: 'Type', render: (r) => <span className={`badge ${r.type === 'CREDIT' ? 'amber' : 'green'}`}>{r.type === 'CREDIT' ? 'Udhaar' : 'Cash'}</span> },
+        { header: 'Price list', value: (r) => r.priceTier, render: (r) => (r.priceTier === 'WHOLESALE' ? <span className="badge blue">Wholesale</span> : <span className="muted">Retail</span>) },
         { header: 'Credit limit', num: true, value: (r) => r.creditLimit, render: (r) => (r.creditLimit ? money(r.creditLimit) : '—') },
         { header: 'Opening balance', num: true, value: (r) => r.openingBalance, render: (r) => money(r.openingBalance) },
       ]}

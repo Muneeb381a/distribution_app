@@ -198,6 +198,8 @@ model Customer {
   type           CustomerType     @default(CASH)
   creditLimit    Decimal?         @db.Decimal(14, 2)
   openingBalance Decimal          @default(0) @db.Decimal(14, 2)
+  /// Which list rates this customer pays: RETAIL or WHOLESALE.
+  priceTier      String           @default("RETAIL")
   isActive       Boolean          @default(true)
   createdAt      DateTime         @default(now())
   rates          CustomerRate[]
@@ -444,13 +446,15 @@ enum CustomerLedgerRef {
 }
 
 /// List price used when the customer has no fixed rate.
+/// List rate per unit and price list (RETAIL or WHOLESALE); used when the customer has no fixed rate.
 model ProductPrice {
   productId String
   unitName  UnitName
+  tier      String   @default("RETAIL")
   rate      Decimal  @db.Decimal(14, 2)
   product   Product  @relation(fields: [productId], references: [id])
 
-  @@id([productId, unitName])
+  @@id([productId, unitName, tier])
 }
 
 model Sale {

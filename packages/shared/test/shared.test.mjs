@@ -136,3 +136,18 @@ test('whatsapp numbers', async () => {
   assert.equal(waPhone('+92 300 1234567'), '923001234567');
   assert.equal(waPhone(null), '');
 });
+
+test('price tiers: wholesale rate, falling back to retail', async () => {
+  const { listRate, tierLabel } = await import('../dist/index.js');
+  const prices = [
+    { productId: 'p', unitName: 'CARTON', tier: 'RETAIL', rate: '1350' },
+    { productId: 'p', unitName: 'CARTON', tier: 'WHOLESALE', rate: '1300' },
+    { productId: 'p', unitName: 'BOTTLE', rate: '230' },
+  ];
+  assert.equal(listRate(prices, 'p', 'CARTON', 'WHOLESALE'), '1300');
+  assert.equal(listRate(prices, 'p', 'CARTON', 'RETAIL'), '1350');
+  assert.equal(listRate(prices, 'p', 'CARTON', null), '1350');
+  assert.equal(listRate(prices, 'p', 'BOTTLE', 'WHOLESALE'), '230'); // no wholesale rate: retail
+  assert.equal(listRate(prices, 'p', 'BAG', 'WHOLESALE'), null);
+  assert.equal(tierLabel('WHOLESALE'), 'Wholesale');
+});

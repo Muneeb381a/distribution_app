@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { BusyButton, Empty, SkeletonRows, useConfirm, usePrompt, useToast } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
 import { LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
@@ -8,7 +8,7 @@ import { api, can, useUser } from '@/lib/api';
 import Link from 'next/link';
 import ChangeRatesDialog from '@/components/ChangeRatesDialog';
 import { Affix, Field, Toggle } from '@/components/Form';
-import { DRINK_SIZE_PRESETS, defaultPack, money, round2, unitLabel } from '@dist/shared';
+import { DRINK_SIZE_PRESETS, defaultPack, money, PRICE_TIERS, round2, unitLabel } from '@dist/shared';
 
 type Line = 'BOTTLES' | 'RICE';
 interface Category { id: string; name: string; parentId: string | null; businessLine: { code: Line } }
@@ -19,7 +19,8 @@ interface Product {
   units: Unit[];
   category: { name: string; businessLine: { code: Line } };
 }
-interface Price { productId: string; unitName: string; rate: string }
+interface Price { productId: string; unitName: string; tier: string; rate: string }
+const rateKey = (unitName: string, tier: string) => `${unitName}|${tier}`;
 
 const EMPTY = { name: '', brand: '', size: '', categoryId: '', packSize: '6', bagKg: '', returnableEmpty: true, reorder: '' };
 type Form = typeof EMPTY;
@@ -179,7 +180,10 @@ export default function ProductsPage() {
                   </span>
                 </td>
                 <td className="num">
-                  {pr.length ? pr.map((x) => <div key={x.unitName}><b>{money(x.rate)}</b> <span className="muted">/ {unitLabel(x.unitName)}</span></div>) : <span className="badge amber">Not set</span>}
+                  {pr.length ? pr.filter((x) => (x.tier ?? 'RETAIL') === 'RETAIL').map((x) => {
+                    const w = pr.find((y) => y.unitName === x.unitName && y.tier === 'WHOLESALE');
+                    return <div key={x.unitName}><b>{money(x.rate)}</b> <span className="muted">/ {unitLabel(x.unitName)}</span>{w && <span className="whole-rate" title="Wholesale"> · W {money(w.rate)}</span>}</div>;
+                  }) : <span className="badge amber">Not set</span>}
                 </td>
                 {(canEdit || canRate) && (
                   <td>
@@ -239,7 +243,8 @@ function ProductDialog({ line, product, categories, prices, canEdit, canRate, on
     reorder: product.reorderLevel == null ? '' : String(round2(Number(product.reorderLevel) / (product.baseUnit === 'BOTTLE' ? Number(factor('CARTON') ?? 1) : 1))),
   } : EMPTY));
   const units = unitsFor(line, form);
-  const [rates, setRates] = useState<Record<string, string>>(() => Object.fromEntries(prices.map((p) => [p.unitName, String(Number(p.rate))])));
+  // Keyed "CARTON|RETAIL", "CARTON|WHOLESALE"…
+  const [rates, setRates] = useState<Record<string, string>>(() => Object.fromEntries(prices.map((p) => [rateKey(p.unitName, p.tier ?? 'RETAIL'), String(Number(p.rate))])));
   const [busy, setBusy] = useState(false);
   const set = (patch: Partial<Form>) => setForm({ ...form, ...patch });
   /** Typing or picking a size fills bottles per peti and returnable from the usual pack. */
@@ -265,9 +270,10 @@ function ProductDialog({ line, product, categories, prices, canEdit, canRate, on
         ? await api<{ id: string }>(`/products/${product.id}`, { method: 'PATCH', json: body })
         : await api<{ id: string }>('/products', { method: 'POST', json: { ...body, baseUnit: bottles ? 'BOTTLE' : 'KG' } });
       if (canRate) {
-        const list = units.filter((u) => rates[u.unitName] !== undefined && rates[u.unitName] !== '').map((u) => ({ unitName: u.unitName, rate: Number(rates[u.unitName]) }));
-        const before = JSON.stringify(prices.map((p) => [p.unitName, Number(p.rate)]).sort());
-        if (JSON.stringify(list.map((p) => [p.unitName, p.rate]).sort()) !== before) {
+        const list = units.flatMap((u) => PRICE_TIERS.map((t) => ({ unitName: u.unitName, tier: t.value as string, raw: rates[rateKey(u.unitName, t.value)] })))
+          .filter((x) => x.raw !== undefined && x.raw !== '').map(({ unitName, tier, raw }) => ({ unitName, tier, rate: Number(raw) }));
+        const before = JSON.stringify(prices.map((p) => [p.unitName, p.tier ?? 'RETAIL', Number(p.rate)]).sort());
+        if (JSON.stringify(list.map((p) => [p.unitName, p.tier, p.rate]).sort()) !== before) {
           await api(`/product-prices/${saved.id}`, { method: 'PUT', json: { prices: list } });
         }
       }
@@ -332,15 +338,28 @@ function ProductDialog({ line, product, categories, prices, canEdit, canRate, on
               </Field>
             </div>
           </fieldset>
-          <h3 style={{ margin: '22px 0 4px' }}>Default sale rate</h3>
-          <p className="card-sub" style={{ margin: '0 0 12px' }}>Used on bills when the customer has no fixed rate. {canRate ? 'Leave a unit empty to require a rate on the bill.' : 'You need the rate-edit permission to change these.'}</p>
-          <div className="fgrid">
-            {units.map((u) => (
-              <Field key={u.unitName} span={4} label={`Per ${unitLabel(u.unitName)}`} optional
-                hint={u.unitName === 'CARTON' && rates.BOTTLE && !rates.CARTON ? `= Rs ${money(Number(rates.BOTTLE) * Number(form.packSize || 0))} at bottle rate` : undefined}>
-                <Affix prefix="Rs"><input type="number" step="any" min="0" inputMode="decimal" disabled={!canRate} placeholder="—" value={rates[u.unitName] ?? ''} onChange={(e) => setRates({ ...rates, [u.unitName]: e.target.value })} /></Affix>
-              </Field>
-            ))}
+          <h3 style={{ margin: '22px 0 4px' }}>List rates</h3>
+          <p className="card-sub" style={{ margin: '0 0 12px' }}>
+            Used on bills when the customer has no fixed rate: retail for retail customers and walk-ins, wholesale for wholesale customers.
+            An empty wholesale rate uses the retail rate. {canRate ? 'Leave both empty to require a rate on the bill.' : 'You need the rate-edit permission to change these.'}
+          </p>
+          <div className="rate-grid">
+            <span /><span className="rate-head">Retail</span><span className="rate-head">Wholesale</span>
+            {units.map((u) => {
+              const r = (t: string) => rates[rateKey(u.unitName, t)] ?? '';
+              const set = (t: string, v: string) => setRates({ ...rates, [rateKey(u.unitName, t)]: v });
+              const retail = Number(r('RETAIL')), whole = Number(r('WHOLESALE'));
+              return (
+                <Fragment key={u.unitName}>
+                  <span className="rate-unit">Per {unitLabel(u.unitName)}</span>
+                  <Affix prefix="Rs"><input aria-label={`Retail rate per ${unitLabel(u.unitName)}`} type="number" step="any" min="0" inputMode="decimal" disabled={!canRate} placeholder="—" value={r('RETAIL')} onChange={(e) => set('RETAIL', e.target.value)} /></Affix>
+                  <div>
+                    <Affix prefix="Rs"><input aria-label={`Wholesale rate per ${unitLabel(u.unitName)}`} type="number" step="any" min="0" inputMode="decimal" disabled={!canRate} placeholder={r('RETAIL') ? `${r('RETAIL')} (retail)` : '—'} value={r('WHOLESALE')} onChange={(e) => set('WHOLESALE', e.target.value)} /></Affix>
+                    {retail > 0 && whole > 0 && <span className={`rate-diff${whole > retail ? ' warn' : ''}`}>{whole > retail ? 'above retail' : `${money(retail - whole)} less (${Math.round(((retail - whole) / retail) * 100)}%)`}</span>}
+                  </div>
+                </Fragment>
+              );
+            })}
           </div>
           <div className="modal-actions">
             <button type="button" className="secondary" onClick={onClose}>Cancel</button>

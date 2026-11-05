@@ -62,7 +62,7 @@ class SyncController {
       this.prisma.employee.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
       this.prisma.customer.findMany({
         where: { isActive: true },
-        select: { id: true, name: true, shopName: true, area: true, phone: true, type: true, creditLimit: true, openingBalance: true },
+        select: { id: true, name: true, shopName: true, area: true, phone: true, type: true, creditLimit: true, openingBalance: true, priceTier: true },
         orderBy: { name: 'asc' },
       }),
       this.prisma.customerRate.findMany(),

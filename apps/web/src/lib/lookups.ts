@@ -29,7 +29,7 @@ export const productOptions = (products: ProductOpt[]) =>
     sub: lineLabel(p.category.businessLine.code),
   }));
 
-export interface CustomerOpt { id: string; name: string; shopName: string | null; area: string | null; phone?: string | null; type: 'CASH' | 'CREDIT' }
+export interface CustomerOpt { id: string; name: string; shopName: string | null; area: string | null; phone?: string | null; type: 'CASH' | 'CREDIT'; priceTier?: string }
 
 /** Combobox options for customers: search by name, shop, area or phone. */
 export const customerOptions = (customers: CustomerOpt[]) =>

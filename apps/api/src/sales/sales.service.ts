@@ -9,7 +9,7 @@ import type { AuthUser } from '../common/decorators.js';
 import { StockService, type Tx } from '../stock/stock.service.js';
 import { customerBalance } from '../common/balances.js';
 import {
-  BILL_PAYMENT_METHODS, DOC_PREFIX, PAYMENT_METHODS, RuleError, billPrefix, checkHasLines, checkOneLine, checkPayment, checkSaleHead, chooseRate, creditBlock, defaultPaid,
+  BILL_PAYMENT_METHODS, DOC_PREFIX, PAYMENT_METHODS, RuleError, billPrefix, listRate, checkHasLines, checkOneLine, checkPayment, checkSaleHead, chooseRate, creditBlock, defaultPaid,
   emptiesGiven, saleLocationTypes, shortageText,
 } from '@dist/shared';
 
@@ -98,7 +98,7 @@ interface Line {
 
 export interface Plan {
   businessLine: BusinessLineCode;
-  customer: { id: string; name: string; type: 'CASH' | 'CREDIT'; creditLimit: Dec | null } | null;
+  customer: { id: string; name: string; type: 'CASH' | 'CREDIT'; creditLimit: Dec | null; priceTier: string } | null;
   items: Line[];
   returns: Line[];
   gross: Dec;
@@ -169,7 +169,8 @@ export class SalesService {
       if (!p?.isActive) throw new BadRequestException('Unknown or inactive product');
       const { qtyBase } = await this.stock.toBase(tx, l.productId, l.unitName, l.qty);
       const fixed = custRates.find((r) => r.productId === l.productId && r.unitName === l.unitName)?.rate;
-      const list = listPrices.find((r) => r.productId === l.productId && r.unitName === l.unitName)?.rate;
+      // The customer's price list (wholesale falls back to retail); walk-in sales are retail.
+      const list = listRate(listPrices, l.productId, l.unitName, customer?.priceTier);
       const rate = new D(rule(() => chooseRate({
         productName: p.name, unitName: l.unitName, fixed: fixed?.toString() ?? null, list: list?.toString() ?? null,
         entered: l.rate ?? null, canEditRate: user.permissions.includes('RATE_EDIT'),
@@ -245,7 +246,7 @@ export class SalesService {
 
     return {
       businessLine,
-      customer: customer ? { id: customer.id, name: customer.name, type: customer.type, creditLimit: customer.creditLimit } : null,
+      customer: customer ? { id: customer.id, name: customer.name, type: customer.type, creditLimit: customer.creditLimit, priceTier: customer.priceTier } : null,
       items, returns, gross, returnsCredit, net, paid, previousBalance, newBalance,
       credit: {
         limit: customer?.creditLimit ?? null,

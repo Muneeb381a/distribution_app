@@ -86,3 +86,21 @@ export function creditBlock(o: { customer: { type: string; creditLimit: string |
 export const emptiesGiven = (qtyBase: number) => Math.round(qtyBase);
 
 export const shortageText = (productName: string, have: number | string, need: number | string) => `${productName}: have ${have}, need ${need}`;
+
+/** Price lists. Every customer is on one; walk-in sales use retail. */
+export const PRICE_TIERS = [
+  { value: 'RETAIL', label: 'Retail', description: 'The standard list rate' },
+  { value: 'WHOLESALE', label: 'Wholesale', description: 'Lower rate for bulk buyers and dealers' },
+] as const;
+export type PriceTier = (typeof PRICE_TIERS)[number]['value'];
+export const tierLabel = (t: string | null | undefined) => PRICE_TIERS.find((x) => x.value === t)?.label ?? 'Retail';
+
+/**
+ * The list rate for a product and unit on a price list. A product without a wholesale rate sells to
+ * wholesale customers at retail, so a missing wholesale rate never blocks a bill. Rows without a
+ * tier (older data) are retail.
+ */
+export function listRate<T>(prices: { productId: string; unitName: string; tier?: string | null; rate: T }[], productId: string, unitName: string, tier?: string | null): T | null {
+  const at = (t: string) => prices.find((p) => p.productId === productId && p.unitName === unitName && (p.tier ?? 'RETAIL') === t)?.rate;
+  return (tier === 'WHOLESALE' ? at('WHOLESALE') : undefined) ?? at('RETAIL') ?? null;
+}

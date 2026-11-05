@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Module, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { PartialType } from '@nestjs/mapped-types';
 import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsEnum, IsNumber, IsOptional, IsString, IsUUID, Max, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsIn, IsNumber, IsOptional, IsString, IsUUID, Max, Min, ValidateNested } from 'class-validator';
 import { CustomerType, EmployeeType, LocationType, SupplierType, UnitName } from '@prisma/client';
 import { PrismaService } from '../prisma.service.js';
 import { AuditService } from '../audit/audit.module.js';
@@ -24,6 +24,8 @@ class CustomerDto {
   @IsOptional() @IsEnum(CustomerType) type?: CustomerType;
   @IsOptional() @IsNumber() @Min(0) creditLimit?: number;
   @IsOptional() @IsNumber() openingBalance?: number;
+  /** Which list rates the customer pays. */
+  @IsOptional() @IsIn(['RETAIL', 'WHOLESALE']) priceTier?: string;
 }
 class UpdateCustomerDto extends PartialType(CustomerDto) {
   @IsOptional() @IsBoolean() isActive?: boolean;

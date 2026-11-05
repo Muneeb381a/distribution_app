@@ -13,6 +13,8 @@ import { overLimit, withCustomerBalances } from '../common/balances.js';
 
 class PriceDto {
   @IsEnum(UnitName) unitName: UnitName;
+  /** Price list; retail when left out. */
+  @IsOptional() @IsIn(['RETAIL', 'WHOLESALE']) tier?: string;
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) rate: number;
 }
 class PricesDto {
@@ -31,6 +33,8 @@ class ChangePricesDto {
   @IsOptional() @IsEnum(UnitName) unitName?: UnitName;
   /** Round new rates to the nearest 1, 5 or 10 rupees (default 1). */
   @IsOptional() @IsIn([0.01, 1, 5, 10]) roundTo?: number;
+  /** Change only this price list; both when left out. */
+  @IsOptional() @IsIn(['RETAIL', 'WHOLESALE']) tier?: string;
   /** Only work out the new rates; change nothing. */
   @IsOptional() @IsBoolean() preview?: boolean;
 }
@@ -289,7 +293,7 @@ class SalesController {
     if (amt && !dto.unitName) throw new BadRequestException('Say which unit the amount is for');
     const step = new Prisma.Decimal(dto.roundTo ?? 1);
     const [prices, products] = await Promise.all([
-      this.prisma.productPrice.findMany({ where: { productId: { in: dto.productIds } } }),
+      this.prisma.productPrice.findMany({ where: { productId: { in: dto.productIds }, tier: dto.tier } }),
       this.prisma.product.findMany({ where: { id: { in: dto.productIds } }, select: { id: true, name: true, size: true, units: { select: { unitName: true, factorToBase: true } } } }),
     ]);
     const rows = prices.map((p) => {
@@ -300,17 +304,17 @@ class SalesController {
       else {
         const per = factor(dto.unitName!);
         // A product without the chosen unit is left as it is.
-        if (!per) return { productId: p.productId, name: product.name, size: product.size, unitName: p.unitName, from: p.rate, to: p.rate, skipped: true };
+        if (!per) return { productId: p.productId, name: product.name, size: product.size, unitName: p.unitName, tier: p.tier, from: p.rate, to: p.rate, skipped: true };
         next = p.rate.plus(new Prisma.Decimal(amt).div(per).mul(factor(p.unitName) ?? 1));
       }
       next = next.div(step).toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP).mul(step).toDecimalPlaces(2);
       if (next.lt(0)) throw new BadRequestException(`${product.name}: the ${p.unitName.toLowerCase()} rate would go below zero`);
-      return { productId: p.productId, name: product.name, size: product.size, unitName: p.unitName, from: p.rate, to: next, skipped: false };
-    }).sort((a, b) => a.name.localeCompare(b.name) || a.unitName.localeCompare(b.unitName));
+      return { productId: p.productId, name: product.name, size: product.size, unitName: p.unitName, tier: p.tier, from: p.rate, to: next, skipped: false };
+    }).sort((a, b) => a.name.localeCompare(b.name) || a.unitName.localeCompare(b.unitName) || b.tier.localeCompare(a.tier));
     const changed = rows.filter((r) => !r.to.equals(r.from));
     if (!dto.preview && changed.length) {
-      await this.prisma.$transaction(changed.map((r) => this.prisma.productPrice.update({ where: { productId_unitName: { productId: r.productId, unitName: r.unitName } }, data: { rate: r.to } })));
-      await this.audit.log(u.id, 'CHANGE_PRICES', 'Product', undefined, undefined, { percent: dto.percent, amount: dto.amount, unitName: dto.unitName, roundTo: dto.roundTo, rates: changed.map((r) => [r.name, r.unitName, r.from, r.to]) });
+      await this.prisma.$transaction(changed.map((r) => this.prisma.productPrice.update({ where: { productId_unitName_tier: { productId: r.productId, unitName: r.unitName, tier: r.tier } }, data: { rate: r.to } })));
+      await this.audit.log(u.id, 'CHANGE_PRICES', 'Product', undefined, undefined, { percent: dto.percent, amount: dto.amount, unitName: dto.unitName, roundTo: dto.roundTo, tier: dto.tier, rates: changed.map((r) => [r.name, r.unitName, r.tier, r.from, r.to]) });
     }
     return { applied: !dto.preview, changed: changed.length, withoutRate: dto.productIds.filter((id) => !prices.some((p) => p.productId === id)).length, rows };
   }
@@ -322,7 +326,13 @@ class SalesController {
     const before = await this.prisma.productPrice.findMany({ where: { productId } });
     const after = await this.prisma.$transaction(async (tx) => {
       await tx.productPrice.deleteMany({ where: { productId } });
-      await tx.productPrice.createMany({ data: dto.prices.map((p) => ({ ...p, productId })) });
+      const seen = new Set<string>();
+      for (const p of dto.prices) {
+        const k = `${p.unitName}|${p.tier ?? 'RETAIL'}`;
+        if (seen.has(k)) throw new BadRequestException(`Two ${(p.tier ?? 'retail').toLowerCase()} rates for ${p.unitName.toLowerCase()}`);
+        seen.add(k);
+      }
+      await tx.productPrice.createMany({ data: dto.prices.map((p) => ({ ...p, tier: p.tier ?? 'RETAIL', productId })) });
       return tx.productPrice.findMany({ where: { productId } });
     });
     await this.audit.log(u.id, 'SET_PRICES', 'Product', productId, before, after);

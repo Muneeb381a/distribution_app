@@ -14,7 +14,7 @@ import { getSnapshot, isNetworkError, previewOffline, saveSaleOffline, useSyncSt
 import type { PrintMode } from '@/components/PrintPanel';
 import { money, BILL_PAYMENT_METHODS, RETURN_REASONS, unitLabel } from '@dist/shared';
 
-interface Customer { id: string; name: string; shopName: string | null; area: string | null; phone: string | null; type: 'CASH' | 'CREDIT'; creditLimit: string | null }
+interface Customer { id: string; name: string; shopName: string | null; area: string | null; phone: string | null; type: 'CASH' | 'CREDIT'; creditLimit: string | null; priceTier?: string }
 interface LastBill { id: string; billNo: string; date: string; net: string; rates: Record<string, string>; items: { productId: string; unitName: string; qty: string }[] }
 interface Saved { id: string | null; billNo: string; net: string; offline?: OutboxOp }
 interface Line { productId: string; unitName: string; qty: string; rate: string; reason: string }
@@ -387,6 +387,7 @@ export default function NewSalePage() {
                   <span>{[customer.shopName, customer.area].filter(Boolean).join(' · ') || 'No shop / area on file'}</span>
                 </div>
                 <span className={`badge ${customer.type === 'CREDIT' ? 'amber' : 'green'}`}>{customer.type === 'CREDIT' ? 'Udhaar customer' : 'Cash customer'}</span>
+                {customer.priceTier === 'WHOLESALE' && <span className="badge blue" title="List rates come from the wholesale list">Wholesale rates</span>}
                 {preview && <span className="badge">Owes Rs {money(preview.previousBalance)}</span>}
                 {lastBill && (
                   <span className="last-bill">
