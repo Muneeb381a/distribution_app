@@ -6,11 +6,13 @@ import { Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { FeedbackProvider } from '@/components/Feedback';
 import { Icon, type IconName } from '@/components/Icon';
 import TopBar from '@/components/TopBar';
+import type { Permission } from '@dist/shared';
 import { api, can, updateUser, useUser, type SessionUser } from '@/lib/api';
 import { startSync, useSyncState } from '@/lib/offline';
 import { PageTitleCtx } from '@/lib/pageTitle';
+import { getSettings, loadSettings, useSettings } from '@/lib/settings';
 
-interface NavItem { href: string; label: string; icon: IconName; permission: string | null }
+interface NavItem { href: string; label: string; icon: IconName; permission: Permission | null }
 
 const NAV: { title: string; items: NavItem[] }[] = [
   { title: 'Overview', items: [{ href: '/dashboard', label: 'Dashboard', icon: 'dashboard', permission: null }] },
@@ -18,7 +20,9 @@ const NAV: { title: string; items: NavItem[] }[] = [
     title: 'Selling',
     items: [
       { href: '/sales', label: 'Sales', icon: 'sales', permission: 'SALE_CREATE' },
+      { href: '/trips', label: 'Vehicle trips', icon: 'suppliers', permission: 'STOCK_TRANSFER' },
       { href: '/khata', label: 'Khata', icon: 'khata', permission: 'PAYMENT_RECORD' },
+      { href: '/cheques', label: 'Cheques', icon: 'wallet', permission: 'PAYMENT_RECORD' },
       { href: '/outbox', label: 'Offline outbox', icon: 'cloud', permission: 'SALE_CREATE' },
       { href: '/customers', label: 'Customers', icon: 'customers', permission: null },
     ],
@@ -48,6 +52,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
       { href: '/users', label: 'Users & roles', icon: 'users', permission: 'USER_MANAGE' },
       { href: '/import', label: 'Import', icon: 'import', permission: 'IMPORT_DATA' },
       { href: '/audit', label: 'Audit log', icon: 'history', permission: 'AUDIT_VIEW' },
+      { href: '/settings', label: 'Settings', icon: 'settings', permission: 'SETTINGS_EDIT' },
     ],
   },
 ];
@@ -56,13 +61,19 @@ const NAV: { title: string; items: NavItem[] }[] = [
 const DETAIL: [RegExp, string][] = [
   [/^\/sales\/new$/, 'New bill'],
   [/^\/sales\/[^/]+$/, 'Bill'],
+  [/^\/khata\/[^/]+\/statement$/, 'Statement'],
   [/^\/khata\/[^/]+$/, 'Customer khata'],
   [/^\/customers\/[^/]+$/, 'Customer rates'],
   [/^\/suppliers\/[^/]+$/, 'Supplier ledger'],
   [/^\/receipts\/[^/]+$/, 'Receipt'],
+  [/^\/payroll\/advances\/[^/]+$/, 'Advance slip'],
   [/^\/payroll\/[^/]+$/, 'Salary slip'],
+  [/^\/employees\/[^/]+$/, 'Employee ledger'],
+  [/^\/products\/catalog$/, 'Add from catalog'],
+  [/^\/stock\/history$/, 'Stock history'],
+  [/^\/trips\/[^/]+$/, 'Trip'],
 ];
-const RECEIPT_PARENT = NAV[1].items[1];
+const RECEIPT_PARENT = NAV[1].items.find((i) => i.href === '/khata')!;
 // /outbox is listed in the menu, so it needs no detail entry.
 
 export interface Crumb { label: string; href?: string }
@@ -71,7 +82,7 @@ export interface Crumb { label: string; href?: string }
 function crumbsFor(pathname: string, detail?: string): Crumb[] {
   const all = NAV.flatMap((g) => g.items.map((i) => ({ ...i, group: g.title })));
   const item = pathname.startsWith('/receipts') ? { ...RECEIPT_PARENT, group: 'Selling' } : all.find((n) => pathname === n.href || pathname.startsWith(`${n.href}/`));
-  if (!item) return [{ label: detail ?? 'Distribution' }];
+  if (!item) return [{ label: detail ?? getSettings().businessName }];
   const sub = DETAIL.find(([re]) => re.test(pathname))?.[1];
   const out: Crumb[] = [{ label: item.group }, { label: item.label, href: sub ? item.href : undefined }];
   if (sub) out.push({ label: detail ?? sub });
@@ -118,9 +129,10 @@ const SIDEBAR_KEY = 'dist.sidebar';
 function TitledTopBar({ user, onMenu, detail }: { user: SessionUser; onMenu: () => void; detail: { path: string; title: string } | null }) {
   const pathname = usePathname();
   const crumbs = useMemo(() => crumbsFor(pathname, detail?.path === pathname ? detail.title : undefined), [pathname, detail]);
+  const { businessName } = useSettings();
   useEffect(() => {
-    document.title = `${crumbs[crumbs.length - 1].label} · Distribution`;
-  }, [crumbs]);
+    document.title = `${crumbs[crumbs.length - 1].label} · ${businessName}`;
+  }, [crumbs, businessName]);
   return <TopBar user={user} onMenu={onMenu} crumbs={crumbs} status={<SyncPill />} />;
 }
 
@@ -189,6 +201,12 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     if (ready && !user) router.replace('/login');
   }, [ready, user, router]);
 
+  // Business name, address and print settings for headers and bills (cached for offline).
+  useEffect(() => {
+    if (user) loadSettings();
+  }, [user]);
+  const biz = useSettings();
+
   // Pick up role / permission changes made since sign-in.
   const stored = user ? JSON.stringify([user.roleName, [...user.permissions].sort()]) : null;
   useEffect(() => {
@@ -214,7 +232,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           <nav className={`sidebar${open ? ' open' : ''}`} aria-label="Main menu">
             <div className="brand">
               <span className="logo"><Icon name="products" /></span>
-              <span className="brand-text">Distribution<small>Rice &amp; Beverages</small></span>
+              <span className="brand-text">{biz.businessName}{biz.tagline && <small>{biz.tagline}</small>}</span>
               <button className="collapse-btn" onClick={toggleSidebar} aria-label={collapsed ? 'Expand menu' : 'Collapse menu'} title={collapsed ? 'Expand menu' : 'Collapse menu'}>
                 <Icon name={collapsed ? 'chevronRight' : 'chevronLeft'} />
               </button>

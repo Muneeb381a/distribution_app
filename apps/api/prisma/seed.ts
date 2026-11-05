@@ -1,20 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import { PrismaClient, type BusinessLineCode } from '@prisma/client';
 import bcrypt from 'bcryptjs';
-import { DEFAULT_ROLES } from '../src/common/permissions.js';
+import { DEFAULT_ROLES, RICE_TREE } from '@dist/shared';
 
 const prisma = new PrismaClient();
 
-// Starting rice tree from plan section 7.1 (Type > Variety > Form); the owner edits it afterwards.
-const RICE_TREE: Record<string, Record<string, string[]>> = {
-  Basmati: Object.fromEntries(
-    ['Super Kernel', '1121', 'D-98', 'Super Basmati', '385', '515', 'Kissan'].map((v) => [v, ['White', 'Sella', 'Steam']]),
-  ),
-  'Non-basmati': Object.fromEntries(
-    ['PK-386', 'IRRI-6', 'IRRI-9', 'KS-282'].map((v) => [v, ['White', 'Sella', 'Steam', 'Parboiled']]),
-  ),
-  Broken: { Tota: ['5%', '25%', '100%'] },
-};
+// The starting rice tree (Type > Variety > Form) lives in @dist/shared so the catalog screen uses the same one.
 const BOTTLE_BRANDS = ['Coca-Cola', 'Pepsi', 'Sprite', 'Fanta', '7Up'];
 
 async function category(businessLineId: string, name: string, parentId: string | null) {

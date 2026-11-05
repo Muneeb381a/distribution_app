@@ -25,17 +25,17 @@ function range(q: RangeQuery) {
 
 const keyFor = (d: Date, groupBy: RangeQuery['groupBy']) => (groupBy === 'none' ? 'total' : groupBy === 'month' ? iso(d).slice(0, 7) : iso(d));
 
-interface LineTotals { qtySold: Dec; sales: Dec; returnsCredit: Dec; netSales: Dec; cost: Dec; grossProfit: Dec; expenses: Dec; netProfit: Dec }
-const emptyLine = (): LineTotals => ({ qtySold: ZERO(), sales: ZERO(), returnsCredit: ZERO(), netSales: ZERO(), cost: ZERO(), grossProfit: ZERO(), expenses: ZERO(), netProfit: ZERO() });
+interface LineTotals { qtySold: Dec; sales: Dec; returnsCredit: Dec; netSales: Dec; cost: Dec; grossProfit: Dec }
+const emptyLine = (): LineTotals => ({ qtySold: ZERO(), sales: ZERO(), returnsCredit: ZERO(), netSales: ZERO(), cost: ZERO(), grossProfit: ZERO() });
 
 @Controller('reports')
 class ReportsController {
   constructor(private prisma: PrismaService) {}
 
   /**
-   * End-of-day / monthly profit per business line.
-   * Revenue is net of returns credits. Cost is the latest purchase cost frozen on each sold line.
-   * Rent and other shared costs are reported separately and only affect the overall net profit.
+   * End-of-day / monthly profit. Bottles and rice each show their own gross profit (net sales - cost);
+   * expenses are not split between them and come off the combined gross profit only. Expenses are
+   * also totalled by godown/shop. Cost is the latest purchase cost frozen on each sold line.
    */
   @Get('profit') @RequirePermissions('REPORT_VIEW')
   async profit(@Query() q: RangeQuery) {
@@ -50,17 +50,17 @@ class ReportsController {
         where: { status: 'ACTIVE', date: { gte: from, lte: to } },
         select: { date: true, businessLine: true, returnsCredit: true, net: true, paidNow: true, customerId: true },
       }),
-      this.prisma.expense.findMany({ where: { status: 'ACTIVE', date: { gte: from, lte: to } }, select: { date: true, businessLine: true, amount: true } }),
+      this.prisma.expense.findMany({ where: { status: 'ACTIVE', date: { gte: from, lte: to } }, select: { date: true, amount: true, category: true, location: { select: { id: true, name: true, type: true } } } }),
       this.prisma.payment.findMany({ where: { status: 'ACTIVE', date: { gte: from, lte: to } }, select: { date: true, amount: true, saleId: true } }),
     ]);
 
-    type Period = { lines: Record<BusinessLineCode, LineTotals>; sharedExpenses: Dec; cash: { paidWithBills: Dec; otherReceipts: Dec; udhaarGiven: Dec }; uncostedLines: number };
+    type Period = { lines: Record<BusinessLineCode, LineTotals>; expenses: Dec; cash: { paidWithBills: Dec; otherReceipts: Dec; udhaarGiven: Dec }; uncostedLines: number };
     const periods = new Map<string, Period>();
     const get = (d: Date): Period => {
       const k = keyFor(d, groupBy);
       let p = periods.get(k);
       if (!p) {
-        p = { lines: { BOTTLES: emptyLine(), RICE: emptyLine() }, sharedExpenses: ZERO(), cash: { paidWithBills: ZERO(), otherReceipts: ZERO(), udhaarGiven: ZERO() }, uncostedLines: 0 };
+        p = { lines: { BOTTLES: emptyLine(), RICE: emptyLine() }, expenses: ZERO(), cash: { paidWithBills: ZERO(), otherReceipts: ZERO(), udhaarGiven: ZERO() }, uncostedLines: 0 };
         periods.set(k, p);
       }
       return p;
@@ -83,26 +83,34 @@ class ReportsController {
       if (s.customerId && unpaid.gt(0)) p.cash.udhaarGiven = p.cash.udhaarGiven.plus(unpaid);
     }
     for (const r of receipts) if (!r.saleId) get(r.date).cash.otherReceipts = get(r.date).cash.otherReceipts.plus(r.amount);
+    // Expenses for the whole range by place (godown / shop / general) and by category.
+    const byPlace = new Map<string, { locationId: string | null; name: string; type: string | null; amount: Dec }>();
+    const byCategory = new Map<string, Dec>();
     for (const e of expenses) {
       const p = get(e.date);
-      if (e.businessLine) p.lines[e.businessLine].expenses = p.lines[e.businessLine].expenses.plus(e.amount);
-      else p.sharedExpenses = p.sharedExpenses.plus(e.amount);
+      p.expenses = p.expenses.plus(e.amount);
+      const k = e.location?.id ?? 'general';
+      const place = byPlace.get(k) ?? { locationId: e.location?.id ?? null, name: e.location?.name ?? 'General', type: e.location?.type ?? null, amount: ZERO() };
+      place.amount = place.amount.plus(e.amount);
+      byPlace.set(k, place);
+      byCategory.set(e.category, (byCategory.get(e.category) ?? ZERO()).plus(e.amount));
     }
 
     const rows = [...periods.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([period, p]) => {
-      const total = emptyLine();
+      const sum = emptyLine();
       for (const code of ['BOTTLES', 'RICE'] as const) {
         const l = p.lines[code];
         l.netSales = l.sales.minus(l.returnsCredit);
         l.grossProfit = l.netSales.minus(l.cost);
-        l.netProfit = l.grossProfit.minus(l.expenses);
-        for (const k of Object.keys(total) as (keyof LineTotals)[]) total[k] = total[k].plus(l[k]);
+        for (const k of Object.keys(sum) as (keyof LineTotals)[]) sum[k] = sum[k].plus(l[k]);
       }
-      total.expenses = total.expenses.plus(p.sharedExpenses);
-      total.netProfit = total.grossProfit.minus(total.expenses);
-      return { period, ...p, total };
+      return { period, ...p, total: { ...sum, expenses: p.expenses, netProfit: sum.grossProfit.minus(p.expenses) } };
     });
-    return { from: iso(from), to: iso(to), groupBy, rows };
+    return {
+      from: iso(from), to: iso(to), groupBy, rows,
+      expensesByPlace: [...byPlace.values()].sort((a, b) => b.amount.comparedTo(a.amount)),
+      expensesByCategory: [...byCategory.entries()].map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount.comparedTo(a.amount)),
+    };
   }
 
   /** Rice bought vs sold per product over a range. */

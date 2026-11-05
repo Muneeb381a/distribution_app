@@ -1,1 +1,10 @@
-﻿{ "name": "distribution-app", "private": true, "scripts": { "api": "pnpm --filter api start:dev", "web": "pnpm --filter web dev" } }
+{
+  "name": "distribution-app",
+  "private": true,
+  "scripts": {
+    "api": "pnpm --filter api start:dev",
+    "web": "pnpm --filter web dev",
+    "backup": "node scripts/backup.mjs",
+    "restore": "node scripts/restore.mjs"
+  }
+}

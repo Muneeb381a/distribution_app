@@ -1,12 +1,27 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsEnum, IsInt, IsISO8601, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsISO8601, IsNumber, IsOptional, IsPositive, IsString, IsUUID, MaxLength, Min, ValidateNested } from 'class-validator';
 import { BusinessLineCode, Prisma, ReturnReason, SaleType, UnitName } from '@prisma/client';
 import { PrismaService } from '../prisma.service.js';
 import { AuditService } from '../audit/audit.module.js';
 import { dayOf } from '../common/dates.js';
 import type { AuthUser } from '../common/decorators.js';
 import { StockService, type Tx } from '../stock/stock.service.js';
+import { customerBalance } from '../common/balances.js';
+import {
+  BILL_PAYMENT_METHODS, DOC_PREFIX, PAYMENT_METHODS, RuleError, billPrefix, listRate, checkHasLines, checkOneLine, checkPayment, checkSaleHead, chooseRate, creditBlock, defaultPaid,
+  emptiesGiven, saleLocationTypes, shortageText,
+} from '@dist/shared';
+
+/** Runs a shared selling rule and answers with the HTTP status it asks for. */
+function rule<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (e) {
+    if (e instanceof RuleError) throw e.status === 403 ? new ForbiddenException(e.message) : new BadRequestException(e.message);
+    throw e;
+  }
+}
 
 const D = Prisma.Decimal;
 type Dec = Prisma.Decimal;
@@ -28,13 +43,26 @@ export class EmptiesCollectedDto {
   @IsInt() @Min(1) qty: number;
 }
 
+/** Cheque details from a payment, checked; null when the payment is not by cheque. */
+export function chequeOf(dto: { method?: string; date?: string; chequeNo?: string; chequeBank?: string; chequeDate?: string }) {
+  if (dto.method !== 'CHEQUE') return null;
+  const no = dto.chequeNo?.trim();
+  if (!no) throw new BadRequestException('Enter the cheque number');
+  return { no, bank: dto.chequeBank?.trim() || null, date: dayOf(dto.chequeDate ?? dto.date) };
+}
+
 export class PaymentDto {
   @IsOptional() @IsUUID() clientId?: string;
   @IsUUID() customerId: string;
   @IsNumber({ maxDecimalPlaces: 2 }) @IsPositive() amount: number;
-  @IsOptional() @IsString() method?: string;
+  @IsOptional() @IsIn(PAYMENT_METHODS.map((m) => m.value)) method?: string;
   @IsOptional() @IsISO8601() date?: string;
   @IsOptional() @IsString() note?: string;
+  /** Required when method is CHEQUE. */
+  @IsOptional() @IsString() @MaxLength(30) chequeNo?: string;
+  @IsOptional() @IsString() @MaxLength(60) chequeBank?: string;
+  /** Date on the cheque; defaults to the payment date. */
+  @IsOptional() @IsISO8601() chequeDate?: string;
 }
 
 export class SaleDto {
@@ -48,7 +76,7 @@ export class SaleDto {
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => SaleLineDto) items?: SaleLineDto[];
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => SaleReturnLineDto) returns?: SaleReturnLineDto[];
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) paidNow?: number;
-  @IsOptional() @IsString() method?: string;
+  @IsOptional() @IsIn(BILL_PAYMENT_METHODS.map((m) => m.value), { message: 'Take cheques as a payment on the khata, not with the bill' }) method?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => EmptiesCollectedDto) emptiesCollected?: EmptiesCollectedDto[];
   /** Save even though the credit limit would be crossed. Needs CREDIT_OVERRIDE. */
   @IsOptional() @IsBoolean() overrideCredit?: boolean;
@@ -70,7 +98,7 @@ interface Line {
 
 export interface Plan {
   businessLine: BusinessLineCode;
-  customer: { id: string; name: string; type: 'CASH' | 'CREDIT'; creditLimit: Dec | null } | null;
+  customer: { id: string; name: string; type: 'CASH' | 'CREDIT'; creditLimit: Dec | null; priceTier: string } | null;
   items: Line[];
   returns: Line[];
   gross: Dec;
@@ -92,11 +120,8 @@ export class SalesService {
 
   /** What the customer owes: opening balance plus every ledger entry. Negative = they are in credit. */
   async balance(tx: Tx, customerId: string): Promise<Dec> {
-    const [c, sum] = await Promise.all([
-      tx.customer.findUniqueOrThrow({ where: { id: customerId }, select: { openingBalance: true } }),
-      tx.customerLedger.aggregate({ where: { customerId }, _sum: { amount: true } }),
-    ]);
-    return c.openingBalance.plus(sum._sum.amount ?? 0);
+    const c = await tx.customer.findUniqueOrThrow({ where: { id: customerId }, select: { id: true, openingBalance: true } });
+    return customerBalance(tx, c);
   }
 
   /** Serialises everything that changes one customer's balance so the previous-balance snapshot is exact. */
@@ -115,17 +140,15 @@ export class SalesService {
   async plan(tx: Tx, dto: SaleDto, user: AuthUser, opts: { preview: boolean; offline?: boolean }): Promise<Plan> {
     const itemDtos = dto.items ?? [];
     const returnDtos = dto.returns ?? [];
-    if (!itemDtos.length && !returnDtos.length) throw new BadRequestException('Add at least one item or return');
+    rule(() => checkHasLines(itemDtos.length, returnDtos.length));
 
-    // ---- where and who
-    if (dto.saleType === 'COUNTER') await this.stock.requireLocation(tx, dto.locationId, ['SHOP', 'GODOWN']);
-    else await this.stock.requireLocation(tx, dto.locationId, ['VEHICLE']);
-    if (dto.saleType === 'DELIVERY' && !dto.salesmanId) throw new BadRequestException('A delivery needs a salesman');
+    // ---- where and who (rules shared with the offline bill screen: @dist/shared sale-rules)
+    await this.stock.requireLocation(tx, dto.locationId, saleLocationTypes(dto.saleType));
+    rule(() => checkSaleHead(dto));
     if (dto.salesmanId) {
       const e = await tx.employee.findUnique({ where: { id: dto.salesmanId } });
       if (!e?.isActive) throw new BadRequestException('Unknown or inactive salesman');
     }
-    if (!dto.customerId && dto.saleType === 'DELIVERY') throw new BadRequestException('A delivery needs a customer');
 
     const customer = dto.customerId ? await tx.customer.findUnique({ where: { id: dto.customerId } }) : null;
     if (dto.customerId && !customer?.isActive) throw new BadRequestException('Unknown or inactive customer');
@@ -146,21 +169,12 @@ export class SalesService {
       if (!p?.isActive) throw new BadRequestException('Unknown or inactive product');
       const { qtyBase } = await this.stock.toBase(tx, l.productId, l.unitName, l.qty);
       const fixed = custRates.find((r) => r.productId === l.productId && r.unitName === l.unitName)?.rate;
-      const list = listPrices.find((r) => r.productId === l.productId && r.unitName === l.unitName)?.rate;
-      const standard = fixed ?? list ?? null;
-      let rate: Dec;
-      if (l.rate == null) {
-        if (!standard) {
-          if (!user.permissions.includes('RATE_EDIT')) throw new ForbiddenException(`No rate is set for ${p.name} (${l.unitName}); ask someone who can set rates`);
-          throw new BadRequestException(`No rate is set for ${p.name} (${l.unitName}); enter one`);
-        }
-        rate = standard;
-      } else {
-        rate = new D(l.rate);
-        if ((!standard || !rate.eq(standard)) && !user.permissions.includes('RATE_EDIT')) {
-          throw new ForbiddenException(`You are not allowed to change the rate of ${p.name}`);
-        }
-      }
+      // The customer's price list (wholesale falls back to retail); walk-in sales are retail.
+      const list = listRate(listPrices, l.productId, l.unitName, customer?.priceTier);
+      const rate = new D(rule(() => chooseRate({
+        productName: p.name, unitName: l.unitName, fixed: fixed?.toString() ?? null, list: list?.toString() ?? null,
+        entered: l.rate ?? null, canEditRate: user.permissions.includes('RATE_EDIT'),
+      })));
       return {
         productId: p.id,
         productName: p.name,
@@ -176,31 +190,20 @@ export class SalesService {
     const items = await Promise.all(itemDtos.map(resolve));
     const returns = await Promise.all(returnDtos.map(async (l) => ({ ...(await resolve(l)), reason: l.reason })));
 
-    const lines = new Set(products.map((p) => p.category.businessLine.code));
-    if (lines.size > 1) throw new BadRequestException('A bill can hold bottles or rice, not both. Make two bills.');
-    const businessLine = [...lines][0];
+    const businessLine = rule(() => checkOneLine(products.map((p) => p.category.businessLine.code)));
 
     // ---- money
     const gross = items.reduce((s, l) => s.plus(l.amount), new D(0));
     const returnsCredit = returns.reduce((s, l) => s.plus(l.amount), new D(0));
     const net = gross.minus(returnsCredit);
-    const cashLike = !customer || customer.type === 'CASH';
-    const paid = new D(dto.paidNow ?? (cashLike ? D.max(net, 0) : 0));
-    if (net.isNegative() && paid.gt(0)) throw new BadRequestException('A bill that credits the customer cannot also take payment');
-    if (!customer && !paid.eq(net)) throw new BadRequestException('A sale without a customer must be paid in full');
+    const paid = new D(dto.paidNow ?? defaultPaid(customer, net.toNumber()));
+    rule(() => checkPayment({ hasCustomer: !!customer, net: net.toNumber(), paid: paid.toNumber() }));
 
     const previousBalance = customer ? await this.balance(tx, customer.id) : new D(0);
     const newBalance = previousBalance.plus(net).minus(paid);
 
     // ---- credit rules
-    const unpaid = net.minus(paid);
-    let blocked: string | null = null;
-    if (customer && unpaid.gt(0)) {
-      if (customer.type === 'CASH') blocked = 'CASH_CUSTOMER_UNPAID: a cash customer must pay in full';
-      else if (customer.creditLimit && newBalance.gt(customer.creditLimit)) {
-        blocked = `CREDIT_LIMIT_EXCEEDED: balance would be ${newBalance} against a limit of ${customer.creditLimit}`;
-      }
-    }
+    const blocked = creditBlock({ customer: customer && { type: customer.type, creditLimit: customer.creditLimit?.toString() ?? null }, net: net.toNumber(), paid: paid.toNumber(), newBalance: newBalance.toNumber() });
     // An offline bill was checked on the device against the last-synced balance and handed over already;
     // the server records it and flags the breach instead of refusing it (plan §9, "conflict flags").
     if (blocked && !opts.preview && !opts.offline) {
@@ -212,7 +215,7 @@ export class SalesService {
     const empties: Plan['empties'] = [];
     if (customer) {
       const given = new Map<string, number>();
-      for (const l of items.filter((x) => x.returnableEmpty)) given.set(l.productId, (given.get(l.productId) ?? 0) + Math.round(Number(l.qtyBase)));
+      for (const l of items.filter((x) => x.returnableEmpty)) given.set(l.productId, (given.get(l.productId) ?? 0) + emptiesGiven(Number(l.qtyBase)));
       const collected = new Map<string, number>();
       for (const c of dto.emptiesCollected ?? []) {
         const p = await tx.product.findUnique({ where: { id: c.productId } });
@@ -237,13 +240,13 @@ export class SalesService {
       for (const l of items) need.set(l.productId, (need.get(l.productId) ?? new D(0)).plus(l.qtyBase));
       for (const [pid, qty] of need) {
         const have = await this.stock.onHand(tx, pid, dto.locationId);
-        if (have.lt(qty)) shortages.push(`${items.find((x) => x.productId === pid)!.productName}: have ${have}, need ${qty}`);
+        if (have.lt(qty)) shortages.push(shortageText(items.find((x) => x.productId === pid)!.productName, have.toString(), qty.toString()));
       }
     }
 
     return {
       businessLine,
-      customer: customer ? { id: customer.id, name: customer.name, type: customer.type, creditLimit: customer.creditLimit } : null,
+      customer: customer ? { id: customer.id, name: customer.name, type: customer.type, creditLimit: customer.creditLimit, priceTier: customer.priceTier } : null,
       items, returns, gross, returnsCredit, net, paid, previousBalance, newBalance,
       credit: {
         limit: customer?.creditLimit ?? null,
@@ -275,7 +278,7 @@ export class SalesService {
         if (dto.customerId) await this.lockCustomer(tx, dto.customerId);
         const plan = await this.plan(tx, dto, user, { preview: false, offline: !!offline });
         const date = dayOf(dto.date);
-        const prefix = plan.businessLine === 'BOTTLES' ? 'BTL' : 'RIC';
+        const prefix = billPrefix(plan.businessLine);
         if (offline && !offline.billNo.startsWith(`${prefix}-`)) throw new BadRequestException(`Offline bill number ${offline.billNo} does not match a ${plan.businessLine.toLowerCase()} bill`);
         const billNo = offline ? offline.billNo : await this.stock.nextNo(tx, `SALE_${plan.businessLine}`, prefix);
 
@@ -323,7 +326,7 @@ export class SalesService {
             });
           }
           if (plan.paid.gt(0)) {
-            const receiptNo = await this.stock.nextNo(tx, 'RECEIPT', 'RCP');
+            const receiptNo = await this.stock.nextNo(tx, 'RECEIPT', DOC_PREFIX.RECEIPT);
             const payment = await tx.payment.create({
               data: {
                 receiptNo, customerId, saleId: sale.id, amount: plan.paid, method: dto.method ?? 'CASH', date,
@@ -438,6 +441,7 @@ export class SalesService {
    * already printed on an offline receipt; otherwise the server numbers it.
    */
   async recordPayment(dto: PaymentDto, user: AuthUser, offline?: { receiptNo: string }) {
+    const cheque = chequeOf(dto);
     if (dto.clientId) {
       const existing = await this.prisma.payment.findUnique({ where: { clientId: dto.clientId }, select: { id: true } });
       if (existing) return existing.id;
@@ -450,11 +454,12 @@ export class SalesService {
         const previous = await this.balance(tx, dto.customerId);
         const amount = new D(dto.amount);
         const date = dayOf(dto.date);
-        const receiptNo = offline ? offline.receiptNo : await this.stock.nextNo(tx, 'RECEIPT', 'RCP');
+        const receiptNo = offline ? offline.receiptNo : await this.stock.nextNo(tx, 'RECEIPT', DOC_PREFIX.RECEIPT);
         const payment = await tx.payment.create({
           data: {
             receiptNo, clientId: dto.clientId, customerId: dto.customerId, amount, method: dto.method ?? 'CASH', date,
             previousBalance: previous, newBalance: previous.minus(amount), note: dto.note, createdById: user.id,
+            ...(cheque ? { chequeNo: cheque.no, chequeBank: cheque.bank, chequeDate: cheque.date, chequeStatus: 'PENDING' } : {}),
           },
         });
         await tx.customerLedger.create({

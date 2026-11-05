@@ -1,12 +1,21 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { BusyButton } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
 import { api, saveSession, type SessionUser } from '@/lib/api';
+import { getSettings } from '@/lib/settings';
+import { DEFAULT_SETTINGS } from '@dist/shared';
 
 export default function LoginPage() {
+  // The business name: last known on this PC first, then the server's (works before sign-in).
+  const [brand, setBrand] = useState(DEFAULT_SETTINGS.businessName);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBrand(getSettings().businessName);
+    api<{ businessName: string }>('/settings/public').then((s) => setBrand(s.businessName)).catch(() => {});
+  }, []);
   const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -31,7 +40,7 @@ export default function LoginPage() {
   return (
     <div className="login-page">
       <aside className="login-art" aria-hidden="true">
-        <div className="brand-row"><span className="logo"><Icon name="products" /></span>Distribution</div>
+        <div className="brand-row"><span className="logo"><Icon name="products" /></span>{brand}</div>
         <div>
           <p className="ur-line" dir="rtl" lang="ur">چاول اور مشروبات کی تقسیم</p>
           <h2>Bills, khata and stock for rice &amp; beverages — in one place.</h2>

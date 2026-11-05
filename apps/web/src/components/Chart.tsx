@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { money } from '@dist/shared';
 
 export interface Series { key: string; label: string; color: string }
 export interface Point { label: string; /** Full label for the tooltip. */ title?: string; values: Record<string, number> }
@@ -17,7 +18,6 @@ function niceMax(v: number) {
   return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
 }
 const compact = (v: number) => (v >= 1e6 ? `${+(v / 1e6).toFixed(1)}M` : v >= 1e4 ? `${+(v / 1e3).toFixed(0)}K` : v.toLocaleString('en-PK'));
-const money = (v: number) => v.toLocaleString('en-PK');
 
 /** Top-rounded rect path, square at the baseline. */
 function topRounded(x: number, y: number, w: number, h: number, r: number) {

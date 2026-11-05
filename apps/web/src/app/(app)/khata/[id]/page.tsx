@@ -8,6 +8,8 @@ import { Icon } from '@/components/Icon';
 import { rowLink } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
 import { usePageTitle } from '@/lib/pageTitle';
+import ChequeFields, { chequeJson, EMPTY_CHEQUE } from '@/components/ChequeFields';
+import { CUSTOMER_LEDGER_LABEL, money, PAYMENT_METHODS } from '@dist/shared';
 
 interface Ledger {
   customer: { id: string; name: string; shopName: string | null; type: string; creditLimit: string | null };
@@ -18,9 +20,7 @@ interface Ledger {
 }
 interface CustomerInfo { phone: string | null; area: string | null; address: string | null }
 
-const LABEL: Record<string, string> = { SALE: 'Bill', PAYMENT: 'Payment', SALE_CANCEL: 'Bill cancelled', PAYMENT_CANCEL: 'Payment cancelled' };
-const METHODS: [string, string][] = [['CASH', 'Cash'], ['BANK', 'Bank'], ['EASYPAISA', 'Easypaisa'], ['JAZZCASH', 'JazzCash']];
-const money = (n: string | number) => Number(n).toLocaleString('en-PK');
+const METHODS = PAYMENT_METHODS.map((m) => [m.value, m.label] as const);
 const PAGE = 50;
 
 export default function CustomerKhataPage() {
@@ -31,6 +31,7 @@ export default function CustomerKhataPage() {
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [info, setInfo] = useState<CustomerInfo | null>(null);
   const [pay, setPay] = useState({ amount: '', method: 'CASH', note: '' });
+  const [cheque, setCheque] = useState(EMPTY_CHEQUE);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [showAll, setShowAll] = useState(false);
@@ -50,7 +51,7 @@ export default function CustomerKhataPage() {
     try {
       const r = await api<{ id: string; receiptNo?: string }>('/payments', {
         method: 'POST',
-        json: { clientId, customerId: id, amount: Number(pay.amount), method: pay.method, note: pay.note || undefined },
+        json: { clientId, customerId: id, amount: Number(pay.amount), method: pay.method, note: pay.note || undefined, ...chequeJson(pay.method, cheque) },
       });
       setClientId(crypto.randomUUID());
       toast.success(`Rs ${money(pay.amount)} received${r.receiptNo ? ` · ${r.receiptNo}` : ''}`);
@@ -61,6 +62,7 @@ export default function CustomerKhataPage() {
     }
   }
 
+  // Bills open the bill; payments, cancelled payments and bounced cheques open the receipt.
   const href = (e: Ledger['entries'][number]) => (e.refType === 'SALE' || e.refType === 'SALE_CANCEL' ? `/sales/${e.refId}` : `/receipts/${e.refId}`);
   const balance = Number(ledger?.balance ?? 0);
   const limit = ledger?.customer.creditLimit ? Number(ledger.customer.creditLimit) : null;
@@ -91,6 +93,7 @@ export default function CustomerKhataPage() {
                       <span className={`badge ${ledger.customer.type === 'CREDIT' ? 'amber' : 'green'}`}>{ledger.customer.type === 'CREDIT' ? 'Udhaar' : 'Cash'}</span>
                     </p>
                   </div>
+                  <Link className="btn secondary no-print party-statement" href={`/khata/${id}/statement`}><Icon name="file" />Statement</Link>
                   <div className="party-bal">
                     <span>{balance > 0 ? 'Owes you' : balance < 0 ? 'In credit' : 'Balance'}</span>
                     <b className={balance > 0 ? 'owe' : balance < 0 ? 'credit' : ''}>Rs {money(Math.abs(balance))}</b>
@@ -141,7 +144,7 @@ export default function CustomerKhataPage() {
                   return (
                     <tr key={e.id} {...rowLink(() => router.push(href(e)))} className={`row-link${e.refType.endsWith('CANCEL') ? ' cancel' : ''}`}>
                       <td>{new Date(e.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-                      <td>{LABEL[e.refType] ?? e.refType}</td>
+                      <td>{CUSTOMER_LEDGER_LABEL[e.refType] ?? e.refType}</td>
                       <td><Link href={href(e)}>{e.note}</Link></td>
                       <td className="num amt-debit">{amt > 0 ? money(amt) : ''}</td>
                       <td className="num amt-credit">{amt < 0 ? money(-amt) : ''}</td>
@@ -178,6 +181,7 @@ export default function CustomerKhataPage() {
                   ))}
                 </div>
               </div>
+              {pay.method === 'CHEQUE' && <ChequeFields value={cheque} onChange={setCheque} />}
               <label>Note<input value={pay.note} placeholder="Optional" onChange={(e) => setPay({ ...pay, note: e.target.value })} /></label>
               {after !== null && (
                 <dl className="totals">

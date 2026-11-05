@@ -1,5 +1,6 @@
 import { BadRequestException, Global, Injectable, Module } from '@nestjs/common';
 import { MovementType, Prisma, StockStatus, UnitName } from '@prisma/client';
+import { dayOf } from '../common/dates.js';
 import { PrismaService } from '../prisma.service.js';
 
 export type Tx = Prisma.TransactionClient;
@@ -32,6 +33,35 @@ export class StockService {
     const unit = await tx.productUnit.findUnique({ where: { productId_unitName: { productId, unitName } } });
     if (!unit) throw new BadRequestException(`Product does not have unit ${unitName}`);
     return { qtyBase: new D(qty).mul(unit.factorToBase), factor: unit.factorToBase };
+  }
+
+  /**
+   * Moves saleable stock between two locations as one numbered transfer document.
+   * Items are in any unit of the product; returns the transfer with its items.
+   */
+  async transfer(tx: Tx, t: { fromLocationId: string; toLocationId: string; date?: string; note?: string; userId: string; items: { productId: string; unitName: UnitName; qty: number }[] }) {
+    if (t.fromLocationId === t.toLocationId) throw new BadRequestException('Source and destination must differ');
+    await this.requireLocation(tx, t.fromLocationId);
+    await this.requireLocation(tx, t.toLocationId);
+    const transferNo = await this.nextNo(tx, 'TRANSFER', 'T');
+    // Fixed order so concurrent transfers take their locks in the same order.
+    const items = [...t.items].sort((a, b) => a.productId.localeCompare(b.productId));
+    const rows = [];
+    for (const it of items) {
+      await this.requireProduct(tx, it.productId);
+      const { qtyBase } = await this.toBase(tx, it.productId, it.unitName, it.qty);
+      rows.push({ productId: it.productId, unitName: it.unitName, qty: it.qty, qtyBase });
+    }
+    const transfer = await tx.stockTransfer.create({
+      data: { transferNo, fromLocationId: t.fromLocationId, toLocationId: t.toLocationId, date: dayOf(t.date), note: t.note, createdById: t.userId, items: { create: rows } },
+      include: { items: true },
+    });
+    for (const r of rows) {
+      const ref = { refType: 'TRANSFER', refId: transfer.id, userId: t.userId, productId: r.productId, note: t.note };
+      await this.move(tx, { ...ref, locationId: t.fromLocationId, qtyBase: r.qtyBase.neg(), type: 'TRANSFER_OUT' });
+      await this.move(tx, { ...ref, locationId: t.toLocationId, qtyBase: r.qtyBase, type: 'TRANSFER_IN' });
+    }
+    return transfer;
   }
 
   async onHand(tx: Tx, productId: string, locationId: string, status: StockStatus = 'OK') {

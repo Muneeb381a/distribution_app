@@ -6,6 +6,7 @@ import { BusyButton, Empty, SkeletonRows, useToast } from '@/components/Feedback
 import { Icon } from '@/components/Icon';
 import { downloadCsv } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
+import { addDays, localDay, presetRange } from '@dist/shared';
 
 interface Entry {
   id: string; at: string; action: string; entity: string; entityId: string | null; userId: string | null;
@@ -37,16 +38,8 @@ const HREF: Record<string, (id: string) => string> = {
 // Fields that only add noise to a diff.
 const HIDDEN = new Set(['id', 'createdAt', 'updatedAt', 'passwordHash', 'createdById', 'cancelledById']);
 
-const iso = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
-const addDays = (d: Date, k: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + k);
 type Preset = '7d' | '30d' | 'month' | 'all' | 'custom';
-function rangeOf(p: Preset): [string, string] {
-  const t = new Date();
-  if (p === '7d') return [iso(addDays(t, -6)), iso(t)];
-  if (p === '30d') return [iso(addDays(t, -29)), iso(t)];
-  if (p === 'month') return [iso(new Date(t.getFullYear(), t.getMonth(), 1)), iso(t)];
-  return ['', ''];
-}
+const rangeOf = (p: Preset): [string, string] => presetRange(p === 'custom' ? 'all' : p);
 
 type Obj = Record<string, unknown>;
 const asObj = (v: unknown): Obj | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Obj) : null);
@@ -175,16 +168,16 @@ export default function AuditPage() {
   const days = useMemo(() => {
     const out: { day: string; items: Entry[] }[] = [];
     for (const r of rows ?? []) {
-      const d = iso(new Date(r.at));
+      const d = localDay(new Date(r.at));
       if (out[out.length - 1]?.day !== d) out.push({ day: d, items: [] });
       out[out.length - 1].items.push(r);
     }
     return out;
   }, [rows]);
   const dayLabel = (d: string) => {
-    const t = iso(new Date());
+    const t = localDay(new Date());
     if (d === t) return 'Today';
-    if (d === iso(addDays(new Date(), -1))) return 'Yesterday';
+    if (d === localDay(addDays(new Date(), -1))) return 'Yesterday';
     return new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   };
 

@@ -11,10 +11,12 @@ import { api, can, useUser } from '@/lib/api';
 import { urdu } from '@/lib/fonts';
 import { usePageTitle } from '@/lib/pageTitle';
 import { renderReceiptImage, type ReceiptData } from '@/lib/saleImage';
+import { useSettings } from '@/lib/settings';
+import { chequeText } from '@/lib/saleImage';
+import { CHEQUE_STATUSES, methodLabel, money } from '@dist/shared';
 
-type Receipt = ReceiptData & { id: string; customerId: string; saleId: string | null; sale: { billNo: string } | null; customer: ReceiptData['customer'] & { phone: string | null } };
+type Receipt = ReceiptData & { id: string; customerId: string; saleId: string | null; chequeStatus: string | null; sale: { billNo: string } | null; customer: ReceiptData['customer'] & { phone: string | null } };
 
-const money = (n: string | number) => Number(n).toLocaleString('en-PK');
 
 export default function ReceiptPage() {
   const { id } = useParams<{ id: string }>();
@@ -31,15 +33,18 @@ export default function ReceiptPage() {
   usePageTitle(receipt ? `Receipt ${receipt.receiptNo}` : null);
 
   const load = useCallback(() => api<Receipt>(`/payments/${id}`)
-    .then((r) => {
-      setReceipt(r);
-      renderReceiptImage(r, urdu.style.fontFamily).then(setImage).catch((e) => setImageError((e as Error).message));
-    })
+    .then(setReceipt)
     .catch((e) => setError(e.message)), [id]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  const settings = useSettings();
+  useEffect(() => {
+    if (!receipt) return;
+    renderReceiptImage(receipt, urdu.style.fontFamily, settings).then(setImage).catch((e) => setImageError((e as Error).message));
+  }, [receipt, settings]);
 
   async function cancel() {
     if (!receipt) return;
@@ -60,6 +65,7 @@ export default function ReceiptPage() {
     return error ? <p className="error">{error}</p> : <span className="skeleton" style={{ display: 'block', height: 240 }} aria-busy="true" />;
   }
   const cancelled = receipt.status === 'CANCELLED';
+  const cheque = receipt.chequeStatus ? CHEQUE_STATUSES.find((c) => c.value === receipt.chequeStatus) : null;
 
   return (
     <>
@@ -67,19 +73,21 @@ export default function ReceiptPage() {
         <Link className="back" href={`/khata/${receipt.customerId}`}><Icon name="chevronLeft" />{receipt.customer.name}&apos;s khata</Link>
         <div className="doc-head">
           <div>
-            <h1>Receipt {receipt.receiptNo} <span className={`badge ${cancelled ? 'red' : 'green'}`}>{cancelled ? 'Cancelled' : 'Received'}</span></h1>
+            <h1>Receipt {receipt.receiptNo} {cheque && receipt.chequeStatus !== 'BOUNCED' ? <span className={`badge ${cheque.tone}`}>Cheque {cheque.label.toLowerCase()}</span>
+              : <span className={`badge ${cancelled ? 'red' : 'green'}`}>{receipt.chequeStatus === 'BOUNCED' ? 'Cheque bounced' : cancelled ? 'Cancelled' : 'Received'}</span>}</h1>
             <p>{new Date(receipt.createdAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}{receipt.recordedBy && ` · by ${receipt.recordedBy}`}</p>
           </div>
           <div className="actions" role="toolbar" aria-label="Receipt actions">
             <button onClick={() => print()}><Icon name="print" />Print</button>
-            {!cancelled && !receipt.saleId && can(user, 'SALE_CANCEL') && (
+            {cheque && receipt.chequeStatus === 'PENDING' && <Link className="btn secondary" href="/cheques">Clear or bounce</Link>}
+            {!cancelled && !receipt.saleId && !cheque && can(user, 'SALE_CANCEL') && (
               <BusyButton className="danger-ghost" busy={busy} onClick={cancel}>{!busy && <Icon name="ban" />}Cancel receipt</BusyButton>
             )}
           </div>
         </div>
-        {cancelled && <div className="cancelled-banner" role="alert"><Icon name="ban" />This receipt was cancelled; the amount was added back to the khata.</div>}
+        {cancelled && <div className="cancelled-banner" role="alert"><Icon name="ban" />{receipt.chequeStatus === 'BOUNCED' ? 'The cheque bounced; the amount was added back to the khata.' : 'This receipt was cancelled; the amount was added back to the khata.'}</div>}
         <div className="mini-stats">
-          <div className="stat"><span className="label">Received</span><span className="value">Rs {money(receipt.amount)}</span><span className="sub">{receipt.method.toLowerCase()}</span></div>
+          <div className="stat"><span className="label">Received</span><span className="value">Rs {money(receipt.amount)}</span><span className="sub">{receipt.chequeNo ? chequeText(receipt) : methodLabel(receipt.method)}</span></div>
           <div className="stat"><span className="label">Balance before</span><span className="value">{money(receipt.previousBalance)}</span></div>
           <div className="stat"><span className="label">Balance after</span><span className={`value${Number(receipt.newBalance) > 0 ? ' neg' : ''}`}>{money(receipt.newBalance)}</span>{receipt.sale && <span className="sub">With bill <Link href={`/sales/${receipt.saleId}`}>{receipt.sale.billNo}</Link></span>}</div>
         </div>

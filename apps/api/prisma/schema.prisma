@@ -124,6 +124,8 @@ model Product {
   isPacked            Boolean              @default(false)
   returnableEmpty     Boolean              @default(false)
   isActive            Boolean              @default(true)
+  /// Order more when saleable stock in all locations together falls to this (base units). Null = not watched.
+  reorderLevel        Decimal?             @db.Decimal(14, 3)
   createdAt           DateTime             @default(now())
   category            Category             @relation(fields: [categoryId], references: [id])
   units               ProductUnit[]
@@ -137,6 +139,7 @@ model Product {
   saleItems           SaleItem[]
   saleReturnItems     SaleReturnItem[]
   emptiesLedger       EmptiesLedger[]
+  tripLines           VehicleTripLine[]
   supplierEmpties     SupplierEmptiesLedger[]
 
   @@index([categoryId])
@@ -162,6 +165,8 @@ model Location {
   transfersFrom   StockTransfer[]  @relation("TransferFrom")
   transfersTo     StockTransfer[]  @relation("TransferTo")
   sales           Sale[]
+  expenses        Expense[]
+  trips           VehicleTrip[]
 }
 
 model Employee {
@@ -180,6 +185,7 @@ model Employee {
   attendance        Attendance[]
   advances          SalaryAdvance[]
   payrollRuns       PayrollRun[]
+  trips             VehicleTrip[]
 }
 
 model Customer {
@@ -192,6 +198,8 @@ model Customer {
   type           CustomerType     @default(CASH)
   creditLimit    Decimal?         @db.Decimal(14, 2)
   openingBalance Decimal          @default(0) @db.Decimal(14, 2)
+  /// Which list rates this customer pays: RETAIL or WHOLESALE.
+  priceTier      String           @default("RETAIL")
   isActive       Boolean          @default(true)
   createdAt      DateTime         @default(now())
   rates          CustomerRate[]
@@ -369,6 +377,9 @@ model SupplierPayment {
   note        String?
   createdById String
   createdAt   DateTime @default(now())
+  chequeNo    String?
+  chequeBank  String?
+  chequeDate  DateTime? @db.Date
   supplier    Supplier @relation(fields: [supplierId], references: [id])
 }
 
@@ -431,16 +442,19 @@ enum CustomerLedgerRef {
   PAYMENT
   SALE_CANCEL
   PAYMENT_CANCEL
+  CHEQUE_BOUNCED
 }
 
 /// List price used when the customer has no fixed rate.
+/// List rate per unit and price list (RETAIL or WHOLESALE); used when the customer has no fixed rate.
 model ProductPrice {
   productId String
   unitName  UnitName
+  tier      String   @default("RETAIL")
   rate      Decimal  @db.Decimal(14, 2)
   product   Product  @relation(fields: [productId], references: [id])
 
-  @@id([productId, unitName])
+  @@id([productId, unitName, tier])
 }
 
 model Sale {
@@ -543,11 +557,20 @@ model Payment {
   status          DocStatus @default(ACTIVE)
   createdById     String
   createdAt       DateTime  @default(now())
+  /// Cheque details when method = CHEQUE. The khata is credited on receipt; a bounce puts it back.
+  chequeNo        String?
+  chequeBank      String?
+  /// Date written on the cheque (often post-dated): when it can be deposited.
+  chequeDate      DateTime? @db.Date
+  /// PENDING until deposited and cleared, then CLEARED or BOUNCED.
+  chequeStatus    String?
+  chequeSettledAt DateTime?
   customer        Customer  @relation(fields: [customerId], references: [id])
   sale            Sale?     @relation(fields: [saleId], references: [id])
 
   @@index([customerId, date])
   @@index([createdById, date])
+  @@index([chequeStatus, chequeDate])
 }
 
 /// Returnable empties (counted in bottles). Cancelling a bill adds an offsetting row.
@@ -581,7 +604,11 @@ model Expense {
   id           String            @id @default(uuid())
   date         DateTime          @db.Date
   category     String
+  /// Old entries only: expenses are no longer split by business line; they come off total profit.
   businessLine BusinessLineCode?
+  /// Godown or shop the cost belongs to; null = general (salaries, office).
+  locationId   String?
+  location     Location?         @relation(fields: [locationId], references: [id])
   amount       Decimal           @db.Decimal(14, 2)
   note         String?
   /// Set for expenses created by the system (e.g. PAYROLL) so they can't be edited by hand.
@@ -592,6 +619,7 @@ model Expense {
   createdAt    DateTime          @default(now())
 
   @@index([date])
+  @@index([locationId])
 }
 
 model Attendance {
@@ -603,21 +631,42 @@ model Attendance {
   @@id([employeeId, date])
 }
 
+/// Money given to an employee ahead of salary. It is recovered from salary (all at once, or a fixed
+/// instalment each month) and/or repaid in cash; what is left is amount − active recoveries.
 model SalaryAdvance {
-  id           String      @id @default(uuid())
+  id           String            @id @default(uuid())
   employeeId   String
-  date         DateTime    @db.Date
-  amount       Decimal     @db.Decimal(14, 2)
+  date         DateTime          @db.Date
+  amount       Decimal           @db.Decimal(14, 2)
+  /// Cut from each salary until recovered. Null = recover the whole remainder from the next salary.
+  installment  Decimal?          @db.Decimal(14, 2)
   note         String?
-  /// Set when a payroll run has deducted this advance.
-  payrollRunId String?
-  status       DocStatus   @default(ACTIVE)
+  status       DocStatus         @default(ACTIVE)
   createdById  String
-  createdAt    DateTime    @default(now())
-  employee     Employee    @relation(fields: [employeeId], references: [id])
-  payrollRun   PayrollRun? @relation(fields: [payrollRunId], references: [id])
+  createdAt    DateTime          @default(now())
+  employee     Employee          @relation(fields: [employeeId], references: [id])
+  recoveries   AdvanceRecovery[]
 
   @@index([employeeId, date])
+}
+
+/// One repayment of an advance: a cut from a payroll run, or cash handed back. Cancelling the run cancels its cuts.
+model AdvanceRecovery {
+  id           String        @id @default(uuid())
+  advanceId    String
+  /// The payroll run that deducted it; null for a cash repayment.
+  payrollRunId String?
+  date         DateTime      @db.Date
+  amount       Decimal       @db.Decimal(14, 2)
+  note         String?
+  status       DocStatus     @default(ACTIVE)
+  createdById  String
+  createdAt    DateTime      @default(now())
+  advance      SalaryAdvance @relation(fields: [advanceId], references: [id])
+  payrollRun   PayrollRun?   @relation(fields: [payrollRunId], references: [id])
+
+  @@index([advanceId])
+  @@index([payrollRunId])
 }
 
 /// One finalised salary calculation for an employee and month ("2026-11").
@@ -644,7 +693,7 @@ model PayrollRun {
   cancelledAt      DateTime?
   cancelReason     String?
   employee         Employee        @relation(fields: [employeeId], references: [id])
-  advanceItems     SalaryAdvance[]
+  recoveries       AdvanceRecovery[]
 
   /// One ACTIVE run per employee and month is enforced by a partial unique index (see the cancel_payroll migration).
   @@index([employeeId, month])
@@ -670,4 +719,60 @@ model SupplierEmptiesLedger {
   product       Product   @relation(fields: [productId], references: [id])
 
   @@index([supplierId, productId])
+}
+
+/// App-wide settings as JSON under a key ("business": name, address, phone, bill footer, thermal width).
+model Setting {
+  key         String   @id
+  value       Json
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+}
+
+/**
+ * One day's round of a vehicle: loaded from the godown in the morning, sells on the route, and is
+ * settled in the evening (stock counted, cash handed over, the rest unloaded).
+ */
+model VehicleTrip {
+  id            String            @id @default(uuid())
+  tripNo        String            @unique
+  vehicleId     String
+  salesmanId    String?
+  date          DateTime          @db.Date
+  /// OPEN while on the road; SETTLED once counted and cash is in.
+  status        String            @default("OPEN")
+  openedAt      DateTime          @default(now())
+  openedById    String
+  settledAt     DateTime?
+  settledById   String?
+  /// Cash taken with bills on this trip (from the bills), and what the salesman handed over.
+  cashExpected  Decimal?          @db.Decimal(14, 2)
+  cashReceived  Decimal?          @db.Decimal(14, 2)
+  note          String?
+  /// Advance created for a cash shortage, recovered from the salesman's salary.
+  advanceId     String?
+  vehicle       Location          @relation(fields: [vehicleId], references: [id])
+  salesman      Employee?         @relation(fields: [salesmanId], references: [id])
+  lines         VehicleTripLine[]
+
+  @@index([vehicleId, status])
+  @@index([date])
+}
+
+/// Per product at settlement: what the stock should be on the vehicle and what was counted.
+model VehicleTripLine {
+  id        String      @id @default(uuid())
+  tripId    String
+  productId String
+  loaded    Decimal     @db.Decimal(14, 3)
+  sold      Decimal     @db.Decimal(14, 3)
+  expected  Decimal     @db.Decimal(14, 3)
+  counted   Decimal     @db.Decimal(14, 3)
+  /// counted - expected: negative is a shortage, positive is extra.
+  diff      Decimal     @db.Decimal(14, 3)
+  unloaded  Decimal     @db.Decimal(14, 3)
+  trip      VehicleTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  product   Product     @relation(fields: [productId], references: [id])
+
+  @@unique([tripId, productId])
 }

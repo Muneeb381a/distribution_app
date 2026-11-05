@@ -1,21 +1,42 @@
 import { BadRequestException, Body, ConflictException, Controller, Get, Module, NotFoundException, Param, Post, Put, Query } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import { IsArray, IsEnum, IsNumber, Min, ValidateNested } from 'class-validator';
-import { BusinessLineCode, UnitName } from '@prisma/client';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsBoolean, IsEnum, IsIn, IsNumber, IsOptional, IsUUID, Max, Min, ValidateNested } from 'class-validator';
+import { BusinessLineCode, Prisma, UnitName } from '@prisma/client';
 import { PrismaService } from '../prisma.service.js';
 import { AuditService } from '../audit/audit.module.js';
 import { CurrentUser, RequirePermissions, type AuthUser } from '../common/decorators.js';
 import { dayOf } from '../common/dates.js';
 import { StockService } from '../stock/stock.service.js';
 import { PaymentDto, SaleDto, SalesService } from './sales.service.js';
+import { overLimit, withCustomerBalances } from '../common/balances.js';
 
 
 class PriceDto {
   @IsEnum(UnitName) unitName: UnitName;
+  /** Price list; retail when left out. */
+  @IsOptional() @IsIn(['RETAIL', 'WHOLESALE']) tier?: string;
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) rate: number;
 }
 class PricesDto {
   @IsArray() @ValidateNested({ each: true }) @Type(() => PriceDto) prices: PriceDto[];
+}
+
+/**
+ * Change many list prices at once: by a percentage (every unit), or by a fixed amount per one unit
+ * (e.g. +Rs 50 a peti), which moves the product's other units in proportion (+Rs 8.33 a bottle).
+ */
+class ChangePricesDto {
+  @IsArray() @ArrayNotEmpty() @ArrayMaxSize(1000) @IsUUID('all', { each: true }) productIds: string[];
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(-90) @Max(500) percent?: number;
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) amount?: number;
+  /** The unit the fixed amount is for. */
+  @IsOptional() @IsEnum(UnitName) unitName?: UnitName;
+  /** Round new rates to the nearest 1, 5 or 10 rupees (default 1). */
+  @IsOptional() @IsIn([0.01, 1, 5, 10]) roundTo?: number;
+  /** Change only this price list; both when left out. */
+  @IsOptional() @IsIn(['RETAIL', 'WHOLESALE']) tier?: string;
+  /** Only work out the new rates; change nothing. */
+  @IsOptional() @IsBoolean() preview?: boolean;
 }
 
 interface SaleQuery {
@@ -101,6 +122,55 @@ class SalesController {
       });
   }
 
+  // -------------------------------------------------------------- cheques
+
+  /** Customer cheques: pending ones by the date on the cheque (soonest first), or cleared / bounced. */
+  @Get('cheques') @RequirePermissions('PAYMENT_RECORD')
+  cheques(@Query('status') status?: string) {
+    const st = status === 'CLEARED' || status === 'BOUNCED' ? status : 'PENDING';
+    return this.prisma.payment.findMany({
+      where: { method: 'CHEQUE', chequeStatus: st },
+      orderBy: st === 'PENDING' ? [{ chequeDate: 'asc' }, { createdAt: 'asc' }] : [{ chequeSettledAt: 'desc' }],
+      take: 300,
+      include: { customer: { select: { id: true, name: true, shopName: true, phone: true } } },
+    });
+  }
+
+  /** The bank paid the cheque. Nothing changes in the khata: it was credited when received. */
+  @Post('cheques/:id/clear') @RequirePermissions('PAYMENT_RECORD')
+  async clearCheque(@Param('id') id: string, @CurrentUser() u: AuthUser) {
+    const p = await this.pendingCheque(id);
+    const row = await this.prisma.payment.update({ where: { id }, data: { chequeStatus: 'CLEARED', chequeSettledAt: new Date() } });
+    await this.audit.log(u.id, 'CHEQUE_CLEARED', 'Payment', id, { chequeStatus: p.chequeStatus }, { chequeStatus: 'CLEARED' });
+    return row;
+  }
+
+  /** The cheque bounced: the receipt is cancelled and the amount goes back on the customer's khata. */
+  @Post('cheques/:id/bounce') @RequirePermissions('SALE_CANCEL')
+  async bounceCheque(@Param('id') id: string, @Body() body: { note?: string }, @CurrentUser() u: AuthUser) {
+    await this.prisma.$transaction(async (tx) => {
+      const p = await this.pendingCheque(id, tx);
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'customer:' + p.customerId}))`;
+      await tx.payment.update({ where: { id }, data: { status: 'CANCELLED', chequeStatus: 'BOUNCED', chequeSettledAt: new Date() } });
+      await tx.customerLedger.create({
+        data: {
+          customerId: p.customerId, date: dayOf(), amount: p.amount, refType: 'CHEQUE_BOUNCED', refId: p.id,
+          note: `Cheque ${p.chequeNo}${p.chequeBank ? ` (${p.chequeBank})` : ''} bounced · ${p.receiptNo}${typeof body?.note === 'string' && body.note.trim() ? ` · ${body.note.trim().slice(0, 120)}` : ''}`,
+          createdById: u.id,
+        },
+      });
+    });
+    await this.audit.log(u.id, 'CHEQUE_BOUNCED', 'Payment', id);
+    return this.receipt(id);
+  }
+
+  private async pendingCheque(id: string, db: Pick<PrismaService, 'payment'> = this.prisma) {
+    const p = await db.payment.findUnique({ where: { id } });
+    if (!p || p.method !== 'CHEQUE') throw new NotFoundException('Not a cheque payment');
+    if (p.chequeStatus !== 'PENDING' || p.status !== 'ACTIVE') throw new ConflictException(`This cheque is already ${(p.chequeStatus ?? 'settled').toLowerCase()}`);
+    return p;
+  }
+
   /** Cancels a standalone receipt. A receipt that came with a bill is cancelled with the bill. */
   @Post('payments/:id/cancel') @RequirePermissions('SALE_CANCEL')
   async cancelPayment(@Param('id') id: string, @CurrentUser() u: AuthUser) {
@@ -124,19 +194,63 @@ class SalesController {
   /** Outstanding balances, highest first, flagging customers over their credit limit. */
   @Get('khata/balances') @RequirePermissions('PAYMENT_RECORD')
   async balances(@Query('area') area?: string) {
-    const [customers, sums] = await Promise.all([
-      this.prisma.customer.findMany({ where: { isActive: true, area }, orderBy: { name: 'asc' } }),
-      this.prisma.customerLedger.groupBy({ by: ['customerId'], _sum: { amount: true } }),
-    ]);
+    const customers = await withCustomerBalances(this.prisma, await this.prisma.customer.findMany({ where: { isActive: true, area }, orderBy: { name: 'asc' } }));
     return customers
       .map((c) => {
-        const balance = c.openingBalance.plus(sums.find((s) => s.customerId === c.id)?._sum.amount ?? 0);
+        const balance = c.balance;
         return {
           id: c.id, name: c.name, shopName: c.shopName, area: c.area, phone: c.phone, type: c.type,
-          creditLimit: c.creditLimit, balance, overLimit: !!c.creditLimit && balance.gt(c.creditLimit),
+          creditLimit: c.creditLimit, balance, overLimit: overLimit(balance, c.creditLimit),
         };
       })
       .sort((a, b) => b.balance.comparedTo(a.balance));
+  }
+
+  /**
+   * Customer statement for a date range: balance brought forward, every bill, payment and
+   * correction in the range (bills with what was in them), and the closing balance.
+   */
+  @Get('khata/:customerId/statement') @RequirePermissions('PAYMENT_RECORD')
+  async statement(@Param('customerId') customerId: string, @Query('from') fromQ?: string, @Query('to') toQ?: string) {
+    const customer = await this.prisma.customer.findUnique({ where: { id: customerId } });
+    if (!customer) throw new NotFoundException();
+    const to = dayOf(toQ);
+    const from = fromQ ? dayOf(fromQ) : new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), 1));
+    if (to < from) throw new BadRequestException('"to" is before "from"');
+    const [before, entries] = await Promise.all([
+      this.prisma.customerLedger.aggregate({ where: { customerId, date: { lt: from } }, _sum: { amount: true } }),
+      this.prisma.customerLedger.findMany({ where: { customerId, date: { gte: from, lte: to } }, orderBy: [{ date: 'asc' }, { createdAt: 'asc' }] }),
+    ]);
+    const saleIds = entries.filter((e) => e.refType === 'SALE' || e.refType === 'SALE_CANCEL').map((e) => e.refId);
+    const payIds = entries.filter((e) => e.refType !== 'SALE' && e.refType !== 'SALE_CANCEL').map((e) => e.refId);
+    const [sales, payments] = await Promise.all([
+      this.prisma.sale.findMany({
+        where: { id: { in: saleIds } },
+        select: { id: true, billNo: true, paidNow: true, items: { select: { qty: true, unitName: true, lineTotal: true, product: { select: { name: true, size: true } } } } },
+      }),
+      this.prisma.payment.findMany({ where: { id: { in: payIds } }, select: { id: true, receiptNo: true, method: true, chequeNo: true } }),
+    ]);
+    const opening = customer.openingBalance.plus(before._sum.amount ?? 0);
+    let running = opening;
+    let debit = new Prisma.Decimal(0);
+    let credit = new Prisma.Decimal(0);
+    const rows = entries.map((e) => {
+      running = running.plus(e.amount);
+      if (e.amount.gt(0)) debit = debit.plus(e.amount); else credit = credit.plus(e.amount.neg());
+      const sale = sales.find((x) => x.id === e.refId);
+      const pay = payments.find((x) => x.id === e.refId);
+      return {
+        id: e.id, date: e.date, refType: e.refType, refId: e.refId, note: e.note, amount: e.amount, balance: running,
+        ref: sale?.billNo ?? pay?.receiptNo ?? e.note,
+        method: pay?.method ?? null, chequeNo: pay?.chequeNo ?? null,
+        items: e.refType === 'SALE' && sale ? sale.items.map((i) => ({ name: i.product.size ? `${i.product.name} ${i.product.size}` : i.product.name, qty: i.qty, unitName: i.unitName, lineTotal: i.lineTotal })) : undefined,
+      };
+    });
+    return {
+      customer: { id: customer.id, name: customer.name, shopName: customer.shopName, phone: customer.phone, area: customer.area, address: customer.address, creditLimit: customer.creditLimit },
+      from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10),
+      opening, debit, credit, closing: running, entries: rows,
+    };
   }
 
   @Get('khata/:customerId') @RequirePermissions('PAYMENT_RECORD')
@@ -170,6 +284,41 @@ class SalesController {
     return this.prisma.productPrice.findMany({ where: { productId } });
   }
 
+  @Post('product-prices/change') @RequirePermissions('RATE_EDIT')
+  async changePrices(@Body() dto: ChangePricesDto, @CurrentUser() u: AuthUser) {
+    const pct = dto.percent ?? 0;
+    const amt = dto.amount ?? 0;
+    if (!pct && !amt) throw new BadRequestException('Give a percentage or an amount');
+    if (pct && amt) throw new BadRequestException('Give a percentage or an amount, not both');
+    if (amt && !dto.unitName) throw new BadRequestException('Say which unit the amount is for');
+    const step = new Prisma.Decimal(dto.roundTo ?? 1);
+    const [prices, products] = await Promise.all([
+      this.prisma.productPrice.findMany({ where: { productId: { in: dto.productIds }, tier: dto.tier } }),
+      this.prisma.product.findMany({ where: { id: { in: dto.productIds } }, select: { id: true, name: true, size: true, units: { select: { unitName: true, factorToBase: true } } } }),
+    ]);
+    const rows = prices.map((p) => {
+      const product = products.find((x) => x.id === p.productId)!;
+      const factor = (unit: string) => product.units.find((x) => x.unitName === unit)?.factorToBase;
+      let next: Prisma.Decimal;
+      if (pct) next = p.rate.mul(new Prisma.Decimal(100).plus(pct)).div(100);
+      else {
+        const per = factor(dto.unitName!);
+        // A product without the chosen unit is left as it is.
+        if (!per) return { productId: p.productId, name: product.name, size: product.size, unitName: p.unitName, tier: p.tier, from: p.rate, to: p.rate, skipped: true };
+        next = p.rate.plus(new Prisma.Decimal(amt).div(per).mul(factor(p.unitName) ?? 1));
+      }
+      next = next.div(step).toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP).mul(step).toDecimalPlaces(2);
+      if (next.lt(0)) throw new BadRequestException(`${product.name}: the ${p.unitName.toLowerCase()} rate would go below zero`);
+      return { productId: p.productId, name: product.name, size: product.size, unitName: p.unitName, tier: p.tier, from: p.rate, to: next, skipped: false };
+    }).sort((a, b) => a.name.localeCompare(b.name) || a.unitName.localeCompare(b.unitName) || b.tier.localeCompare(a.tier));
+    const changed = rows.filter((r) => !r.to.equals(r.from));
+    if (!dto.preview && changed.length) {
+      await this.prisma.$transaction(changed.map((r) => this.prisma.productPrice.update({ where: { productId_unitName_tier: { productId: r.productId, unitName: r.unitName, tier: r.tier } }, data: { rate: r.to } })));
+      await this.audit.log(u.id, 'CHANGE_PRICES', 'Product', undefined, undefined, { percent: dto.percent, amount: dto.amount, unitName: dto.unitName, roundTo: dto.roundTo, tier: dto.tier, rates: changed.map((r) => [r.name, r.unitName, r.tier, r.from, r.to]) });
+    }
+    return { applied: !dto.preview, changed: changed.length, withoutRate: dto.productIds.filter((id) => !prices.some((p) => p.productId === id)).length, rows };
+  }
+
   @Put('product-prices/:productId') @RequirePermissions('RATE_EDIT')
   async setPrices(@Param('productId') productId: string, @Body() dto: PricesDto, @CurrentUser() u: AuthUser) {
     const units = await this.prisma.productUnit.findMany({ where: { productId } });
@@ -177,7 +326,13 @@ class SalesController {
     const before = await this.prisma.productPrice.findMany({ where: { productId } });
     const after = await this.prisma.$transaction(async (tx) => {
       await tx.productPrice.deleteMany({ where: { productId } });
-      await tx.productPrice.createMany({ data: dto.prices.map((p) => ({ ...p, productId })) });
+      const seen = new Set<string>();
+      for (const p of dto.prices) {
+        const k = `${p.unitName}|${p.tier ?? 'RETAIL'}`;
+        if (seen.has(k)) throw new BadRequestException(`Two ${(p.tier ?? 'retail').toLowerCase()} rates for ${p.unitName.toLowerCase()}`);
+        seen.add(k);
+      }
+      await tx.productPrice.createMany({ data: dto.prices.map((p) => ({ ...p, tier: p.tier ?? 'RETAIL', productId })) });
       return tx.productPrice.findMany({ where: { productId } });
     });
     await this.audit.log(u.id, 'SET_PRICES', 'Product', productId, before, after);

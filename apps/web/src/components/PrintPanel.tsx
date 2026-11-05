@@ -2,6 +2,7 @@
 
 import { useCallback, useState, type ReactNode } from 'react';
 import { Icon } from '@/components/Icon';
+import { useSettings } from '@/lib/settings';
 
 export type PrintMode = 'thermal' | 'a4';
 
@@ -17,7 +18,7 @@ export function usePrintMode(initial: PrintMode = 'thermal') {
 }
 
 interface Props {
-  /** PNG data URL of the 80 mm thermal version. */
+  /** PNG data URL of the thermal version (80 or 58 mm, from Settings). */
   thermalImage: string;
   /** Set when the thermal image could not be drawn. */
   thermalError?: string;
@@ -33,11 +34,12 @@ interface Props {
  * "A4" also covers WhatsApp: choose "Save as PDF" in the print dialog and share the file.
  */
 export default function PrintPanel({ thermalImage, thermalError, a4, mode, setMode, print }: Props) {
+  const { thermalWidth } = useSettings();
   return (
     <section className="card print-card" data-print={mode} aria-label="Print preview">
       <div className="print-tabs no-print">
         <div className="seg" role="tablist" aria-label="Paper">
-          <button type="button" role="tab" aria-selected={mode === 'thermal'} className={mode === 'thermal' ? 'on' : ''} onClick={() => setMode('thermal')}>Thermal 80 mm</button>
+          <button type="button" role="tab" aria-selected={mode === 'thermal'} className={mode === 'thermal' ? 'on' : ''} onClick={() => setMode('thermal')}>Thermal {thermalWidth} mm</button>
           <button type="button" role="tab" aria-selected={mode === 'a4'} className={mode === 'a4' ? 'on' : ''} onClick={() => setMode('a4')}>A4 / PDF</button>
         </div>
         <div className="actions">
@@ -48,7 +50,7 @@ export default function PrintPanel({ thermalImage, thermalError, a4, mode, setMo
       <div className="doc-preview print-stage">
         <div className={`thermal-img card${mode === 'thermal' ? '' : ' screen-hidden'}`}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          {thermalImage ? <img src={thermalImage} alt="Thermal print preview" style={{ width: '80mm', maxWidth: '100%' }} />
+          {thermalImage ? <img src={thermalImage} alt="Thermal print preview" style={{ width: `${thermalWidth}mm`, maxWidth: '100%' }} />
             : thermalError ? <span className="error">Could not draw the thermal print: {thermalError}</span>
             : <span className="skeleton" style={{ display: 'block', width: '100%', height: 360 }} aria-label="Preparing preview" />}
         </div>

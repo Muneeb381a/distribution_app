@@ -11,6 +11,8 @@ import { api, can, useUser } from '@/lib/api';
 import { urdu } from '@/lib/fonts';
 import { usePageTitle } from '@/lib/pageTitle';
 import { renderBillImage, type BillData } from '@/lib/saleImage';
+import { useSettings } from '@/lib/settings';
+import { money, unitLabel, waPhone } from '@dist/shared';
 
 type Bill = BillData & {
   id: string;
@@ -20,7 +22,6 @@ type Bill = BillData & {
   payments: { id: string; receiptNo: string; amount: string; method: string; status: string }[];
 };
 
-const money = (n: string | number) => Number(n).toLocaleString('en-PK');
 const label = (p: { name: string; size: string | null }) => (p.size ? `${p.name} (${p.size})` : p.name);
 
 export default function BillPage() {
@@ -44,8 +45,6 @@ export default function BillPage() {
       const b = await api<Bill>(`/sales/${id}`);
       setBill(b);
       setError('');
-      // The bill shows even if the thermal picture cannot be drawn (e.g. font still loading).
-      renderBillImage(b, urdu.style.fontFamily).then((img) => { setImage(img); setImageError(''); }).catch((e) => setImageError((e as Error).message));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -55,6 +54,13 @@ export default function BillPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+
+  // The bill shows even if the thermal picture cannot be drawn (e.g. font still loading).
+  const settings = useSettings();
+  useEffect(() => {
+    if (!bill) return;
+    renderBillImage(bill, urdu.style.fontFamily, settings).then((img) => { setImage(img); setImageError(''); }).catch((e) => setImageError((e as Error).message));
+  }, [bill, settings]);
 
   // /sales/:id?print=thermal|a4 opens the print dialog once the preview is ready (used by the "Save & print" flow).
   useEffect(() => {
@@ -92,7 +98,7 @@ export default function BillPage() {
     const text = [
       `Bill ${bill.billNo} · ${new Date(bill.createdAt).toLocaleDateString('en-GB')}`,
       bill.customer ? `${bill.customer.name}${bill.customer.shopName ? ` (${bill.customer.shopName})` : ''}` : 'Cash sale',
-      ...bill.items.map((l) => `${label(l.product)} ${Number(l.qty)} ${l.unitName.toLowerCase()} × ${money(l.rate)} = ${money(l.lineTotal)}`),
+      ...bill.items.map((l) => `${label(l.product)} ${Number(l.qty)} ${unitLabel(l.unitName)} × ${money(l.rate)} = ${money(l.lineTotal)}`),
       `Total: Rs ${money(bill.net)}`,
       `Paid: Rs ${money(bill.paidNow)}`,
       ...(bill.customer ? [`Balance: Rs ${money(bill.newBalance)}`] : []),
@@ -112,8 +118,7 @@ export default function BillPage() {
     } catch (e) {
       if ((e as Error).name === 'AbortError') return;
     }
-    const phone = bill.customer?.phone?.replace(/\D/g, '').replace(/^0/, '92');
-    window.open(`https://wa.me/${phone ?? ''}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+    window.open(`https://wa.me/${waPhone(bill.customer?.phone)}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
   }
 
   if (error && !bill) {
@@ -192,7 +197,7 @@ export default function BillPage() {
                     {bill.items.map((l, i) => (
                       <tr key={i}>
                         <td><b>{label(l.product)}</b></td>
-                        <td className="num">{Number(l.qty)} {l.unitName.toLowerCase()}</td>
+                        <td className="num">{Number(l.qty)} {unitLabel(l.unitName)}</td>
                         <td className="num">{money(l.rate)}</td>
                         <td className="num"><b>{money(l.lineTotal)}</b></td>
                       </tr>
@@ -200,7 +205,7 @@ export default function BillPage() {
                     {bill.returns.map((r, i) => (
                       <tr key={`r${i}`}>
                         <td>Return · {label(r.product)} <span className="badge red">{r.reason.toLowerCase()}</span></td>
-                        <td className="num">{Number(r.qty)} {r.unitName.toLowerCase()}</td>
+                        <td className="num">{Number(r.qty)} {unitLabel(r.unitName)}</td>
                         <td className="num muted">—</td>
                         <td className="num amt-credit">-{money(r.creditAmount)}</td>
                       </tr>

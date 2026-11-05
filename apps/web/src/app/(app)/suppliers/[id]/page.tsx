@@ -9,6 +9,8 @@ import { Icon } from '@/components/Icon';
 import { api, can, useUser } from '@/lib/api';
 import { productOptions, useLookups } from '@/lib/lookups';
 import { usePageTitle } from '@/lib/pageTitle';
+import ChequeFields, { chequeJson, EMPTY_CHEQUE } from '@/components/ChequeFields';
+import { money, PAYMENT_METHODS, SUPPLIER_LEDGER_LABEL } from '@dist/shared';
 
 interface Ledger {
   supplier: { id: string; name: string; phone?: string | null; type?: string };
@@ -20,9 +22,7 @@ interface Ledger {
 interface EmptiesEntry { id: string; date: string; qtyIn: number; qtyOut: number; note: string | null; status: string; product: { name: string; size: string | null } }
 interface EmptiesData { entries: EmptiesEntry[]; owed: { productId: string; product: string; owed: number }[] }
 
-const LABEL: Record<string, string> = { PURCHASE: 'Purchase', PAYMENT: 'Payment', RETURN: 'Return', CANCEL: 'Cancelled purchase' };
-const METHODS: [string, string][] = [['CASH', 'Cash'], ['BANK', 'Bank'], ['EASYPAISA', 'Easypaisa'], ['JAZZCASH', 'JazzCash']];
-const money = (n: string | number) => Number(n).toLocaleString('en-PK', { maximumFractionDigits: 2 });
+const METHODS = PAYMENT_METHODS.map((m) => [m.value, m.label] as const);
 
 export default function SupplierLedgerPage() {
   const { id } = useParams<{ id: string }>();
@@ -31,6 +31,7 @@ export default function SupplierLedgerPage() {
   const { products, locations } = useLookups();
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [pay, setPay] = useState({ amount: '', method: 'CASH', note: '' });
+  const [cheque, setCheque] = useState(EMPTY_CHEQUE);
   const [ret, setRet] = useState({ locationId: '', productId: '', unitName: '', qty: '', unitPrice: '', fromStatus: 'DAMAGED', note: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<'' | 'pay' | 'ret' | 'emp'>('');
@@ -72,8 +73,9 @@ export default function SupplierLedgerPage() {
 
   async function submitPay(e: FormEvent) {
     e.preventDefault();
-    if (await post('pay', '/supplier-payments', { supplierId: id, amount: Number(pay.amount), method: pay.method, note: pay.note || undefined }, `Paid Rs ${money(pay.amount)} to ${ledger?.supplier.name}`)) {
+    if (await post('pay', '/supplier-payments', { supplierId: id, amount: Number(pay.amount), method: pay.method, note: pay.note || undefined, ...chequeJson(pay.method, cheque) }, `Paid Rs ${money(pay.amount)} to ${ledger?.supplier.name}`)) {
       setPay({ ...pay, amount: '', note: '' });
+      setCheque(EMPTY_CHEQUE);
     }
   }
 
@@ -171,7 +173,7 @@ export default function SupplierLedgerPage() {
                   return (
                     <tr key={e.id} className={e.refType === 'CANCEL' ? 'cancel' : ''}>
                       <td>{new Date(e.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-                      <td>{LABEL[e.refType] ?? e.refType}</td>
+                      <td>{SUPPLIER_LEDGER_LABEL[e.refType] ?? e.refType}</td>
                       <td className="muted">{e.note}</td>
                       <td className="num amt-debit">{a > 0 ? money(a) : ''}</td>
                       <td className="num amt-credit">{a < 0 ? money(-a) : ''}</td>
@@ -226,6 +228,7 @@ export default function SupplierLedgerPage() {
                   {METHODS.map(([v, l]) => <button type="button" role="radio" aria-checked={pay.method === v} key={v} className={`chip${pay.method === v ? ' on' : ''}`} onClick={() => setPay({ ...pay, method: v })}>{l}</button>)}
                 </div>
               </div>
+              {pay.method === 'CHEQUE' && <ChequeFields id="sp-cheque" value={cheque} onChange={setCheque} />}
               <label>Note<input value={pay.note} placeholder="Optional" onChange={(e) => setPay({ ...pay, note: e.target.value })} /></label>
               <BusyButton type="submit" busy={busy === 'pay'}>Record payment</BusyButton>
             </form>

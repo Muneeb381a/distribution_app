@@ -1,0 +1,21 @@
+{
+  "name": "@dist/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Rules, labels, permissions and formats shared by the API and the web app — the one place to change them.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+    "test": "tsc -p tsconfig.json && node --test test/shared.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}

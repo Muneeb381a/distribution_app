@@ -1,26 +1,29 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { BusyButton, Empty, SkeletonRows, useConfirm, usePrompt, useToast } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
 import { LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
+import Link from 'next/link';
+import ChangeRatesDialog from '@/components/ChangeRatesDialog';
+import { Affix, Field, Toggle } from '@/components/Form';
+import { DRINK_SIZE_PRESETS, defaultPack, money, PRICE_TIERS, round2, unitLabel } from '@dist/shared';
 
 type Line = 'BOTTLES' | 'RICE';
 interface Category { id: string; name: string; parentId: string | null; businessLine: { code: Line } }
 interface Unit { unitName: string; factorToBase: string }
 interface Product {
   id: string; name: string; brand: string | null; size: string | null; returnableEmpty: boolean; isActive: boolean; isPacked: boolean;
-  categoryId: string; baseUnit: 'BOTTLE' | 'KG';
+  categoryId: string; baseUnit: 'BOTTLE' | 'KG'; reorderLevel: string | null;
   units: Unit[];
   category: { name: string; businessLine: { code: Line } };
 }
-interface Price { productId: string; unitName: string; rate: string }
+interface Price { productId: string; unitName: string; tier: string; rate: string }
+const rateKey = (unitName: string, tier: string) => `${unitName}|${tier}`;
 
-const EMPTY = { name: '', brand: '', size: '', categoryId: '', packSize: '6', bagKg: '', returnableEmpty: true };
+const EMPTY = { name: '', brand: '', size: '', categoryId: '', packSize: '6', bagKg: '', returnableEmpty: true, reorder: '' };
 type Form = typeof EMPTY;
-const money = (n: string | number) => Number(n).toLocaleString('en-PK', { maximumFractionDigits: 2 });
-const unitLabel = (u: string) => u.toLowerCase();
 
 /** Units sent to the API for a bottle or rice product. */
 function unitsFor(line: Line, f: Form) {
@@ -47,6 +50,7 @@ export default function ProductsPage() {
   const [filter, setFilter] = useState('');
   const [showInactive, setShowInactive] = useState(false);
   const [editing, setEditing] = useState<Product | 'new' | null>(null);
+  const [changingRates, setChangingRates] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -124,6 +128,7 @@ export default function ProductsPage() {
         {canEdit && (
           <div className="actions">
             <button className="secondary btn-icon" onClick={addCategory}><Icon name="plus" />Category</button>
+            <Link className="btn secondary" href="/products/catalog"><Icon name="import" />Add from catalog</Link>
             <button className="btn-icon" onClick={() => setEditing('new')}><Icon name="plus" />Add product</button>
           </div>
         )}
@@ -137,6 +142,11 @@ export default function ProductsPage() {
         </div>
         <div className="filter"><Icon name="search" /><input aria-label="Filter products" placeholder="Filter by name, brand, size, category…" value={filter} onChange={(e) => { setFilter(e.target.value); reset(); }} /></div>
         {inactiveCount > 0 && <button type="button" className={`chip${showInactive ? ' on' : ''}`} aria-pressed={showInactive} onClick={() => setShowInactive(!showInactive)}>Show inactive ({inactiveCount})</button>}
+        {canRate && shown.some((p) => p.isActive) && (
+          <button type="button" className="secondary btn-icon" style={{ marginLeft: 'auto' }} onClick={() => setChangingRates(true)} title="Change the list rates of the products shown">
+            <Icon name="trend" />Change rates{filter ? ` (${shown.filter((p) => p.isActive).length})` : ''}
+          </button>
+        )}
       </div>
 
       {missingRate > 0 && (
@@ -170,7 +180,10 @@ export default function ProductsPage() {
                   </span>
                 </td>
                 <td className="num">
-                  {pr.length ? pr.map((x) => <div key={x.unitName}><b>{money(x.rate)}</b> <span className="muted">/ {unitLabel(x.unitName)}</span></div>) : <span className="badge amber">Not set</span>}
+                  {pr.length ? pr.filter((x) => (x.tier ?? 'RETAIL') === 'RETAIL').map((x) => {
+                    const w = pr.find((y) => y.unitName === x.unitName && y.tier === 'WHOLESALE');
+                    return <div key={x.unitName}><b>{money(x.rate)}</b> <span className="muted">/ {unitLabel(x.unitName)}</span>{w && <span className="whole-rate" title="Wholesale"> · W {money(w.rate)}</span>}</div>;
+                  }) : <span className="badge amber">Not set</span>}
                 </td>
                 {(canEdit || canRate) && (
                   <td>
@@ -194,6 +207,11 @@ export default function ProductsPage() {
         </tbody>
       </table>
       <LoadMore shown={page.length} total={sorted.length} onMore={loadMore} />
+
+      {changingRates && (
+        <ChangeRatesDialog line={line} productIds={shown.filter((p) => p.isActive).map((p) => p.id)} onClose={() => setChangingRates(false)}
+          onDone={(n) => { setChangingRates(false); toast.success(`${n} rate${n === 1 ? '' : 's'} changed`); load(); }} />
+      )}
 
       {editing && (
         <ProductDialog
@@ -221,11 +239,19 @@ function ProductDialog({ line, product, categories, prices, canEdit, canRate, on
   const [form, setForm] = useState<Form>(() => (product ? {
     name: product.name, brand: product.brand ?? '', size: product.size ?? '', categoryId: product.categoryId,
     packSize: String(Number(factor('CARTON') ?? 6)), bagKg: factor('BAG') ? String(Number(factor('BAG'))) : '', returnableEmpty: product.returnableEmpty,
+    // Shown in peti for bottles, kg for rice; stored in base units.
+    reorder: product.reorderLevel == null ? '' : String(round2(Number(product.reorderLevel) / (product.baseUnit === 'BOTTLE' ? Number(factor('CARTON') ?? 1) : 1))),
   } : EMPTY));
   const units = unitsFor(line, form);
-  const [rates, setRates] = useState<Record<string, string>>(() => Object.fromEntries(prices.map((p) => [p.unitName, String(Number(p.rate))])));
+  // Keyed "CARTON|RETAIL", "CARTON|WHOLESALE"…
+  const [rates, setRates] = useState<Record<string, string>>(() => Object.fromEntries(prices.map((p) => [rateKey(p.unitName, p.tier ?? 'RETAIL'), String(Number(p.rate))])));
   const [busy, setBusy] = useState(false);
   const set = (patch: Partial<Form>) => setForm({ ...form, ...patch });
+  /** Typing or picking a size fills bottles per peti and returnable from the usual pack. */
+  const setSize = (size: string) => {
+    const d = product ? null : defaultPack(size); // never change an existing product's peti by accident
+    set(d ? { size, packSize: String(d.pack), returnableEmpty: d.returnable } : { size });
+  };
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -234,6 +260,7 @@ function ProductDialog({ line, product, categories, prices, canEdit, canRate, on
     const body = {
       categoryId: form.categoryId, name: form.name.trim(), brand: form.brand || undefined, size: form.size || undefined,
       isPacked: !bottles && !!form.bagKg, returnableEmpty: bottles && form.returnableEmpty, units,
+      reorderLevel: form.reorder === '' ? null : Number(form.reorder) * (bottles ? Number(form.packSize) || 1 : 1),
     };
     try {
       // Someone with only the rate permission edits rates, not the product itself.
@@ -243,9 +270,10 @@ function ProductDialog({ line, product, categories, prices, canEdit, canRate, on
         ? await api<{ id: string }>(`/products/${product.id}`, { method: 'PATCH', json: body })
         : await api<{ id: string }>('/products', { method: 'POST', json: { ...body, baseUnit: bottles ? 'BOTTLE' : 'KG' } });
       if (canRate) {
-        const list = units.filter((u) => rates[u.unitName] !== undefined && rates[u.unitName] !== '').map((u) => ({ unitName: u.unitName, rate: Number(rates[u.unitName]) }));
-        const before = JSON.stringify(prices.map((p) => [p.unitName, Number(p.rate)]).sort());
-        if (JSON.stringify(list.map((p) => [p.unitName, p.rate]).sort()) !== before) {
+        const list = units.flatMap((u) => PRICE_TIERS.map((t) => ({ unitName: u.unitName, tier: t.value as string, raw: rates[rateKey(u.unitName, t.value)] })))
+          .filter((x) => x.raw !== undefined && x.raw !== '').map(({ unitName, tier, raw }) => ({ unitName, tier, rate: Number(raw) }));
+        const before = JSON.stringify(prices.map((p) => [p.unitName, p.tier ?? 'RETAIL', Number(p.rate)]).sort());
+        if (JSON.stringify(list.map((p) => [p.unitName, p.tier, p.rate]).sort()) !== before) {
           await api(`/product-prices/${saved.id}`, { method: 'PUT', json: { prices: list } });
         }
       }
@@ -264,38 +292,74 @@ function ProductDialog({ line, product, categories, prices, canEdit, canRate, on
             <span className="modal-icon info"><Icon name="products" /></span>
             <h2 id="product-title">{product ? `Edit ${product.name}` : `New ${line === 'BOTTLES' ? 'bottle' : 'rice'} product`}</h2>
           </div>
-          <fieldset disabled={!canEdit} style={{ border: 0, padding: 0, margin: '14px 0 0' }}>
-            <div className="form" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
-              <label style={{ gridColumn: '1 / -1' }}>Category
+          <fieldset disabled={!canEdit} className="plain-fieldset">
+            <div className="fgrid">
+              <Field label="Category" required span={12}>
                 <select required value={form.categoryId} onChange={(e) => set({ categoryId: e.target.value })}>
                   <option value="">Select category…</option>
                   {categories.map((o) => <option key={o.id} value={o.id}>{o.text}</option>)}
                 </select>
-              </label>
-              <label>Name<input required autoFocus value={form.name} onChange={(e) => set({ name: e.target.value })} /></label>
-              <label>Brand<input value={form.brand} placeholder="Optional" onChange={(e) => set({ brand: e.target.value })} /></label>
-              <label>Size<input value={form.size} placeholder={line === 'BOTTLES' ? '1.5 L' : '25 kg'} onChange={(e) => set({ size: e.target.value })} /></label>
+              </Field>
+              <Field label="Name" required span={6} hint={line === 'BOTTLES' ? 'Brand and flavour, e.g. "Pepsi" or "Shezan Mango"' : 'Variety and form, e.g. "Super Kernel Sella"'}>
+                <input required autoFocus value={form.name} onChange={(e) => set({ name: e.target.value })} />
+              </Field>
+              <Field label={line === 'BOTTLES' ? 'Company' : 'Brand'} optional span={6}>
+                <input value={form.brand} placeholder={line === 'BOTTLES' ? 'PepsiCo' : 'Guard, Falak…'} onChange={(e) => set({ brand: e.target.value })} />
+              </Field>
               {line === 'BOTTLES' ? (
                 <>
-                  <label>Bottles per carton<input type="number" min="1" step="1" required value={form.packSize} onChange={(e) => set({ packSize: e.target.value })} /></label>
-                  <label>Returnable empty
-                    <input type="checkbox" checked={form.returnableEmpty} onChange={(e) => set({ returnableEmpty: e.target.checked })} />
-                  </label>
+                  <Field label="Size" span={12} hint="Pick a common size to fill in bottles per peti, or type your own.">
+                    <input value={form.size} placeholder="1.5 L" onChange={(e) => setSize(e.target.value)} />
+                  </Field>
+                  <div className="span-12 size-chips" role="group" aria-label="Common sizes">
+                    {DRINK_SIZE_PRESETS.map((p) => (
+                      <button key={p.size} type="button" className={`size-chip${form.size === p.size ? ' on' : ''}`} aria-pressed={form.size === p.size} onClick={() => setSize(p.size)}>
+                        <b>{p.size}</b><span>{p.pack}/peti{p.returnable ? ' · ♻' : ''}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <Field label="Bottles per peti" required span={6} hint="How many bottles come in one carton/crate">
+                    <Affix suffix="bottles"><input type="number" min="1" step="1" required inputMode="numeric" value={form.packSize} onChange={(e) => set({ packSize: e.target.value })} /></Affix>
+                  </Field>
+                  <div className="fld span-6 toggle-fld">
+                    <Toggle checked={form.returnableEmpty} onChange={(v) => set({ returnableEmpty: v })} label="Returnable empty" description="Glass bottles — empties are tracked per customer" />
+                  </div>
                 </>
               ) : (
-                <label>Bag size (kg, if packed)<input type="number" step="any" min="0" placeholder="Loose" value={form.bagKg} onChange={(e) => set({ bagKg: e.target.value })} /></label>
+                <>
+                  <Field label="Size" optional span={6}><input value={form.size} placeholder="25 kg bag" onChange={(e) => set({ size: e.target.value })} /></Field>
+                  <Field label="Bag weight" optional span={6} hint="Leave empty for loose rice sold by kg and maund">
+                    <Affix suffix="kg"><input type="number" step="any" min="0" inputMode="decimal" placeholder="Loose" value={form.bagKg} onChange={(e) => set({ bagKg: e.target.value })} /></Affix>
+                  </Field>
+                </>
               )}
+              <Field label="Reorder when stock falls to" optional span={6} hint="All locations together. Shows on the dashboard and Stock page when reached.">
+                <Affix suffix={line === 'BOTTLES' ? 'peti' : 'kg'}><input type="number" step="any" min="0" inputMode="decimal" placeholder="Not watched" value={form.reorder} onChange={(e) => set({ reorder: e.target.value })} /></Affix>
+              </Field>
             </div>
           </fieldset>
-          <h3 style={{ margin: '22px 0 4px' }}>Default sale rate</h3>
-          <p className="card-sub" style={{ margin: '0 0 12px' }}>Used on bills when the customer has no fixed rate. {canRate ? 'Leave a unit empty to require a rate on the bill.' : 'You need the rate-edit permission to change these.'}</p>
-          <div className="form" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
-            {units.map((u) => (
-              <label key={u.unitName}>Rs per {unitLabel(u.unitName)}
-                <input type="number" step="any" min="0" inputMode="decimal" disabled={!canRate} placeholder="—" value={rates[u.unitName] ?? ''} onChange={(e) => setRates({ ...rates, [u.unitName]: e.target.value })} />
-                {u.unitName === 'CARTON' && rates.BOTTLE && !rates.CARTON && <span className="hint">= {money(Number(rates.BOTTLE) * Number(form.packSize || 0))} at bottle rate</span>}
-              </label>
-            ))}
+          <h3 style={{ margin: '22px 0 4px' }}>List rates</h3>
+          <p className="card-sub" style={{ margin: '0 0 12px' }}>
+            Used on bills when the customer has no fixed rate: retail for retail customers and walk-ins, wholesale for wholesale customers.
+            An empty wholesale rate uses the retail rate. {canRate ? 'Leave both empty to require a rate on the bill.' : 'You need the rate-edit permission to change these.'}
+          </p>
+          <div className="rate-grid">
+            <span /><span className="rate-head">Retail</span><span className="rate-head">Wholesale</span>
+            {units.map((u) => {
+              const r = (t: string) => rates[rateKey(u.unitName, t)] ?? '';
+              const set = (t: string, v: string) => setRates({ ...rates, [rateKey(u.unitName, t)]: v });
+              const retail = Number(r('RETAIL')), whole = Number(r('WHOLESALE'));
+              return (
+                <Fragment key={u.unitName}>
+                  <span className="rate-unit">Per {unitLabel(u.unitName)}</span>
+                  <Affix prefix="Rs"><input aria-label={`Retail rate per ${unitLabel(u.unitName)}`} type="number" step="any" min="0" inputMode="decimal" disabled={!canRate} placeholder="—" value={r('RETAIL')} onChange={(e) => set('RETAIL', e.target.value)} /></Affix>
+                  <div>
+                    <Affix prefix="Rs"><input aria-label={`Wholesale rate per ${unitLabel(u.unitName)}`} type="number" step="any" min="0" inputMode="decimal" disabled={!canRate} placeholder={r('RETAIL') ? `${r('RETAIL')} (retail)` : '—'} value={r('WHOLESALE')} onChange={(e) => set('WHOLESALE', e.target.value)} /></Affix>
+                    {retail > 0 && whole > 0 && <span className={`rate-diff${whole > retail ? ' warn' : ''}`}>{whole > retail ? 'above retail' : `${money(retail - whole)} less (${Math.round(((retail - whole) / retail) * 100)}%)`}</span>}
+                  </div>
+                </Fragment>
+              );
+            })}
           </div>
           <div className="modal-actions">
             <button type="button" className="secondary" onClick={onClose}>Cancel</button>

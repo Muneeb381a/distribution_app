@@ -1,11 +1,17 @@
 'use client';
 
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import Combobox from '@/components/Combobox';
-import { Empty, SkeletonRows, useToast } from '@/components/Feedback';
+import { Choice, Field, FormActions, FormCard, FormSection } from '@/components/Form';
+import { Icon } from '@/components/Icon';
+import MoveLines, { UnitSelect } from '@/components/MoveLines';
+import { BusyButton, Empty, SkeletonRows, useToast } from '@/components/Feedback';
 import { LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
-import { formatQty, productLabel, productOptions, useLookups, type ProductOpt } from '@/lib/lookups';
+import { formatQty, productLabel, productOptions, useLookups } from '@/lib/lookups';
+import { money } from '@dist/shared';
 
 interface Row {
   productId: string; productName: string; size: string | null; line: string; baseUnit: string;
@@ -13,22 +19,15 @@ interface Row {
   ok: string; damaged: string; latestUnitCost?: string | null; value?: string | null;
 }
 interface Line { productId: string; unitName: string; qty: string }
+interface LowRow { productId: string; name: string; size: string | null; baseUnit: string; units: { unitName: string; factorToBase: string }[]; reorderLevel: string; onHand: string; where: { name: string; qtyBase: string }[] }
 const emptyLine: Line = { productId: '', unitName: '', qty: '' };
-const KINDS = [
-  ['ADD', 'Add stock (correction)'],
-  ['REMOVE', 'Remove stock (correction)'],
-  ['MARK_DAMAGED', 'Mark as damaged'],
-  ['RESTORE_DAMAGED', 'Return damaged to saleable (needs approval permission)'],
-  ['WRITE_OFF_DAMAGED', 'Write off damaged'],
+const KINDS: [string, string, string][] = [
+  ['MARK_DAMAGED', 'Mark as damaged', 'Saleable stock found broken or expired'],
+  ['WRITE_OFF_DAMAGED', 'Write off damaged', 'Damaged stock thrown away'],
+  ['RESTORE_DAMAGED', 'Damaged back to saleable', 'Checked and fine after all (needs approval permission)'],
+  ['ADD', 'Add stock (correction)', 'Count found more than the app shows'],
+  ['REMOVE', 'Remove stock (correction)', 'Count found less than the app shows'],
 ];
-
-function UnitSelect({ product, value, onChange }: { product?: ProductOpt; value: string; onChange: (v: string) => void }) {
-  return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} required>
-      {product?.units.map((u) => <option key={u.unitName} value={u.unitName}>{u.unitName}</option>)}
-    </select>
-  );
-}
 
 export default function StockPage() {
   const user = useUser();
@@ -36,6 +35,10 @@ export default function StockPage() {
   const [rows, setRows] = useState<Row[] | null>(null);
   const toast = useToast();
   const [filter, setFilter] = useState({ locationId: '', line: '', search: '' });
+  const search = useSearchParams();
+  const [showLow, setShowLow] = useState(search.get('low') === '1');
+  const [low, setLow] = useState<LowRow[] | null>(null);
+  useEffect(() => { api<LowRow[]>('/stock/low').then(setLow).catch(() => setLow([])); }, []);
   const [transfer, setTransfer] = useState({ from: '', to: '', lines: [{ ...emptyLine }] });
   const [adjust, setAdjust] = useState({ locationId: '', ...emptyLine, kind: 'MARK_DAMAGED', note: '' });
   const [error, setError] = useState('');
@@ -56,60 +59,99 @@ export default function StockPage() {
     k === 'product' ? productLabel({ name: r.productName, size: r.size }) : k === 'location' ? r.locationName : k === 'ok' ? r.ok : k === 'damaged' ? r.damaged : r.value);
   const { page, loadMore } = usePaged(sorted, 50);
   const prod = (id: string) => products.find((p) => p.id === id);
-  const setLine = (i: number, patch: Partial<Line>) =>
-    setTransfer({ ...transfer, lines: transfer.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) });
   const pickProduct = (id: string) => ({ productId: id, unitName: prod(id)?.units[0]?.unitName ?? '' });
 
-  async function run(path: string, json: unknown, done: string) {
+  // Unfiltered stock, so the forms can say what is available wherever the list is filtered.
+  const [allStock, setAllStock] = useState<Row[]>([]);
+  const loadAll = useCallback(() => api<Row[]>('/stock').then(setAllStock).catch(() => {}), []);
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
+  const onHand = (productId: string, locationId: string) => {
+    if (!productId || !locationId) return '—';
+    const r = allStock.find((x) => x.productId === productId && x.locationId === locationId);
+    return r ? formatQty(r.ok, r.units, r.baseUnit) : '0';
+  };
+
+  const [busy, setBusy] = useState<'' | 'transfer' | 'adjust'>('');
+  // Bumped after a save so the form remounts clean (no leftover 'invalid' marks on emptied fields).
+  const [fresh, setFresh] = useState({ transfer: 0, adjust: 0 });
+  async function run(key: 'transfer' | 'adjust', path: string, json: unknown, done: string) {
+    setBusy(key);
     try {
       await api(path, { method: 'POST', json });
       toast.success(done);
-      await load();
+      await Promise.all([load(), loadAll()]);
       return true;
     } catch (e) {
       toast.error((e as Error).message);
       return false;
+    } finally {
+      setBusy('');
     }
   }
 
   async function submitTransfer(e: FormEvent) {
     e.preventDefault();
-    const ok = await run('/stock/transfers', {
+    const ok = await run('transfer', '/stock/transfers', {
       fromLocationId: transfer.from,
       toLocationId: transfer.to,
       items: transfer.lines.map((l) => ({ productId: l.productId, unitName: l.unitName, qty: Number(l.qty) })),
     }, 'Transfer saved');
-    if (ok) setTransfer({ from: transfer.from, to: transfer.to, lines: [{ ...emptyLine }] });
+    if (ok) { setTransfer({ from: transfer.from, to: transfer.to, lines: [{ ...emptyLine }] }); setFresh((f) => ({ ...f, transfer: f.transfer + 1 })); }
   }
 
   async function submitAdjust(e: FormEvent) {
     e.preventDefault();
-    const ok = await run('/stock/adjustments', { ...adjust, qty: Number(adjust.qty) }, 'Adjustment saved');
-    if (ok) setAdjust({ ...adjust, qty: '', note: '' });
+    const ok = await run('adjust', '/stock/adjustments', { ...adjust, qty: Number(adjust.qty) }, 'Adjustment saved');
+    if (ok) { setAdjust({ ...adjust, qty: '', note: '' }); setFresh((f) => ({ ...f, adjust: f.adjust + 1 })); }
   }
 
   const showCost = !!rows?.some((r) => 'latestUnitCost' in r);
 
   return (
     <>
-      <div className="page-head"><div><h1>Stock</h1><p>{rows ? `${rows.length} product / location rows` : 'Loading…'}</p></div></div>
-      {(error || lookupError) && <p className="error">{error || lookupError}</p>}
-      <div className="card form">
-        <label>Location
-          <select value={filter.locationId} onChange={(e) => setFilter({ ...filter, locationId: e.target.value })}>
-            <option value="">All</option>
-            {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-        </label>
-        <label>Line
-          <select value={filter.line} onChange={(e) => setFilter({ ...filter, line: e.target.value })}>
-            <option value="">Both</option>
-            <option value="BOTTLES">Bottles</option>
-            <option value="RICE">Rice</option>
-          </select>
-        </label>
-        <label>Search<input value={filter.search} onChange={(e) => setFilter({ ...filter, search: e.target.value })} /></label>
+      <div className="page-head"><div><h1>Stock</h1><p>{rows ? `${rows.length} product / location rows` : 'Loading…'}</p></div>
+        <div className="actions"><Link className="btn secondary" href="/stock/history"><Icon name="history" />Stock history</Link></div>
       </div>
+      {(error || lookupError) && <p className="error">{error || lookupError}</p>}
+      <div className="list-head">
+        <div className="filter"><Icon name="search" /><input aria-label="Search stock" placeholder="Search product…" value={filter.search} onChange={(e) => setFilter({ ...filter, search: e.target.value })} /></div>
+        <select aria-label="Location" value={filter.locationId} onChange={(e) => setFilter({ ...filter, locationId: e.target.value })}>
+          <option value="">All locations</option>
+          {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+        </select>
+        <div className="chips">
+          {[['', 'All'], ['BOTTLES', 'Bottles'], ['RICE', 'Rice']].map(([v, l]) => (
+            <button key={v} type="button" className={`chip${filter.line === v ? ' on' : ''}`} aria-pressed={filter.line === v} onClick={() => setFilter({ ...filter, line: v })}>{l}</button>
+          ))}
+          <button type="button" className={`chip${showLow ? ' on' : ''}`} data-tone="amber" aria-pressed={showLow} onClick={() => setShowLow(!showLow)}>
+            Reorder now{low && low.length ? <span className="chip-count">{low.length}</span> : null}
+          </button>
+        </div>
+      </div>
+      {showLow && (
+        <section className="card alert-card">
+          <div className="card-head"><h2><Icon name="alert" /> At or below reorder level</h2><span className="muted" style={{ fontSize: 13 }}>All locations together. Set the level on each product.</span></div>
+          {!low ? <span className="skeleton" style={{ display: 'block', height: 80 }} /> : low.length ? (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Product</th><th className="num">In stock</th><th className="num">Reorder at</th><th>Where</th></tr></thead>
+                <tbody>
+                  {low.map((r) => (
+                    <tr key={r.productId}>
+                      <td><Link href={`/stock/history?product=${r.productId}`}><b>{productLabel(r)}</b></Link></td>
+                      <td className={`num${Number(r.onHand) <= 0 ? ' error' : ''}`}><b>{formatQty(r.onHand, r.units, r.baseUnit)}</b></td>
+                      <td className="num muted">{formatQty(r.reorderLevel, r.units, r.baseUnit)}</td>
+                      <td className="muted">{r.where.map((w) => `${w.name} ${formatQty(w.qtyBase, r.units, r.baseUnit)}`).join(' · ') || 'Out of stock'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : <p className="muted" style={{ margin: 0 }}>Nothing is at its reorder level. Set “Reorder when stock falls to” on a product to watch it.</p>}
+        </section>
+      )}
       <table className="sticky-head">
         <thead>
           <tr>
@@ -124,14 +166,14 @@ export default function StockPage() {
           {!rows && <SkeletonRows cols={4} />}
           {page.map((r) => (
             <tr key={`${r.productId}|${r.locationId}`}>
-              <td><strong>{productLabel({ name: r.productName, size: r.size })}</strong></td>
+              <td><Link href={`/stock/history?product=${r.productId}&location=${r.locationId}`} title="Stock card"><strong>{productLabel({ name: r.productName, size: r.size })}</strong></Link></td>
               <td><span className="badge">{r.locationName}</span></td>
               <td className="num">{formatQty(r.ok, r.units, r.baseUnit)}</td>
               <td className="num">{Number(r.damaged) ? <span className="badge red">{Number(r.damaged)}</span> : <span className="muted">—</span>}</td>
               {showCost && (
                 <>
-                  <td className="num">{r.latestUnitCost ? Number(r.latestUnitCost).toLocaleString() : '—'}</td>
-                  <td className="num">{r.value ? <strong>{Number(r.value).toLocaleString()}</strong> : '—'}</td>
+                  <td className="num">{r.latestUnitCost ? money(r.latestUnitCost) : '—'}</td>
+                  <td className="num">{r.value ? <strong>{money(r.value)}</strong> : '—'}</td>
                 </>
               )}
             </tr>
@@ -143,67 +185,69 @@ export default function StockPage() {
       </table>
       <LoadMore shown={page.length} total={sorted.length} onMore={loadMore} />
 
+      <div className="dash-grid stock-forms">
       {can(user, 'STOCK_TRANSFER') && (
-        <>
-          <h2>Transfer stock</h2>
-          <form className="card" onSubmit={submitTransfer}>
-            <div className="form">
-              {(['from', 'to'] as const).map((k) => (
-                <label key={k}>{k === 'from' ? 'From' : 'To'}
-                  <select required value={transfer[k]} onChange={(e) => setTransfer({ ...transfer, [k]: e.target.value })}>
-                    <option value="">—</option>
-                    {locations.map((l) => <option key={l.id} value={l.id}>{l.name} ({l.type.toLowerCase()})</option>)}
-                  </select>
-                </label>
-              ))}
+        <FormCard
+          key={`t${fresh.transfer}`}
+          onSubmit={submitTransfer}
+          title="Transfer stock"
+          description="Move stock between godowns, the shop and vehicles — e.g. load a van in the morning, unload it at night."
+          actions={<FormActions><BusyButton busy={busy === 'transfer'}><Icon name="refresh" />Transfer</BusyButton></FormActions>}
+        >
+          <FormSection>
+            <Field label="From" required span={5}>
+              <select required value={transfer.from} onChange={(e) => setTransfer({ ...transfer, from: e.target.value })}>
+                <option value="">Select location…</option>
+                {locations.map((l) => <option key={l.id} value={l.id} disabled={l.id === transfer.to}>{l.name} · {l.type.toLowerCase()}</option>)}
+              </select>
+            </Field>
+            <div className="fld span-2 swap-col">
+              <button type="button" className="secondary icon-only" title="Swap" aria-label="Swap from and to" onClick={() => setTransfer({ ...transfer, from: transfer.to, to: transfer.from })}><Icon name="refresh" /></button>
             </div>
-            {transfer.lines.map((l, i) => (
-              <div className="form" key={i} style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--border)' }}>
-                <div className="field">
-                  <label htmlFor={`transfer-product-${i}`}>Product</label>
-                  <Combobox id={`transfer-product-${i}`} required compact options={productOpts} value={l.productId} recentKey="product" placeholder="Type product name…" onChange={(v) => setLine(i, pickProduct(v))} />
-                </div>
-                <label>Unit<UnitSelect product={prod(l.productId)} value={l.unitName} onChange={(v) => setLine(i, { unitName: v })} /></label>
-                <label>Qty<input type="number" step="any" min="0" required value={l.qty} onChange={(e) => setLine(i, { qty: e.target.value })} /></label>
-                {transfer.lines.length > 1 && (
-                  <button type="button" className="secondary" onClick={() => setTransfer({ ...transfer, lines: transfer.lines.filter((_, j) => j !== i) })}>Remove</button>
-                )}
-              </div>
-            ))}
-            <div className="toolbar" style={{ marginTop: 12 }}>
-              <button type="button" className="secondary" onClick={() => setTransfer({ ...transfer, lines: [...transfer.lines, { ...emptyLine }] })}>+ Add item</button>
-              <button>Transfer</button>
-            </div>
-          </form>
-        </>
+            <Field label="To" required span={5}>
+              <select required value={transfer.to} onChange={(e) => setTransfer({ ...transfer, to: e.target.value })}>
+                <option value="">Select location…</option>
+                {locations.map((l) => <option key={l.id} value={l.id} disabled={l.id === transfer.from}>{l.name} · {l.type.toLowerCase()}</option>)}
+              </select>
+            </Field>
+            <MoveLines id="transfer" products={products} lines={transfer.lines} onChange={(lines) => setTransfer({ ...transfer, lines })}
+              available={(pid) => onHand(pid, transfer.from)}
+              note={transfer.from ? `Available is at ${locations.find((x) => x.id === transfer.from)?.name}` : 'Choose “From” to see what is available'} />
+          </FormSection>
+        </FormCard>
       )}
 
       {can(user, 'STOCK_ADJUST') && (
-        <>
-          <h2>Adjust / damaged stock</h2>
-          <form className="card form" onSubmit={submitAdjust}>
-            <label>Location
+        <FormCard
+          key={`a${fresh.adjust}`}
+          onSubmit={submitAdjust}
+          title="Adjust or damaged stock"
+          description="Corrections after a count, and damaged stock. Every change needs a reason and shows in the audit log."
+          actions={<FormActions><BusyButton busy={busy === 'adjust'}>Save adjustment</BusyButton></FormActions>}
+        >
+          <FormSection>
+            <Field label="What happened" required span={12}>
+              <Choice name="kind" columns={1} value={adjust.kind} onChange={(v) => setAdjust({ ...adjust, kind: v })}
+                options={KINDS.filter(([v]) => v !== 'RESTORE_DAMAGED' || can(user, 'DAMAGED_APPROVE')).map(([value, label, description]) => ({ value, label, description }))} />
+            </Field>
+            <Field label="Location" required span={12}>
               <select required value={adjust.locationId} onChange={(e) => setAdjust({ ...adjust, locationId: e.target.value })}>
-                <option value="">—</option>
+                <option value="">Select location…</option>
                 {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
               </select>
-            </label>
-            <div className="field">
-              <label htmlFor="adjust-product">Product</label>
+            </Field>
+            <Field label="Product" required span={12} htmlFor="adjust-product" hint={adjust.productId && adjust.locationId ? `At this location: ${onHand(adjust.productId, adjust.locationId)}` : undefined}>
               <Combobox id="adjust-product" required compact options={productOpts} value={adjust.productId} recentKey="product" placeholder="Type product name…" onChange={(v) => setAdjust({ ...adjust, ...pickProduct(v) })} />
-            </div>
-            <label>Unit<UnitSelect product={prod(adjust.productId)} value={adjust.unitName} onChange={(v) => setAdjust({ ...adjust, unitName: v })} /></label>
-            <label>Qty<input type="number" step="any" min="0" required value={adjust.qty} onChange={(e) => setAdjust({ ...adjust, qty: e.target.value })} /></label>
-            <label>What
-              <select value={adjust.kind} onChange={(e) => setAdjust({ ...adjust, kind: e.target.value })}>
-                {KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-            </label>
-            <label>Reason (required)<input required minLength={3} value={adjust.note} onChange={(e) => setAdjust({ ...adjust, note: e.target.value })} /></label>
-            <button>Save</button>
-          </form>
-        </>
+            </Field>
+            <Field label="Unit" required span={6}><UnitSelect product={prod(adjust.productId)} value={adjust.unitName} onChange={(v) => setAdjust({ ...adjust, unitName: v })} /></Field>
+            <Field label="Quantity" required span={6}><input type="number" step="any" min="0" required inputMode="decimal" placeholder="0" value={adjust.qty} onChange={(e) => setAdjust({ ...adjust, qty: e.target.value })} /></Field>
+            <Field label="Reason" required span={12} hint="At least 3 characters, e.g. “counted 2 short”, “bottles burst in van”.">
+              <input required minLength={3} value={adjust.note} onChange={(e) => setAdjust({ ...adjust, note: e.target.value })} />
+            </Field>
+          </FormSection>
+        </FormCard>
       )}
+      </div>
     </>
   );
 }

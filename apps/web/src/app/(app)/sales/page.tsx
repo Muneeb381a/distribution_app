@@ -4,16 +4,17 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { Empty, SkeletonRows } from '@/components/Feedback';
+import { DueBadge, LineBadge } from '@/components/Badge';
 import { Icon } from '@/components/Icon';
 import { LoadMore, rowLink, SortTh, usePaged, useSort } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
+import { money, saleTypeLabel } from '@dist/shared';
 
 interface SaleRow {
   id: string; billNo: string; date: string; businessLine: string; saleType: string; net: string; paidNow: string; status: string;
   customer: { name: string; shopName: string | null } | null; salesman: { name: string } | null;
 }
 
-const n = (v: string | number) => Number(v).toLocaleString();
 
 export default function SalesPage() {
   const user = useUser();
@@ -51,9 +52,9 @@ export default function SalesPage() {
       {error && <p className="error">{error}</p>}
 
       <div className="sum-bar">
-        <div><span>Total sales</span><b>Rs {n(total)}</b></div>
-        <div><span>Paid</span><b>Rs {n(paid)}</b></div>
-        <div><span>Udhaar</span><b>Rs {n(udhaar)}</b></div>
+        <div><span>Total sales</span><b>Rs {money(total)}</b></div>
+        <div><span>Paid</span><b>Rs {money(paid)}</b></div>
+        <div><span>Udhaar</span><b>Rs {money(udhaar)}</b></div>
         <div><span>Bills</span><b>{active.length}</b></div>
       </div>
 
@@ -79,19 +80,18 @@ export default function SalesPage() {
         <tbody>
           {!loaded && !error && <SkeletonRows cols={9} />}
           {page.map((r) => {
-            const due = Number(r.net) - Number(r.paidNow);
             return (
               <tr key={r.id} {...rowLink(() => router.push(`/sales/${r.id}`))} style={r.status === 'CANCELLED' ? { opacity: 0.55 } : undefined}>
                 <td><Link href={`/sales/${r.id}`}>{r.billNo}</Link></td>
                 <td>{r.date.slice(0, 10)}</td>
                 <td>{r.customer?.name ?? <span className="muted">Cash sale</span>}{r.customer?.shopName && <span className="muted"> · {r.customer.shopName}</span>}</td>
-                <td><span className={`badge ${r.businessLine === 'RICE' ? 'amber' : 'blue'}`}>{r.businessLine === 'RICE' ? 'Rice' : 'Bottles'}</span></td>
-                <td>{r.saleType === 'DELIVERY' ? 'Delivery' : 'Counter'}</td>
+                <td><LineBadge line={r.businessLine} /></td>
+                <td>{saleTypeLabel(r.saleType)}</td>
                 <td>{r.salesman?.name ?? ''}</td>
-                <td className="num"><strong>{n(r.net)}</strong></td>
-                <td className="num">{n(r.paidNow)}</td>
+                <td className="num"><strong>{money(r.net)}</strong></td>
+                <td className="num">{money(r.paidNow)}</td>
                 <td>
-                  {r.status === 'CANCELLED' ? <span className="badge red">Cancelled</span> : due > 0 ? <span className="badge amber">Udhaar {n(due)}</span> : <span className="badge green">Paid</span>}
+                  <DueBadge status={r.status} total={r.net} paid={r.paidNow} />
                 </td>
               </tr>
             );

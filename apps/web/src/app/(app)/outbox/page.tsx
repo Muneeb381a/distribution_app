@@ -13,15 +13,10 @@ import {
   type OutboxOp, type Snapshot,
 } from '@/lib/offline';
 import { usePageTitle } from '@/lib/pageTitle';
+import { formatDate, money, BILL_PAYMENT_METHODS, timeAgo } from '@dist/shared';
 
-const money = (n: string | number) => Number(n).toLocaleString('en-PK', { maximumFractionDigits: 2 });
-const when = (iso: string) => new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-const ago = (iso: string | null) => {
-  if (!iso) return 'never';
-  const m = Math.round((Date.now() - Date.parse(iso)) / 60_000);
-  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : when(iso);
-};
-const METHODS: [string, string][] = [['CASH', 'Cash'], ['BANK', 'Bank'], ['EASYPAISA', 'Easypaisa'], ['JAZZCASH', 'JazzCash']];
+// Cheques are taken on the khata page, where they can later be cleared or bounced.
+const METHODS = BILL_PAYMENT_METHODS.map((m) => [m.value, m.label] as const);
 
 export default function OutboxPage() {
   usePageTitle('Offline outbox');
@@ -104,7 +99,7 @@ export default function OutboxPage() {
         <div className="stat">
           <span className="label"><span className={`icon ${sync.reachable ? 'green' : 'amber'}`}><Icon name={sync.reachable ? 'cloud' : 'wifiOff'} /></span>Connection</span>
           <span className="value" style={{ fontSize: 22 }}>{sync.reachable ? 'Online' : 'Offline'}</span>
-          <span className="sub">Last sync {ago(sync.lastSync)}</span>
+          <span className="sub">Last sync {timeAgo(sync.lastSync)}</span>
         </div>
         <div className="stat">
           <span className="label"><span className="icon amber"><Icon name="history" /></span>Waiting</span>
@@ -119,7 +114,7 @@ export default function OutboxPage() {
         <div className="stat">
           <span className="label"><span className="icon"><Icon name="monitor" /></span>This PC</span>
           <span className="value" style={{ fontSize: 22 }}>{sync.prefix ?? '—'}</span>
-          <span className="sub">{snap ? `Data saved ${ago(snap.at)}` : 'No offline data yet'}</span>
+          <span className="sub">{snap ? `Data saved ${timeAgo(snap.at)}` : 'No offline data yet'}</span>
         </div>
       </div>
 
@@ -138,7 +133,7 @@ export default function OutboxPage() {
                   <li key={o.clientId} style={{ flexWrap: 'wrap' }}>
                     <span className="who-line">
                       <b>{o.number}</b>
-                      <span>{o.bill?.customer?.name ?? o.receipt?.customer.name ?? 'Walk-in'} · Rs {money(o.bill?.net ?? o.payment?.amount ?? 0)} · {when(o.savedAt)}</span>
+                      <span>{o.bill?.customer?.name ?? o.receipt?.customer.name ?? 'Walk-in'} · Rs {money(o.bill?.net ?? o.payment?.amount ?? 0)} · {formatDate(o.savedAt, 'datetime')}</span>
                       <span className="error" style={{ display: 'block' }}>{o.error}</span>
                     </span>
                     <span className="row-actions">
@@ -160,7 +155,7 @@ export default function OutboxPage() {
                   <td><b>{o.number}</b><div className="muted" style={{ fontSize: 12.5 }}>{o.kind === 'SALE' ? 'Bill' : 'Receipt'}</div></td>
                   <td>{o.bill?.customer?.name ?? o.receipt?.customer.name ?? <span className="muted">Walk-in</span>}</td>
                   <td className="num"><b>{money(o.bill?.net ?? o.payment?.amount ?? 0)}</b></td>
-                  <td className="muted">{when(o.savedAt)}</td>
+                  <td className="muted">{formatDate(o.savedAt, 'datetime')}</td>
                   <td>
                     {tone(o)}
                     {o.flags?.map((f) => <div key={f} className="muted" style={{ fontSize: 12.5, whiteSpace: 'normal', maxWidth: 280 }}>{f.replace(/^[A-Z_]+: /, '')}</div>)}

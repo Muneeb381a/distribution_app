@@ -6,11 +6,13 @@ import { useEffect, useState } from 'react';
 import { Icon } from '@/components/Icon';
 import { api } from '@/lib/api';
 import { usePageTitle } from '@/lib/pageTitle';
+import { useSettings } from '@/lib/settings';
+import { contactLine, formatDate, money, monthName } from '@dist/shared';
 
 interface Slip {
   month: string; base: string; commission: string; absenceDeduction: string; gross: string; advances: string; carryIn: string;
   netPaid: string; carryOut: string; paidOn: string; status?: string; employee: { name: string; type: string; phone?: string | null };
-  advanceItems: { id: string; date: string; amount: string; note: string | null }[];
+  recoveries: { id: string; amount: string; status: string; advance: { id: string; date: string; amount: string; note: string | null } }[];
   details: { attendance?: Record<string, number>; salesNet?: string; commissionPercent?: string | null } | null;
 }
 
@@ -20,11 +22,10 @@ function attendanceText(a: Record<string, number>) {
   const parts = Object.entries(a).filter(([, v]) => Number(v) > 0).map(([k, v]) => `${v} ${ATT[k.toLowerCase()] ?? k.toLowerCase()}`);
   return parts.length ? parts.join(' · ') : 'Not marked';
 }
-const n = (v: string | number) => Number(v).toLocaleString('en-PK');
-const monthName = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 
 export default function SalarySlipPage() {
   const { id } = useParams<{ id: string }>();
+  const biz = useSettings();
   const [slip, setSlip] = useState<Slip | null>(null);
   const [error, setError] = useState('');
 
@@ -49,6 +50,7 @@ export default function SalarySlipPage() {
         <article className="slip card paper">
           <header className="slip-head">
             <div>
+              <span className="slip-biz">{biz.businessName}{contactLine(biz) ? ` · ${contactLine(biz)}` : ''}</span>
               <span className="slip-kicker">Salary slip</span>
               <h1>{monthName(slip.month)}</h1>
             </div>
@@ -67,19 +69,19 @@ export default function SalarySlipPage() {
           <table className="slip-table">
             <thead><tr><th>Earnings &amp; deductions</th><th className="num">Rs</th></tr></thead>
             <tbody>
-              {row(slip.employee.type === 'DAILY' ? 'Wages for days worked' : 'Salary', n(slip.base))}
-              {Number(slip.commission) > 0 && row(`Commission (${Number(slip.details?.commissionPercent ?? 0)}% of ${n(slip.details?.salesNet ?? '0')})`, n(slip.commission))}
-              {Number(slip.absenceDeduction) > 0 && row('Absence deduction', `-${n(slip.absenceDeduction)}`, 'minus')}
-              {row('Earned', n(slip.gross), 'subtotal')}
-              {slip.advanceItems.map((a) => row(`Advance ${a.date.slice(0, 10)}${a.note ? ` (${a.note})` : ''}`, `-${n(a.amount)}`, 'minus'))}
-              {Number(slip.carryIn) > 0 && row('Advances carried from last month', `-${n(slip.carryIn)}`, 'minus')}
+              {row(slip.employee.type === 'DAILY' ? 'Wages for days worked' : 'Salary', money(slip.base))}
+              {Number(slip.commission) > 0 && row(`Commission (${Number(slip.details?.commissionPercent ?? 0)}% of ${money(slip.details?.salesNet ?? '0')})`, money(slip.commission))}
+              {Number(slip.absenceDeduction) > 0 && row('Absence deduction', `-${money(slip.absenceDeduction)}`, 'minus')}
+              {row('Earned', money(slip.gross), 'subtotal')}
+              {slip.recoveries.map((r) => row(`Advance of ${formatDate(r.advance.date)}${r.advance.note ? ` (${r.advance.note})` : ''}${Number(r.amount) < Number(r.advance.amount) ? ` — part of ${money(r.advance.amount)}` : ''}`, `-${money(r.amount)}`, 'minus'))}
+              {Number(slip.carryIn) > 0 && row('Advances carried from last month', `-${money(slip.carryIn)}`, 'minus')}
             </tbody>
           </table>
           <div className="slip-net">
             <span>Net paid</span>
-            <b>Rs {n(slip.netPaid)}</b>
+            <b>Rs {money(slip.netPaid)}</b>
           </div>
-          {Number(slip.carryOut) > 0 && <p className="muted" style={{ margin: '10px 0 0' }}>Rs {n(slip.carryOut)} of advances is carried to next month.</p>}
+          {Number(slip.carryOut) > 0 && <p className="muted" style={{ margin: '10px 0 0' }}>Rs {money(slip.carryOut)} of advances is carried to next month.</p>}
           <footer className="slip-sign">
             <span>Employee signature</span>
             <span>Authorised by</span>

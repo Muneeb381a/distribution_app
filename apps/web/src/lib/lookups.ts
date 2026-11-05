@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { lineLabel, productLabel } from '@dist/shared';
 import { api } from './api';
 
 export interface ProductOpt { id: string; name: string; size: string | null; baseUnit: string; returnableEmpty: boolean; category: { businessLine: { code: string } }; units: { unitName: string; factorToBase: string }[] }
@@ -17,30 +18,18 @@ export function useLookups() {
   return { ...data, error };
 }
 
-export const productLabel = (p: { name: string; size: string | null }) => (p.size ? `${p.name} (${p.size})` : p.name);
-
-/** "36 (6 ctn)" for bottles, plain quantity otherwise. */
-export function formatQty(qtyBase: string | number, units: { unitName: string; factorToBase: string }[], baseUnit: string) {
-  const q = Number(qtyBase);
-  const carton = units.find((u) => u.unitName === 'CARTON');
-  if (baseUnit === 'BOTTLE' && carton && Number(carton.factorToBase) > 1) {
-    const f = Number(carton.factorToBase);
-    const c = Math.trunc(q / f);
-    const r = q - c * f;
-    return c ? `${q} (${c} ctn${r ? ` + ${r}` : ''})` : String(q);
-  }
-  return `${q}${baseUnit === 'KG' ? ' kg' : ''}`;
-}
+// Labels and quantities come from @dist/shared so every screen shows them the same way.
+export { productLabel, formatQty } from '@dist/shared';
 
 /** Combobox options for products. */
 export const productOptions = (products: ProductOpt[]) =>
   products.map((p) => ({
     value: p.id,
     label: productLabel(p),
-    sub: p.category.businessLine.code === 'RICE' ? 'Rice' : 'Bottles',
+    sub: lineLabel(p.category.businessLine.code),
   }));
 
-export interface CustomerOpt { id: string; name: string; shopName: string | null; area: string | null; phone?: string | null; type: 'CASH' | 'CREDIT' }
+export interface CustomerOpt { id: string; name: string; shopName: string | null; area: string | null; phone?: string | null; type: 'CASH' | 'CREDIT'; priceTier?: string }
 
 /** Combobox options for customers: search by name, shop, area or phone. */
 export const customerOptions = (customers: CustomerOpt[]) =>

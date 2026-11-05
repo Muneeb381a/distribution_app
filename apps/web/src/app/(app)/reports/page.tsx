@@ -6,27 +6,18 @@ import { Empty, SkeletonRows } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
 import { downloadCsv, SortTh, useSort } from '@/components/Table';
 import { api } from '@/lib/api';
+import { addDays, lineLabel, localDay, presetRange, rupees } from '@dist/shared';
 
 type Tab = 'profit' | 'rice' | 'salesmen' | 'empties' | 'returns' | 'collections';
 const TABS: [Tab, string][] = [
   ['profit', 'Profit'], ['rice', 'Rice bought / sold'], ['salesmen', 'Salesmen & vehicles'],
   ['empties', 'Empties'], ['returns', 'Returns & damaged'], ['collections', 'Collections'],
 ];
-const n = (v: string | number | null | undefined) => Number(v ?? 0).toLocaleString('en-PK', { maximumFractionDigits: 0 });
 const neg = (v: string | number) => (Number(v) < 0 ? 'error' : '');
-const iso = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
-const addDays = (d: Date, k: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + k);
 
 type Preset = 'today' | 'yesterday' | '7d' | 'month' | 'lastMonth' | 'custom';
 const PRESETS: [Preset, string][] = [['today', 'Today'], ['yesterday', 'Yesterday'], ['7d', 'Last 7 days'], ['month', 'This month'], ['lastMonth', 'Last month']];
-function rangeOf(p: Preset): [string, string] {
-  const t = new Date();
-  if (p === 'yesterday') return [iso(addDays(t, -1)), iso(addDays(t, -1))];
-  if (p === '7d') return [iso(addDays(t, -6)), iso(t)];
-  if (p === 'month') return [iso(new Date(t.getFullYear(), t.getMonth(), 1)), iso(t)];
-  if (p === 'lastMonth') return [iso(new Date(t.getFullYear(), t.getMonth() - 1, 1)), iso(new Date(t.getFullYear(), t.getMonth(), 0))];
-  return [iso(t), iso(t)];
-}
+const rangeOf = (p: Preset): [string, string] => presetRange(p === 'custom' ? 'today' : p);
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Data = any;
@@ -42,7 +33,7 @@ function DataTable({ cols, rows, empty = 'Nothing in this range.', rowKey }: { c
       <table>
         <thead><tr>{cols.map((c) => <SortTh key={c.key} k={c.key} sort={sort} toggle={toggle} num={c.num}>{c.label}</SortTh>)}</tr></thead>
         <tbody>
-          {sorted.map((r, i) => <tr key={rowKey(r, i)}>{cols.map((c) => <td key={c.key} className={c.num ? 'num' : ''}>{c.render ? c.render(r) : c.num ? n(c.value(r)) : c.value(r)}</td>)}</tr>)}
+          {sorted.map((r, i) => <tr key={rowKey(r, i)}>{cols.map((c) => <td key={c.key} className={c.num ? 'num' : ''}>{c.render ? c.render(r) : c.num ? rupees(c.value(r)) : c.value(r)}</td>)}</tr>)}
           {!rows.length && <tr><td colSpan={cols.length}><Empty icon="reports" title={empty} text="Try a wider date range." /></td></tr>}
         </tbody>
       </table>
@@ -56,7 +47,11 @@ const sumTotal = (rows: Data[], f: string) => rows.reduce((s, r) => s + Number(r
 function Profit({ d, from, to, groupBy }: { d: Data; from: string; to: string; groupBy: string }) {
   const rows: Data[] = d.rows;
   const net = sumTotal(rows, 'netSales'), gross = sumTotal(rows, 'grossProfit'), exp = sumTotal(rows, 'expenses'), profit = sumTotal(rows, 'netProfit');
+  const lineNet = { BOTTLES: sumLine(rows, 'BOTTLES', 'netSales'), RICE: sumLine(rows, 'RICE', 'netSales') };
+  const lineGross = { BOTTLES: sumLine(rows, 'BOTTLES', 'grossProfit'), RICE: sumLine(rows, 'RICE', 'grossProfit') };
   const uncosted = rows.reduce((s, r) => s + r.uncostedLines, 0);
+  const places: { locationId: string | null; name: string; type: string | null; amount: string }[] = d.expensesByPlace ?? [];
+  const categories: { category: string; amount: string }[] = d.expensesByCategory ?? [];
 
   // Every day of the range on the chart, including days with no sales.
   const chart = useMemo(() => {
@@ -67,8 +62,8 @@ function Profit({ d, from, to, groupBy }: { d: Data; from: string; to: string; g
     };
     if (groupBy === 'day') {
       const out = [];
-      for (let t = new Date(`${from}T00:00:00`); iso(t) <= to && out.length < 93; t = addDays(t, 1)) {
-        out.push(point(iso(t), String(t.getDate()), t.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })));
+      for (let t = new Date(`${from}T00:00:00`); localDay(t) <= to && out.length < 93; t = addDays(t, 1)) {
+        out.push(point(localDay(t), String(t.getDate()), t.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })));
       }
       return out;
     }
@@ -78,21 +73,92 @@ function Profit({ d, from, to, groupBy }: { d: Data; from: string; to: string; g
   const tile = (label: string, value: number, sub: string, icon: Parameters<typeof Icon>[0]['name'], tone = '') => (
     <div className="stat">
       <span className="label"><span className={`icon ${tone}`}><Icon name={icon} /></span>{label}</span>
-      <span className={`value${value < 0 ? ' neg' : ''}`}><small>Rs</small>{n(value)}</span>
+      <span className={`value${value < 0 ? ' neg' : ''}`}><small>Rs</small>{rupees(value)}</span>
       <span className="sub">{sub}</span>
     </div>
   );
-  const pct = (v: number) => (net ? `${Math.round((v / net) * 100)}% of net sales` : '—');
+  /** Profit as a share of the sales it came from: "18% margin". */
+  const margin = (p: number, sales: number) => (sales ? `${Math.round((p / sales) * 100)}% margin` : 'No sales');
+  const placeLabel = (p: (typeof places)[number]) => (p.type === 'GODOWN' ? 'Godown' : p.type === 'SHOP' ? 'Shop' : 'Salaries, office and other');
+  const biggestPlace = Math.max(1, ...places.map((p) => Number(p.amount)));
+  const biggestCat = Math.max(1, ...categories.map((c) => Number(c.amount)));
 
   return (
     <>
-      <div className="stats">
-        {tile('Net sales', net, `${n(sumLine(rows, 'BOTTLES', 'netSales'))} bottles · ${n(sumLine(rows, 'RICE', 'netSales'))} rice`, 'sales')}
-        {tile('Gross profit', gross, pct(gross), 'trend', 'green')}
-        {tile('Expenses', exp, `incl. ${n(rows.reduce((s, r) => s + Number(r.sharedExpenses), 0))} shared`, 'expenses', 'amber')}
-        {tile('Net profit', profit, pct(profit), 'wallet', profit < 0 ? 'red' : 'green')}
+      <div className="stats profit-stats">
+        {tile('Bottles profit', lineGross.BOTTLES, `${margin(lineGross.BOTTLES, lineNet.BOTTLES)} on Rs ${rupees(lineNet.BOTTLES)}`, 'products', 'blue')}
+        {tile('Rice profit', lineGross.RICE, `${margin(lineGross.RICE, lineNet.RICE)} on Rs ${rupees(lineNet.RICE)}`, 'stock', 'amber')}
+        {tile('Both together', gross, `${margin(gross, net)} on Rs ${rupees(net)} sales`, 'trend', 'green')}
+        {tile('Expenses', exp, places.length ? places.slice(0, 2).map((p) => `${p.name} ${rupees(p.amount)}`).join(' · ') : 'None in this range', 'expenses', 'amber')}
+        {tile('Net profit', profit, 'Both lines, after all expenses', 'wallet', profit < 0 ? 'red' : 'green')}
       </div>
       {uncosted > 0 && <p className="error"><Icon name="alert" /> {uncosted} sold lines have no cost yet, so profit is overstated.</p>}
+
+      {rows.length > 0 && (
+        <section className="card profit-sheet">
+          <div className="card-head"><h2>Profit and loss</h2><span className="muted" style={{ fontSize: 13 }}>{from === to ? from : `${from} to ${to}`}</span></div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th /><th className="num hide-sm">Net sales</th><th className="num hide-sm">Cost</th><th className="num">Profit</th><th className="num">Margin</th></tr></thead>
+              <tbody>
+                {(['BOTTLES', 'RICE'] as const).map((k) => (
+                  <tr key={k}>
+                    <td><span className="swatch" style={{ background: LINE_SERIES.find((s) => s.key === k)!.color }} />{lineLabel(k)}</td>
+                    <td className="num hide-sm">{rupees(lineNet[k])}</td>
+                    <td className="num hide-sm">{rupees(sumLine(rows, k, 'cost'))}</td>
+                    <td className={`num ${neg(lineGross[k])}`}><b>{rupees(lineGross[k])}</b></td>
+                    <td className="num muted">{lineNet[k] ? `${Math.round((lineGross[k] / lineNet[k]) * 100)}%` : '—'}</td>
+                  </tr>
+                ))}
+                <tr className="total-row">
+                  <td>Both lines</td><td className="num hide-sm">{rupees(net)}</td><td className="num hide-sm">{rupees(sumTotal(rows, 'cost'))}</td>
+                  <td className={`num ${neg(gross)}`}>{rupees(gross)}</td><td className="num">{net ? `${Math.round((gross / net) * 100)}%` : '—'}</td>
+                </tr>
+                {places.map((p) => (
+                  <tr key={p.locationId ?? 'general'} className="pl-minus">
+                    <td>Less expenses · {p.name}</td><td className="hide-sm" /><td className="hide-sm" /><td className="num amt-debit">-{rupees(p.amount)}</td><td />
+                  </tr>
+                ))}
+                <tr className="total-row pl-net">
+                  <td>Net profit</td><td className="hide-sm" /><td className="hide-sm" /><td className={`num ${neg(profit)}`}>{rupees(profit)}</td><td className="num">{net ? `${Math.round((profit / net) * 100)}%` : '—'}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p className="muted" style={{ fontSize: 13, margin: '10px 0 0' }}>Each line&apos;s profit is its net sales minus the purchase cost of what was sold. Expenses are kept together and come off the combined profit.</p>
+        </section>
+      )}
+
+      {places.length > 0 && (
+        <div className="dash-grid two-even">
+          <section className="card">
+            <div className="card-head"><h2>Expenses by place</h2></div>
+            <ul className="list">
+              {places.map((p) => (
+                <li key={p.locationId ?? 'general'} style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+                  <span style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                    <span><b>{p.name}</b>{placeLabel(p).toLowerCase() !== p.name.toLowerCase() && <span className="muted" style={{ fontSize: 12.5 }}> {placeLabel(p)}</span>}</span>
+                    <span className="amt">Rs {rupees(p.amount)}</span>
+                  </span>
+                  <span className="meter" aria-hidden="true"><span style={{ width: `${(Number(p.amount) / biggestPlace) * 100}%`, background: 'var(--accent)' }} /></span>
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section className="card">
+            <div className="card-head"><h2>Expenses by category</h2></div>
+            <ul className="list">
+              {categories.slice(0, 8).map((c) => (
+                <li key={c.category} style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+                  <span style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>{c.category}</span><span className="amt">Rs {rupees(c.amount)}</span></span>
+                  <span className="meter" aria-hidden="true"><span style={{ width: `${(Number(c.amount) / biggestCat) * 100}%`, background: 'var(--warn)' }} /></span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+      )}
+
       {chart.length > 1 && (
         <section className="card">
           <div className="card-head"><h2>Net sales by {groupBy === 'month' ? 'month' : 'day'}</h2></div>
@@ -106,36 +172,31 @@ function Profit({ d, from, to, groupBy }: { d: Data; from: string; to: string; g
         empty="No sales or expenses in this range."
         cols={[
           { key: 'period', label: 'Period', value: (r) => r.period, render: (r) => <b style={{ whiteSpace: 'nowrap' }}>{r.period}</b> },
-          { key: 'b', label: 'Bottles net', num: true, value: (r) => r.lines.BOTTLES.netSales },
-          { key: 'r', label: 'Rice net', num: true, value: (r) => r.lines.RICE.netSales },
           { key: 'net', label: 'Net sales', num: true, value: (r) => r.total.netSales },
-          { key: 'cost', label: 'Cost', num: true, value: (r) => r.total.cost },
-          { key: 'gross', label: 'Gross profit', num: true, value: (r) => r.total.grossProfit, render: (r) => <span className={neg(r.total.grossProfit)}>{n(r.total.grossProfit)}</span> },
+          { key: 'bp', label: 'Bottles profit', num: true, value: (r) => r.lines.BOTTLES.grossProfit, render: (r) => <span className={neg(r.lines.BOTTLES.grossProfit)}>{rupees(r.lines.BOTTLES.grossProfit)}</span> },
+          { key: 'rp', label: 'Rice profit', num: true, value: (r) => r.lines.RICE.grossProfit, render: (r) => <span className={neg(r.lines.RICE.grossProfit)}>{rupees(r.lines.RICE.grossProfit)}</span> },
+          { key: 'gross', label: 'Both', num: true, value: (r) => r.total.grossProfit, render: (r) => <span className={neg(r.total.grossProfit)}>{rupees(r.total.grossProfit)}</span> },
           { key: 'exp', label: 'Expenses', num: true, value: (r) => r.total.expenses },
-          { key: 'np', label: 'Net profit', num: true, value: (r) => r.total.netProfit, render: (r) => <b className={neg(r.total.netProfit)}>{n(r.total.netProfit)}</b> },
+          { key: 'np', label: 'Net profit', num: true, value: (r) => r.total.netProfit, render: (r) => <b className={neg(r.total.netProfit)}>{rupees(r.total.netProfit)}</b> },
           { key: 'cash', label: 'Cash with bills', num: true, value: (r) => r.cash.paidWithBills },
           { key: 'udh', label: 'Udhaar given', num: true, value: (r) => r.cash.udhaarGiven },
         ]}
       />
       {rows.length > 0 && (
         <>
-          <h2>By line (whole range)</h2>
+          <h2>Sales detail by line</h2>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Line</th><th className="num">Qty sold</th><th className="num">Sales</th><th className="num">Returns</th><th className="num">Net sales</th><th className="num">Cost</th><th className="num">Gross profit</th><th className="num">Expenses</th><th className="num">Net profit</th></tr></thead>
+              <thead><tr><th>Line</th><th className="num">Qty sold</th><th className="num">Sales</th><th className="num">Returns</th><th className="num">Net sales</th><th className="num">Cost</th><th className="num">Gross profit</th></tr></thead>
               <tbody>
                 {(['BOTTLES', 'RICE'] as const).map((k) => (
                   <tr key={k}>
-                    <td><span className="swatch" style={{ background: LINE_SERIES.find((s) => s.key === k)!.color }} />{k === 'BOTTLES' ? 'Bottles' : 'Rice'}</td>
-                    {['qtySold', 'sales', 'returnsCredit', 'netSales', 'cost', 'grossProfit', 'expenses', 'netProfit'].map((f) => (
-                      <td key={f} className={`num ${neg(sumLine(rows, k, f))}`}>{n(sumLine(rows, k, f))}</td>
+                    <td><span className="swatch" style={{ background: LINE_SERIES.find((s) => s.key === k)!.color }} />{lineLabel(k)}</td>
+                    {['qtySold', 'sales', 'returnsCredit', 'netSales', 'cost', 'grossProfit'].map((f) => (
+                      <td key={f} className={`num ${neg(sumLine(rows, k, f))}`}>{rupees(sumLine(rows, k, f))}</td>
                     ))}
                   </tr>
                 ))}
-                <tr className="total-row">
-                  <td>Total</td><td className="num">{n(sumTotal(rows, 'qtySold'))}</td><td className="num">{n(sumTotal(rows, 'sales'))}</td><td className="num">{n(sumTotal(rows, 'returnsCredit'))}</td>
-                  <td className="num">{n(net)}</td><td className="num">{n(sumTotal(rows, 'cost'))}</td><td className={`num ${neg(gross)}`}>{n(gross)}</td><td className="num">{n(exp)}</td><td className={`num ${neg(profit)}`}>{n(profit)}</td>
-                </tr>
               </tbody>
             </table>
           </div>
@@ -146,7 +207,7 @@ function Profit({ d, from, to, groupBy }: { d: Data; from: string; to: string; g
   );
 }
 
-const methods = (r: Data) => Object.entries(r.byMethod ?? {}).map(([m, v]) => `${m.toLowerCase()} ${n(v as string)}`).join(' · ');
+const methods = (r: Data) => Object.entries(r.byMethod ?? {}).map(([m, v]) => `${m.toLowerCase()} ${rupees(v as string)}`).join(' · ');
 
 /** Columns per tab, also used for the CSV export. */
 function colsFor(tab: Tab): Record<string, Col[]> {
@@ -169,7 +230,7 @@ function colsFor(tab: Tab): Record<string, Col[]> {
     ] };
     case 'salesmen': return {
       salesmen: [{ key: 'name', label: 'Salesman', value: (r) => r.name, render: (r) => <b>{r.name}</b> }, ...sm,
-        { key: 'commission', label: 'Commission', num: true, value: (r) => r.commission, render: (r) => <>{n(r.commission)}{r.commissionPercent && <span className="muted"> ({Number(r.commissionPercent)}%)</span>}</> }],
+        { key: 'commission', label: 'Commission', num: true, value: (r) => r.commission, render: (r) => <>{rupees(r.commission)}{r.commissionPercent && <span className="muted"> ({Number(r.commissionPercent)}%)</span>}</> }],
       vehicles: [{ key: 'name', label: 'Vehicle', value: (r) => r.name, render: (r) => <b>{r.name}</b> }, ...sm],
     };
     case 'empties': return { customers: [
@@ -189,7 +250,7 @@ function colsFor(tab: Tab): Record<string, Col[]> {
         { key: 'bill', label: 'Bill', value: (r) => r.bill },
         { key: 'customer', label: 'Customer', value: (r) => r.customer },
         { key: 'product', label: 'Product', value: (r) => r.product },
-        { key: 'qty', label: 'Qty', num: true, value: (r) => r.qty, render: (r) => `${n(r.qty)} ${r.unitName.toLowerCase()}` },
+        { key: 'qty', label: 'Qty', num: true, value: (r) => r.qty, render: (r) => `${rupees(r.qty)} ${r.unitName.toLowerCase()}` },
         { key: 'reason', label: 'Reason', value: (r) => r.reason.toLowerCase(), render: (r) => <span className={`badge ${r.reason === 'DAMAGED' ? 'red' : 'amber'}`}>{r.reason.toLowerCase()}</span> },
         { key: 'credit', label: 'Credit', num: true, value: (r) => r.credit },
       ],
@@ -203,7 +264,7 @@ function colsFor(tab: Tab): Record<string, Col[]> {
       { key: 'date', label: 'Date', value: (r) => r.date },
       { key: 'user', label: 'Recorded by', value: (r) => r.user },
       { key: 'count', label: 'Receipts', num: true, value: (r) => r.count },
-      { key: 'total', label: 'Total', num: true, value: (r) => r.total, render: (r) => <b>{n(r.total)}</b> },
+      { key: 'total', label: 'Total', num: true, value: (r) => r.total, render: (r) => <b>{rupees(r.total)}</b> },
       { key: 'methods', label: 'By method', value: methods, render: (r) => <span className="muted">{methods(r)}</span> },
     ] };
     default: return {};
@@ -228,8 +289,8 @@ function View({ tab, d }: { tab: Tab; d: Data }) {
     <>
       {tab === 'returns' && (
         <div className="mini-stats">
-          <div className="stat"><span className="label">Damaged credited</span><span className="value"><small>Rs</small>{n(d.credit.DAMAGED)}</span></div>
-          <div className="stat"><span className="label">Expired credited</span><span className="value"><small>Rs</small>{n(d.credit.EXPIRED)}</span></div>
+          <div className="stat"><span className="label">Damaged credited</span><span className="value"><small>Rs</small>{rupees(d.credit.DAMAGED)}</span></div>
+          <div className="stat"><span className="label">Expired credited</span><span className="value"><small>Rs</small>{rupees(d.credit.EXPIRED)}</span></div>
         </div>
       )}
       {Object.keys(cols).map((k) => (
@@ -274,11 +335,11 @@ export default function ReportsPage() {
 
   function exportCsv() {
     if (!ready) return;
-    const name = `${tab}-${tab === 'empties' ? iso(new Date()) : `${from}_${to}`}`;
+    const name = `${tab}-${tab === 'empties' ? localDay(new Date()) : `${from}_${to}`}`;
     if (tab === 'profit') {
-      const f = ['netSales', 'cost', 'grossProfit', 'expenses', 'netProfit'];
-      downloadCsv(`${name}.csv`, ['Period', 'Bottles net', 'Rice net', 'Net sales', 'Cost', 'Gross profit', 'Expenses', 'Net profit', 'Cash with bills', 'Udhaar given'],
-        ready.rows.map((r: Data) => [r.period, r.lines.BOTTLES.netSales, r.lines.RICE.netSales, ...f.map((k) => r.total[k]), r.cash.paidWithBills, r.cash.udhaarGiven]));
+      downloadCsv(`${name}.csv`, ['Period', 'Bottles net sales', 'Bottles profit', 'Rice net sales', 'Rice profit', 'Net sales', 'Cost', 'Gross profit (both)', 'Expenses', 'Net profit', 'Cash with bills', 'Udhaar given'],
+        ready.rows.map((r: Data) => [r.period, r.lines.BOTTLES.netSales, r.lines.BOTTLES.grossProfit, r.lines.RICE.netSales, r.lines.RICE.grossProfit,
+          r.total.netSales, r.total.cost, r.total.grossProfit, r.total.expenses, r.total.netProfit, r.cash.paidWithBills, r.cash.udhaarGiven]));
       return;
     }
     const cols = colsFor(tab), rows = rowsFor(tab, ready);
@@ -324,7 +385,7 @@ export default function ReportsPage() {
       {error && <p className="error">{error}</p>}
       {!ready && !error && (
         <div aria-busy="true">
-          {tab === 'profit' && <div className="stats">{[0, 1, 2, 3].map((i) => <span key={i} className="skeleton" style={{ height: 104 }} />)}</div>}
+          {tab === 'profit' && <div className="stats profit-stats">{[0, 1, 2, 3, 4].map((i) => <span key={i} className="skeleton" style={{ height: 104 }} />)}</div>}
           <table><tbody><SkeletonRows cols={6} rows={6} /></tbody></table>
         </div>
       )}
