@@ -9,6 +9,7 @@ import { dayOf } from '../common/dates.js';
 import { StockService } from '../stock/stock.service.js';
 import { PaymentDto, SaleDto, SalesService } from './sales.service.js';
 import { overLimit, withCustomerBalances } from '../common/balances.js';
+import { loadAllocations } from '../common/allocation.js';
 
 
 class PriceDto {
@@ -44,6 +45,8 @@ interface SaleQuery {
   line?: BusinessLineCode;
   salesmanId?: string;
   status?: 'ACTIVE' | 'CANCELLED';
+  /** PENDING = dispatched but not yet signed for. */
+  delivery?: 'PENDING' | 'DELIVERED';
   from?: string;
   to?: string;
   limit?: string;
@@ -70,21 +73,35 @@ class SalesController {
   }
 
   @Get('sales') @RequirePermissions('SALE_CREATE')
-  list(@Query() q: SaleQuery) {
-    return this.prisma.sale.findMany({
+  async list(@Query() q: SaleQuery) {
+    const sales = await this.prisma.sale.findMany({
       where: {
-        customerId: q.customerId, businessLine: q.line, salesmanId: q.salesmanId, status: q.status,
+        customerId: q.customerId, businessLine: q.line, salesmanId: q.salesmanId, status: q.delivery === 'PENDING' ? 'ACTIVE' : q.status,
+        deliveryStatus: q.delivery === 'PENDING' || q.delivery === 'DELIVERED' ? q.delivery : undefined,
         date: range(q.from, q.to),
       },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
       take: Math.min(Number(q.limit) || 100, 500),
       include: { customer: { select: { name: true, shopName: true } }, salesman: { select: { name: true } }, location: { select: { name: true } } },
     });
+    // Paid / part / unpaid per bill, worked out the same way as on the khata.
+    const alloc = await loadAllocations(this.prisma, sales.flatMap((x) => (x.customerId && x.status === 'ACTIVE' ? [x.customerId] : [])));
+    const vehicles = new Map((await this.prisma.location.findMany({ where: { id: { in: [...new Set(sales.flatMap((x) => (x.vehicleId ? [x.vehicleId] : [])))] } }, select: { id: true, name: true } })).map((v) => [v.id, v.name]));
+    return sales.map((x) => {
+      const bill = x.customerId ? alloc.get(x.customerId)?.bills.find((b) => b.saleId === x.id) : undefined;
+      return { ...x, vehicleName: x.vehicleId ? vehicles.get(x.vehicleId) ?? null : null, payStatus: bill?.status ?? null, paid: bill?.paid ?? null, remaining: bill?.remaining ?? null };
+    });
   }
 
   @Get('sales/:id') @RequirePermissions('SALE_CREATE')
   one(@Param('id') id: string) {
     return this.sales.view(id);
+  }
+
+  /** The customer's side has the goods: record who signed for them. */
+  @Post('sales/:id/deliver') @RequirePermissions('SALE_CREATE')
+  deliver(@Param('id') id: string, @Body() body: { receivedBy?: string }, @CurrentUser() u: AuthUser) {
+    return this.sales.deliver(id, typeof body?.receivedBy === 'string' ? body.receivedBy : '', u);
   }
 
   @Post('sales/:id/cancel') @RequirePermissions('SALE_CANCEL')
@@ -230,6 +247,7 @@ class SalesController {
       }),
       this.prisma.payment.findMany({ where: { id: { in: payIds } }, select: { id: true, receiptNo: true, method: true, chequeNo: true } }),
     ]);
+    const alloc = (await loadAllocations(this.prisma, [customerId])).get(customerId);
     const opening = customer.openingBalance.plus(before._sum.amount ?? 0);
     let running = opening;
     let debit = new Prisma.Decimal(0);
@@ -239,10 +257,14 @@ class SalesController {
       if (e.amount.gt(0)) debit = debit.plus(e.amount); else credit = credit.plus(e.amount.neg());
       const sale = sales.find((x) => x.id === e.refId);
       const pay = payments.find((x) => x.id === e.refId);
+      const billOf = e.refType === 'SALE' ? alloc?.bills.find((b) => b.saleId === e.refId) : undefined;
       return {
         id: e.id, date: e.date, refType: e.refType, refId: e.refId, note: e.note, amount: e.amount, balance: running,
         ref: sale?.billNo ?? pay?.receiptNo ?? e.note,
         method: pay?.method ?? null, chequeNo: pay?.chequeNo ?? null,
+        // What is still owed on this bill today, or which bills this receipt paid (oldest first).
+        bill: billOf ? { paid: billOf.paid, remaining: billOf.remaining, status: billOf.status } : undefined,
+        appliedTo: e.refType === 'PAYMENT' ? alloc?.payments.find((a) => a.paymentId === e.refId)?.applied : undefined,
         items: e.refType === 'SALE' && sale ? sale.items.map((i) => ({ name: i.product.size ? `${i.product.name} ${i.product.size}` : i.product.name, qty: i.qty, unitName: i.unitName, lineTotal: i.lineTotal })) : undefined,
       };
     });
@@ -262,6 +284,10 @@ class SalesController {
       this.prisma.emptiesLedger.groupBy({ by: ['productId'], where: { customerId }, _sum: { qtyOut: true, qtyIn: true } }),
     ]);
     const names = await this.prisma.product.findMany({ where: { id: { in: empties.map((e) => e.productId) } }, select: { id: true, name: true } });
+    const alloc = (await loadAllocations(this.prisma, [customerId])).get(customerId);
+    const receipts = await this.prisma.payment.findMany({ where: { customerId }, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }] });
+    const users = await this.prisma.appUser.findMany({ where: { id: { in: [...new Set(receipts.map((r) => r.createdById))] } }, select: { id: true, username: true } });
+    const billNos = new Map((await this.prisma.sale.findMany({ where: { customerId }, select: { id: true, billNo: true } })).map((x) => [x.id, x.billNo]));
     let running = customer.openingBalance;
     return {
       customer: { id: customer.id, name: customer.name, shopName: customer.shopName, type: customer.type, creditLimit: customer.creditLimit },
@@ -271,6 +297,18 @@ class SalesController {
         return { ...e, balance: running };
       }),
       balance: running,
+      /** Bills with what is paid / left, and every receipt with the bills it paid: the installment history. */
+      bills: (alloc?.bills ?? []).map((b) => ({ saleId: b.saleId, billNo: b.billNo, date: b.date, net: b.net, paid: b.paid, remaining: b.remaining, status: b.status, ageDays: b.ageDays })),
+      openingRemaining: alloc?.openingRemaining ?? customer.openingBalance,
+      advance: alloc?.advance ?? 0,
+      receipts: receipts.map((r) => ({
+        id: r.id, receiptNo: r.receiptNo, date: r.date, createdAt: r.createdAt, amount: r.amount, method: r.method, status: r.status,
+        chequeNo: r.chequeNo, chequeStatus: r.chequeStatus, note: r.note, saleId: r.saleId, billNo: r.saleId ? billNos.get(r.saleId) ?? null : null,
+        recordedBy: users.find((u) => u.id === r.createdById)?.username ?? null,
+        previousBalance: r.previousBalance, newBalance: r.newBalance,
+        applied: alloc?.payments.find((a) => a.paymentId === r.id)?.applied ?? [],
+        unallocated: alloc?.payments.find((a) => a.paymentId === r.id)?.unallocated ?? 0,
+      })),
       emptiesHeld: empties
         .map((e) => ({ productId: e.productId, name: names.find((n) => n.id === e.productId)?.name, held: (e._sum.qtyOut ?? 0) - (e._sum.qtyIn ?? 0) }))
         .filter((e) => e.held !== 0),

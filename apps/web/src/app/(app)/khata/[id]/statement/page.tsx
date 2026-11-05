@@ -14,6 +14,9 @@ import { addDays, contactLine, CUSTOMER_LEDGER_LABEL, formatDate, localDay, meth
 interface Entry {
   id: string; date: string; refType: string; refId: string; note: string | null; amount: string; balance: string; ref: string | null;
   method: string | null; chequeNo: string | null; items?: { name: string; qty: string; unitName: string; lineTotal: string }[];
+  /** Today's position of this bill, and the bills a receipt paid (oldest first). */
+  bill?: { paid: string; remaining: string; status: string };
+  appliedTo?: { billNo: string; amount: string }[];
 }
 interface Statement {
   customer: { id: string; name: string; shopName: string | null; phone: string | null; area: string | null; address: string | null; creditLimit: string | null };
@@ -158,6 +161,8 @@ export default function StatementPage() {
                         {e.items.map((i, k) => <li key={k}>{i.name} — {Number(i.qty)} {unitLabel(i.unitName)} <span>{money(i.lineTotal)}</span></li>)}
                       </ul>
                     )}
+                    {e.bill && Number(e.bill.remaining) > 0 && <div className="muted st-left">Paid {money(e.bill.paid)} · still owed {money(e.bill.remaining)}</div>}
+                    {e.appliedTo && e.appliedTo.length > 0 && <div className="muted st-left">Paid towards: {e.appliedTo.map((a) => `${a.billNo} ${money(a.amount)}`).join(' · ')}</div>}
                   </td>
                   <td className="num">{amt > 0 ? money(amt) : ''}</td>
                   <td className="num">{amt < 0 ? money(-amt) : ''}</td>

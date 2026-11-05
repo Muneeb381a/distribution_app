@@ -184,7 +184,7 @@ class TripsController {
       db.stockMovement.groupBy({ by: ['productId'], where: { locationId: trip.vehicleId, status: 'OK', createdAt: { lt: trip.openedAt } }, _sum: { qtyBase: true } }),
       db.stockMovement.findMany({ where: { locationId: trip.vehicleId, createdAt: during, refType: { not: 'TRIP' } }, select: { productId: true, qtyBase: true, type: true, status: true, note: true } }),
       db.sale.findMany({
-        where: { locationId: trip.vehicleId, status: 'ACTIVE', createdAt: during },
+        where: { OR: [{ locationId: trip.vehicleId }, { vehicleId: trip.vehicleId }], status: 'ACTIVE', createdAt: during },
         orderBy: { createdAt: 'asc' },
         select: { id: true, billNo: true, net: true, paidNow: true, createdAt: true, customer: { select: { id: true, name: true } }, payments: { where: { status: 'ACTIVE' }, select: { amount: true, method: true } } },
       }),

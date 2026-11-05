@@ -20,8 +20,11 @@ export function checkSaleHead(h: SaleHead) {
   if (h.saleType === 'DELIVERY' && !h.customerId) throw new RuleError('A delivery needs a customer');
 }
 
-/** Which location types a sale may come from. */
-export const saleLocationTypes = (saleType: string): ('SHOP' | 'GODOWN' | 'VEHICLE')[] => (saleType === 'DELIVERY' ? ['VEHICLE'] : ['SHOP', 'GODOWN']);
+/**
+ * Which location types a sale may come from. A delivery can go straight from the godown or shop (the vehicle
+ * is then only the carrier, no separate loading) or from a vehicle that was loaded for a round.
+ */
+export const saleLocationTypes = (saleType: string): ('SHOP' | 'GODOWN' | 'VEHICLE')[] => (saleType === 'DELIVERY' ? ['SHOP', 'GODOWN', 'VEHICLE'] : ['SHOP', 'GODOWN']);
 
 export function checkHasLines(items: number, returns: number) {
   if (!items && !returns) throw new RuleError('Add at least one item or return');

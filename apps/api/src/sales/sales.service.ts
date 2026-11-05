@@ -8,6 +8,7 @@ import { dayOf } from '../common/dates.js';
 import type { AuthUser } from '../common/decorators.js';
 import { StockService, type Tx } from '../stock/stock.service.js';
 import { customerBalance } from '../common/balances.js';
+import { loadAllocations } from '../common/allocation.js';
 import {
   BILL_PAYMENT_METHODS, DOC_PREFIX, PAYMENT_METHODS, RuleError, billPrefix, listRate, checkHasLines, checkOneLine, checkPayment, checkSaleHead, chooseRate, creditBlock, defaultPaid,
   emptiesGiven, saleLocationTypes, shortageText,
@@ -71,6 +72,8 @@ export class SaleDto {
   @IsEnum(SaleType) saleType: SaleType;
   @IsOptional() @IsUUID() customerId?: string;
   @IsUUID() locationId: string;
+  /** For a delivery from a godown or shop: the vehicle that carries it. Ignored for a bill from a loaded vehicle. */
+  @IsOptional() @IsUUID() vehicleId?: string;
   @IsOptional() @IsUUID() salesmanId?: string;
   @IsOptional() @IsISO8601() date?: string;
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => SaleLineDto) items?: SaleLineDto[];
@@ -110,6 +113,9 @@ export interface Plan {
   credit: { limit: Dec | null; available: Dec | null; blocked: string | null };
   empties: { productId: string; productName: string; given: number; collected: number; heldAfter: number }[];
   shortages: string[];
+  /** The carrying vehicle of a delivery, and whether it is a dispatch from a godown/shop that is tracked until signed for. */
+  vehicleId: string | null;
+  dispatch: boolean;
 }
 
 @Injectable()
@@ -143,8 +149,19 @@ export class SalesService {
     rule(() => checkHasLines(itemDtos.length, returnDtos.length));
 
     // ---- where and who (rules shared with the offline bill screen: @dist/shared sale-rules)
-    await this.stock.requireLocation(tx, dto.locationId, saleLocationTypes(dto.saleType));
+    const from = await this.stock.requireLocation(tx, dto.locationId, saleLocationTypes(dto.saleType));
     rule(() => checkSaleHead(dto));
+    let vehicleId: string | null = null;
+    if (dto.saleType === 'DELIVERY') {
+      if (from.type === 'VEHICLE') {
+        if (dto.vehicleId && dto.vehicleId !== from.id) throw new BadRequestException('This bill is from a loaded vehicle; that vehicle carries it');
+        vehicleId = from.id;
+      } else {
+        if (!dto.vehicleId) throw new BadRequestException('Choose the vehicle that will carry this delivery');
+        await this.stock.requireLocation(tx, dto.vehicleId, ['VEHICLE']);
+        vehicleId = dto.vehicleId;
+      }
+    }
     if (dto.salesmanId) {
       const e = await tx.employee.findUnique({ where: { id: dto.salesmanId } });
       if (!e?.isActive) throw new BadRequestException('Unknown or inactive salesman');
@@ -253,7 +270,7 @@ export class SalesService {
         available: customer?.creditLimit ? customer.creditLimit.minus(newBalance) : null,
         blocked,
       },
-      empties, shortages,
+      empties, shortages, vehicleId, dispatch: dto.saleType === 'DELIVERY' && from.type !== 'VEHICLE',
     };
   }
 
@@ -286,6 +303,7 @@ export class SalesService {
           data: {
             billNo, clientId: dto.clientId, businessLine: plan.businessLine, saleType: dto.saleType,
             customerId: plan.customer?.id, locationId: dto.locationId, salesmanId: dto.salesmanId, date,
+            vehicleId: plan.vehicleId, deliveryStatus: plan.dispatch ? 'PENDING' : null,
             gross: plan.gross, returnsCredit: plan.returnsCredit, net: plan.net, paidNow: plan.paid,
             previousBalance: plan.previousBalance, newBalance: plan.newBalance, note: dto.note,
             empties: plan.empties, createdById: user.id,
@@ -431,7 +449,40 @@ export class SalesService {
     });
     if (!sale) throw new NotFoundException();
     const limit = sale.customer?.creditLimit ?? null;
-    return { ...sale, availableCredit: limit ? limit.minus(sale.newBalance) : null };
+    const vehicle = sale.vehicleId ? await this.prisma.location.findUnique({ where: { id: sale.vehicleId }, select: { id: true, name: true } }) : null;
+    const deliveredBy = sale.deliveredById ? await this.prisma.appUser.findUnique({ where: { id: sale.deliveredById }, select: { username: true } }) : null;
+    return { ...sale, vehicle, deliveredBy: deliveredBy?.username ?? null, availableCredit: limit ? limit.minus(sale.newBalance) : null, payInfo: await this.payInfo(sale) };
+  }
+
+  /** The goods reached the customer: who took them (the name on the signed slip). Pending dispatches only. */
+  async deliver(id: string, receivedBy: string, user: AuthUser) {
+    const name = receivedBy.trim();
+    if (!name) throw new BadRequestException('Write who received the goods');
+    const done = await this.prisma.sale.updateMany({
+      where: { id, status: 'ACTIVE', deliveryStatus: 'PENDING' },
+      data: { deliveryStatus: 'DELIVERED', deliveredAt: new Date(), deliveredById: user.id, receivedBy: name.slice(0, 80) },
+    });
+    if (!done.count) {
+      const sale = await this.prisma.sale.findUnique({ where: { id }, select: { status: true, deliveryStatus: true } });
+      if (!sale) throw new NotFoundException();
+      throw new ConflictException(sale.status === 'CANCELLED' ? 'This bill is cancelled' : sale.deliveryStatus === 'DELIVERED' ? 'Already marked delivered' : 'This bill is not a tracked delivery');
+    }
+    await this.audit.log(user.id, 'DELIVER', 'Sale', id, undefined, { receivedBy: name });
+    return this.view(id);
+  }
+
+  /** How much of a bill is paid, what is left, and every receipt that paid part of it (date, who recorded it). */
+  private async payInfo(sale: { id: string; customerId: string | null; status: string; net: Prisma.Decimal }) {
+    if (!sale.customerId || sale.status !== 'ACTIVE') return null;
+    const bill = (await loadAllocations(this.prisma, [sale.customerId])).get(sale.customerId)?.bills.find((b) => b.saleId === sale.id);
+    if (!bill) return null;
+    const rows = await this.prisma.payment.findMany({ where: { id: { in: bill.payments.map((p) => p.paymentId) } }, select: { id: true, createdById: true, createdAt: true } });
+    const users = await this.prisma.appUser.findMany({ where: { id: { in: rows.map((r) => r.createdById) } }, select: { id: true, username: true } });
+    const recorded = new Map(rows.map((r) => [r.id, { by: users.find((u) => u.id === r.createdById)?.username ?? null, at: r.createdAt }]));
+    return {
+      paid: bill.paid, remaining: bill.remaining, status: bill.status, ageDays: bill.ageDays,
+      payments: bill.payments.map((p) => ({ ...p, recordedBy: recorded.get(p.paymentId)?.by ?? null, recordedAt: recorded.get(p.paymentId)?.at ?? null })),
+    };
   }
 
   // ---------------------------------------------------------------- payments

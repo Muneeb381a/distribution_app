@@ -17,11 +17,19 @@ interface Ledger {
   balance: string;
   entries: { id: string; date: string; refType: string; refId: string; note: string | null; amount: string; balance: string }[];
   emptiesHeld: { productId: string; name: string; held: number }[];
+  bills: { saleId: string; billNo: string; date: string; net: string; paid: string; remaining: string; status: 'PAID' | 'PART' | 'UNPAID'; ageDays: number }[];
+  openingRemaining: string;
+  advance: string;
+  receipts: {
+    id: string; receiptNo: string; date: string; amount: string; method: string; status: string; chequeNo: string | null; chequeStatus: string | null;
+    note: string | null; recordedBy: string | null; applied: { saleId: string | null; billNo: string; amount: string }[]; unallocated: string;
+  }[];
 }
 interface CustomerInfo { phone: string | null; area: string | null; address: string | null }
 
 const METHODS = PAYMENT_METHODS.map((m) => [m.value, m.label] as const);
 const PAGE = 50;
+const day = (d: string) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
 export default function CustomerKhataPage() {
   const { id } = useParams<{ id: string }>();
@@ -35,6 +43,7 @@ export default function CustomerKhataPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [tab, setTab] = useState<'ledger' | 'payments' | 'bills'>('ledger');
   const [clientId, setClientId] = useState(() => crypto.randomUUID());
 
   usePageTitle(ledger ? `${ledger.customer.name} · khata` : null);
@@ -71,6 +80,23 @@ export default function CustomerKhataPage() {
   const hidden = showAll ? 0 : Math.max(0, entries.length - PAGE);
   const shown = entries.slice(hidden);
   const after = Number(pay.amount) ? balance - Number(pay.amount) : null;
+  const openBills = (ledger?.bills ?? []).filter((b) => Number(b.remaining) > 0);
+  const openCount = openBills.length + (Number(ledger?.openingRemaining ?? 0) > 0 ? 1 : 0);
+  // Which bills this payment would clear, oldest first (what the server will do).
+  const plan = (() => {
+    let left = Number(pay.amount);
+    if (!ledger || !(left > 0)) return [];
+    const out: { label: string; amount: number; clears: boolean }[] = [];
+    const rows = [...(Number(ledger.openingRemaining) > 0 ? [{ label: 'Old balance', remaining: Number(ledger.openingRemaining) }] : []), ...openBills.map((b) => ({ label: b.billNo, remaining: Number(b.remaining) }))];
+    for (const r of rows) {
+      if (left <= 0) break;
+      const take = Math.min(left, r.remaining);
+      out.push({ label: r.label, amount: take, clears: take >= r.remaining });
+      left -= take;
+    }
+    if (left > 0) out.push({ label: 'Advance (for next bill)', amount: left, clears: false });
+    return out;
+  })();
 
   if (error && !ledger) return <><Link className="back" href="/khata"><Icon name="chevronLeft" />Khata</Link><p className="error">{error}</p></>;
 
@@ -120,11 +146,63 @@ export default function CustomerKhataPage() {
           </section>
 
           <div className="list-head">
-            <h2 style={{ margin: 0 }}>Ledger</h2>
-            <span className="count">{entries.length} entries</span>
+            <div className="chips" role="tablist" aria-label="Khata views">
+              {([['ledger', `Ledger · ${entries.length}`], ['payments', `Payments · ${(ledger?.receipts ?? []).filter((r) => r.status === 'ACTIVE').length}`], ['bills', `Bills owed · ${openCount}`]] as const).map(([v, l]) => (
+                <button key={v} type="button" role="tab" aria-selected={tab === v} className={`chip${tab === v ? ' on' : ''}`} onClick={() => setTab(v)}>{l}</button>
+              ))}
+            </div>
             <span className="grow" />
             {can(user, 'SALE_CREATE') && <Link className="btn" href={`/sales/new?customer=${id}`}><Icon name="plus" />New bill</Link>}
           </div>
+          {tab === 'payments' && ledger && (
+            <div className="table-wrap">
+              <table className="ledger">
+                <thead><tr><th>Date</th><th>Receipt</th><th>Method</th><th>Received by</th><th>Paid towards</th><th className="num">Amount</th></tr></thead>
+                <tbody>
+                  {ledger.receipts.map((r) => (
+                    <tr key={r.id} {...rowLink(() => router.push(`/receipts/${r.id}`))} className={`row-link${r.status === 'CANCELLED' ? ' cancel' : ''}`}>
+                      <td>{day(r.date)}</td>
+                      <td><Link href={`/receipts/${r.id}`}>{r.receiptNo}</Link>{r.status === 'CANCELLED' && <> <span className="badge red">{r.chequeStatus === 'BOUNCED' ? 'Bounced' : 'Cancelled'}</span></>}</td>
+                      <td>{r.method.toLowerCase()}{r.chequeNo ? ` · ${r.chequeNo}` : ''}</td>
+                      <td>{r.recordedBy ?? ''}</td>
+                      <td className="muted">
+                        {r.status === 'CANCELLED' ? '' : [...r.applied.map((a) => `${a.billNo} ${money(a.amount)}`), ...(Number(r.unallocated) > 0 ? [`advance ${money(r.unallocated)}`] : [])].join(' · ')}
+                      </td>
+                      <td className="num amt-credit">{money(r.amount)}</td>
+                    </tr>
+                  ))}
+                  {!ledger.receipts.length && <tr><td colSpan={6}><Empty icon="khata" title="No payments yet" text="Each payment received from this customer shows here with its date." /></td></tr>}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {tab === 'bills' && ledger && (
+            <div className="table-wrap">
+              <table className="ledger">
+                <thead><tr><th>Bill</th><th>Date</th><th>Age</th><th className="num">Bill total</th><th className="num">Paid</th><th className="num">Left</th><th>Status</th></tr></thead>
+                <tbody>
+                  {Number(ledger.openingRemaining) > 0 && (
+                    <tr><td>Old balance</td><td /><td /><td className="num">{money(ledger.openingBalance)}</td><td className="num">{money(Number(ledger.openingBalance) - Number(ledger.openingRemaining))}</td><td className="num"><b>{money(ledger.openingRemaining)}</b></td><td><span className="badge amber">Brought forward</span></td></tr>
+                  )}
+                  {[...ledger.bills].filter((b) => b.status !== 'PAID').reverse().map((b) => (
+                    <tr key={b.saleId} {...rowLink(() => router.push(`/sales/${b.saleId}`))} className="row-link">
+                      <td><Link href={`/sales/${b.saleId}`}>{b.billNo}</Link></td>
+                      <td>{day(b.date)}</td>
+                      <td className={b.ageDays > 30 ? 'neg' : ''}>{b.ageDays} days</td>
+                      <td className="num">{money(b.net)}</td>
+                      <td className="num amt-credit">{money(b.paid)}</td>
+                      <td className="num"><b>{money(b.remaining)}</b></td>
+                      <td><span className={`badge ${b.status === 'PART' ? 'amber' : 'red'}`}>{b.status === 'PART' ? 'Part paid' : 'Unpaid'}</span></td>
+                    </tr>
+                  ))}
+                  {!openCount && <tr><td colSpan={7}><Empty icon="khata" title="Nothing owed" text="Every bill is paid." /></td></tr>}
+                </tbody>
+              </table>
+              {Number(ledger.advance) > 0 && <p className="muted" style={{ margin: '8px 0 0' }}>Rs {money(ledger.advance)} received in advance, it is used on the next bill.</p>}
+            </div>
+          )}
+          {tab === 'ledger' && (
+            <>
           {hidden > 0 && (
             <div className="load-more" style={{ margin: '0 0 12px' }}>
               <span className="muted">{hidden} earlier entries hidden</span>
@@ -158,6 +236,8 @@ export default function CustomerKhataPage() {
               </tbody>
             </table>
           </div>
+            </>
+          )}
         </div>
 
         <aside className="doc-side first-on-small">
@@ -188,6 +268,11 @@ export default function CustomerKhataPage() {
                   <dt>Balance now</dt><dd>{money(balance)}</dd>
                   <dt><b>After this payment</b></dt><dd className={after < 0 ? 'good' : ''}><b>{money(after)}</b></dd>
                 </dl>
+              )}
+              {plan.length > 0 && (
+                <div className="muted" style={{ fontSize: 13 }}>
+                  <b>This pays:</b> {plan.map((x) => `${x.label} ${money(x.amount)}${x.clears ? ' ✓' : ''}`).join(' · ')}
+                </div>
               )}
               <BusyButton type="submit" busy={busy}>{busy ? 'Saving…' : <><Icon name="print" />Save &amp; print receipt</>}</BusyButton>
             </form>

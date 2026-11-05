@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BillA4 } from '@/components/BillA4';
 import { BusyButton, useConfirm, useToast } from '@/components/Feedback';
+import { DeliveryPanel } from '@/components/DeliveryPanel';
 import { Icon } from '@/components/Icon';
 import PrintPanel, { usePrintMode } from '@/components/PrintPanel';
 import { api, can, useUser } from '@/lib/api';
@@ -19,7 +20,17 @@ type Bill = BillData & {
   customerId: string | null;
   customer: (BillData['customer'] & { id: string; phone: string | null; area: string | null; type: string }) | null;
   location: { name: string; type: string };
+  vehicle: { id: string; name: string } | null;
+  deliveryStatus: string | null;
+  deliveredAt: string | null;
+  receivedBy: string | null;
+  deliveredBy: string | null;
   payments: { id: string; receiptNo: string; amount: string; method: string; status: string }[];
+  /** Paid / left on this bill today, with every receipt that paid part of it. */
+  payInfo: {
+    paid: string; remaining: string; status: 'PAID' | 'PART' | 'UNPAID'; ageDays: number;
+    payments: { paymentId: string; receiptNo: string; date: string; method: string; amount: string; recordedBy: string | null; recordedAt: string | null }[];
+  } | null;
 };
 
 const label = (p: { name: string; size: string | null }) => (p.size ? `${p.name} (${p.size})` : p.name);
@@ -226,6 +237,12 @@ export default function BillPage() {
           </div>
 
           <aside className="doc-side">
+            {bill.saleType === 'DELIVERY' && !cancelled && (
+              <>
+                <DeliveryPanel sale={bill} canMark={can(user, 'SALE_CREATE')} onDone={() => { void load(); }} />
+                <Link className="btn secondary no-print" href={`/sales/${bill.id}/slip`}><Icon name="print" />Delivery slip{bill.vehicle ? ` · ${bill.vehicle.name}` : ''}</Link>
+              </>
+            )}
             <section className="card receipt">
               <h2>Totals</h2>
               <dl className="totals">
@@ -234,6 +251,12 @@ export default function BillPage() {
                 <dt className="grand-row">This bill</dt><dd className="grand-row">Rs {money(bill.net)}</dd>
                 <dt>Paid now</dt><dd className="good">{money(bill.paidNow)}</dd>
                 {bill.customer && <><dt>Udhaar on this bill</dt><dd className={due > 0 ? 'neg' : ''}>{money(due)}</dd></>}
+                {bill.payInfo && due > 0 && (
+                  <>
+                    <dt>Paid so far</dt><dd className="good">{money(bill.payInfo.paid)}</dd>
+                    <dt><b>Still to pay</b></dt><dd className={Number(bill.payInfo.remaining) > 0 ? 'neg' : 'good'}><b>{money(bill.payInfo.remaining)}</b></dd>
+                  </>
+                )}
               </dl>
               {bill.customer && (
                 <dl className="totals after">
@@ -243,6 +266,33 @@ export default function BillPage() {
                 </dl>
               )}
             </section>
+            {bill.payInfo && (due > 0 || bill.payInfo.payments.length > 1) && (
+              <section className="card no-print">
+                <h3>Payments on this bill</h3>
+                <p className="muted" style={{ margin: '0 0 8px' }}>
+                  <span className={`badge ${bill.payInfo.status === 'PAID' ? 'green' : bill.payInfo.status === 'PART' ? 'amber' : 'red'}`}>
+                    {bill.payInfo.status === 'PAID' ? 'Paid in full' : bill.payInfo.status === 'PART' ? 'Part paid' : 'Unpaid'}
+                  </span>
+                  {Number(bill.payInfo.remaining) > 0 && bill.payInfo.ageDays > 0 && <> · {bill.payInfo.ageDays} days old</>}
+                </p>
+                {bill.payInfo.payments.length === 0 ? <p className="muted">No payment against this bill yet.</p> : (
+                  <ul className="list">
+                    {bill.payInfo.payments.map((p) => (
+                      <li key={`${p.paymentId}`}>
+                        <span className="who-line">
+                          <b><Link href={`/receipts/${p.paymentId}`}>{p.receiptNo}</Link></b>
+                          <span>{new Date(p.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} · {p.method.toLowerCase()}{p.recordedBy ? ` · ${p.recordedBy}` : ''}</span>
+                        </span>
+                        <span className="amt">{money(p.amount)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {bill.customerId && can(user, 'PAYMENT_RECORD') && Number(bill.payInfo.remaining) > 0 && (
+                  <Link className="btn" style={{ marginTop: 10 }} href={`/khata/${bill.customerId}`}><Icon name="plus" />Receive payment</Link>
+                )}
+              </section>
+            )}
             {bill.payments.length > 0 && (
               <section className="card">
                 <h3>Receipts</h3>

@@ -32,7 +32,7 @@ export interface Snapshot {
 }
 
 export interface SaleBody {
-  saleType: string; customerId?: string; locationId: string; salesmanId?: string; paidNow?: number; method?: string; note?: string; date?: string;
+  saleType: string; customerId?: string; locationId: string; vehicleId?: string; salesmanId?: string; paidNow?: number; method?: string; note?: string; date?: string;
   items: { productId: string; unitName: string; qty: number; rate?: number }[];
   returns: { productId: string; unitName: string; qty: number; rate?: number; reason: string }[];
   emptiesCollected: { productId: string; qty: number }[];

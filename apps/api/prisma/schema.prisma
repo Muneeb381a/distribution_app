@@ -483,6 +483,14 @@ model Sale {
   createdAt       DateTime         @default(now())
   cancelledById   String?
   cancelledAt     DateTime?
+  /// The vehicle that carries a delivery. Equals the location for a bill from a loaded vehicle; for a bill from the godown it is just the carrier.
+  vehicleId       String?
+  /// PENDING until the goods reach the customer, then DELIVERED. Only dispatches from a godown/shop are tracked.
+  deliveryStatus  String?
+  deliveredAt     DateTime?
+  deliveredById   String?
+  /// Who took the goods at the customer's end (the name on the signed slip).
+  receivedBy      String?
   customer        Customer?        @relation(fields: [customerId], references: [id])
   location        Location         @relation(fields: [locationId], references: [id])
   salesman        Employee?        @relation(fields: [salesmanId], references: [id])
@@ -493,6 +501,8 @@ model Sale {
   @@index([customerId, date])
   @@index([businessLine, date])
   @@index([salesmanId, date])
+  @@index([deliveryStatus])
+  @@index([vehicleId, createdAt])
 }
 
 model SaleItem {

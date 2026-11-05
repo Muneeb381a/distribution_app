@@ -47,7 +47,7 @@ export default function NewSalePage() {
   // ?location=<vehicle>&salesman=<id> (from a vehicle trip) starts a delivery bill from that vehicle.
   const [head, setHead] = useState({
     saleType: search.get('location') ? 'DELIVERY' : 'COUNTER', customerId: search.get('customer') ?? '', locationId: search.get('location') ?? '',
-    salesmanId: search.get('salesman') ?? '', paidNow: '', method: 'CASH', note: '',
+    salesmanId: search.get('salesman') ?? '', vehicleId: '', paidNow: '', method: 'CASH', note: '',
   });
   const [lastBill, setLastBill] = useState<LastBill | null>(null);
   const [saved, setSaved] = useState<Saved | null>(null);
@@ -84,6 +84,7 @@ export default function NewSalePage() {
       ...h,
       locationId: h.locationId || (d.locationId && locations.some((l) => l.id === d.locationId) ? d.locationId : ''),
       salesmanId: h.salesmanId || (d.salesmanId && salesmen.some((x) => x.id === d.salesmanId) ? d.salesmanId : ''),
+      vehicleId: h.vehicleId || (d.vehicleId && locations.some((l) => l.id === d.vehicleId) ? d.vehicleId : ''),
     }));
   }, [user, locations, salesmen, search, head.saleType]);
 
@@ -126,7 +127,10 @@ export default function NewSalePage() {
     toast.info(`${repeatable.length} item${repeatable.length === 1 ? '' : 's'} from ${lastBill?.billNo} added — check quantities`);
   }
   const delivery = head.saleType === 'DELIVERY';
-  const places = locations.filter((l) => (delivery ? l.type === 'VEHICLE' : l.type !== 'VEHICLE'));
+  // A delivery goes straight from the godown/shop (a vehicle only carries it) or from a vehicle loaded for a round.
+  const places = locations.filter((l) => (delivery ? true : l.type !== 'VEHICLE'));
+  const vehicles = locations.filter((l) => l.type === 'VEHICLE');
+  const dispatch = delivery && !!head.locationId && locations.find((l) => l.id === head.locationId)?.type !== 'VEHICLE';
   const returnable = products.filter((p) => p.returnableEmpty);
 
   const body = useMemo(() => {
@@ -136,6 +140,7 @@ export default function NewSalePage() {
       saleType: head.saleType,
       customerId: head.customerId || undefined,
       locationId: head.locationId,
+      vehicleId: dispatch && head.vehicleId ? head.vehicleId : undefined,
       salesmanId: head.salesmanId || undefined,
       paidNow: head.paidNow !== '' ? Number(head.paidNow) : undefined,
       method: head.method,
@@ -144,7 +149,7 @@ export default function NewSalePage() {
       returns: returns.filter(ok).map((l) => ({ ...line(l), reason: l.reason })),
       emptiesCollected: collected.filter((c) => c.productId && Number(c.qty) > 0).map((c) => ({ productId: c.productId, qty: Math.round(Number(c.qty)) })),
     };
-  }, [head, items, returns, collected]);
+  }, [head, items, returns, collected, dispatch]);
 
   const hasLines = body.items.length > 0 || body.returns.length > 0;
 
@@ -181,7 +186,7 @@ export default function NewSalePage() {
       const op = await saveSaleOffline(s, { ...body, overrideCredit: override || undefined }, p, clientId, salesmen.find((x) => x.id === head.salesmanId)?.name ?? null);
       setClientId(crypto.randomUUID());
       setSaved({ id: null, billNo: op.number, net: p.net, offline: op });
-      rememberBillDefaults(user?.id, head.saleType, head.locationId, head.salesmanId);
+      rememberBillDefaults(user?.id, head.saleType, head.locationId, head.salesmanId, dispatch ? head.vehicleId : '');
       toast.info(`Bill ${op.number} saved on this PC — it syncs when the connection is back`);
     };
     try {
@@ -191,7 +196,7 @@ export default function NewSalePage() {
         const bill = await api<Saved>('/sales', { method: 'POST', json: { ...body, clientId, overrideCredit: override || undefined } });
         setClientId(crypto.randomUUID());
         setSaved({ id: bill.id, billNo: bill.billNo, net: bill.net ?? preview?.net ?? '0' });
-        rememberBillDefaults(user?.id, head.saleType, head.locationId, head.salesmanId);
+        rememberBillDefaults(user?.id, head.saleType, head.locationId, head.salesmanId, dispatch ? head.vehicleId : '');
         toast.success(`Bill ${bill.billNo ?? ''} saved`);
       }
     } catch (err) {
@@ -352,17 +357,25 @@ export default function NewSalePage() {
               {[['COUNTER', 'Counter sale'], ['DELIVERY', 'Delivery (vehicle)']].map(([v, l]) => (
                 <button type="button" key={v} className={head.saleType === v ? 'on' : ''} onClick={() => {
                   const d = readBillDefaults(user?.id)[v as 'COUNTER' | 'DELIVERY'];
-                  setHead({ ...head, saleType: v, locationId: d?.locationId && locations.some((l) => l.id === d.locationId) ? d.locationId : '', salesmanId: head.salesmanId || d?.salesmanId || '' });
+                  setHead({ ...head, saleType: v, locationId: d?.locationId && locations.some((l) => l.id === d.locationId) ? d.locationId : '', vehicleId: d?.vehicleId && locations.some((l) => l.id === d.vehicleId) ? d.vehicleId : head.vehicleId, salesmanId: head.salesmanId || d?.salesmanId || '' });
                 }}>{l}</button>
               ))}
             </div>
             <div className="form">
-              <label>{delivery ? 'Vehicle' : 'Sold from'}
+              <label>{delivery ? 'Goods from' : 'Sold from'}
                 <select required value={head.locationId} onChange={(e) => setHead({ ...head, locationId: e.target.value })}>
                   <option value="">Select…</option>
-                  {places.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                  {places.map((l) => <option key={l.id} value={l.id}>{l.name}{delivery && l.type === 'VEHICLE' ? ' (loaded vehicle)' : ''}</option>)}
                 </select>
               </label>
+              {dispatch && (
+                <label>Vehicle (carries it)
+                  <select required value={head.vehicleId} onChange={(e) => setHead({ ...head, vehicleId: e.target.value })}>
+                    <option value="">Select…</option>
+                    {vehicles.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                  </select>
+                </label>
+              )}
               <div className="field" data-field="customer">
                 <label htmlFor="bill-customer">Customer</label>
                 <Combobox

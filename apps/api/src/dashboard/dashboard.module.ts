@@ -47,7 +47,7 @@ class DashboardController {
     const days = Array.from({ length: 7 }, (_, i) => iso(addDays(weekStart, i)));
     const trend = new Map(days.map((d) => [d, { date: d, sales: ZERO(), bills: 0 }]));
     const todayKey = iso(today);
-    const t = { bills: 0, netSales: ZERO(), cashWithBills: ZERO(), receipts: ZERO(), udhaar: ZERO(), expenses: ZERO(), cost: ZERO() };
+    const t = { bills: 0, netSales: ZERO(), cashWithBills: ZERO(), receipts: ZERO(), udhaar: ZERO(), expenses: ZERO(), cost: ZERO(), bottles: ZERO(), rice: ZERO(), bottlesCost: ZERO(), riceCost: ZERO() };
     const m = { bills: 0, netSales: ZERO(), expenses: ZERO(), cost: ZERO(), bottles: ZERO(), rice: ZERO(), bottlesCost: ZERO(), riceCost: ZERO() };
 
     for (const s of sales) {
@@ -64,6 +64,8 @@ class DashboardController {
       if (k === todayKey) {
         t.bills += 1;
         t.netSales = t.netSales.plus(s.net);
+        if (s.businessLine === 'BOTTLES') t.bottles = t.bottles.plus(s.net);
+        else t.rice = t.rice.plus(s.net);
         t.cashWithBills = t.cashWithBills.plus(s.paidNow);
         if (s.customerId && s.net.gt(s.paidNow)) t.udhaar = t.udhaar.plus(s.net.minus(s.paidNow));
       }
@@ -75,7 +77,11 @@ class DashboardController {
         if (it.sale.businessLine === 'BOTTLES') m.bottlesCost = m.bottlesCost.plus(c);
         else m.riceCost = m.riceCost.plus(c);
       }
-      if (iso(it.sale.date) === todayKey) t.cost = t.cost.plus(c);
+      if (iso(it.sale.date) === todayKey) {
+        t.cost = t.cost.plus(c);
+        if (it.sale.businessLine === 'BOTTLES') t.bottlesCost = t.bottlesCost.plus(c);
+        else t.riceCost = t.riceCost.plus(c);
+      }
     }
     for (const e of expenses) {
       if (e.date >= monthStart) m.expenses = m.expenses.plus(e.amount);
@@ -97,7 +103,10 @@ class DashboardController {
     const payable = suppliers.reduce((s: Dec, x) => s.plus(x.balance), ZERO());
 
     return {
-      today: { ...t, grossProfit: t.netSales.minus(t.cost), netProfit: t.netSales.minus(t.cost).minus(t.expenses) },
+      today: {
+        ...t, grossProfit: t.netSales.minus(t.cost), netProfit: t.netSales.minus(t.cost).minus(t.expenses),
+        bottlesProfit: t.bottles.minus(t.bottlesCost), riceProfit: t.rice.minus(t.riceCost),
+      },
       month: {
         ...m, grossProfit: m.netSales.minus(m.cost), netProfit: m.netSales.minus(m.cost).minus(m.expenses),
         // Each line's own gross profit; expenses are not split and only come off the combined profit.

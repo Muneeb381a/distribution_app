@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import StackedColumns, { LINE_SERIES, type Point } from '@/components/Chart';
+import { LineBadge } from '@/components/Badge';
 import { Icon, type IconName } from '@/components/Icon';
 import { api, can, useUser } from '@/lib/api';
 import { formatQty, productLabel } from '@/lib/lookups';
@@ -15,7 +16,7 @@ interface Collections { rows: { byMethod: Record<string, string>; total: string;
 const SERIES = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)'];
 
 interface Summary {
-  today: { bills: number; netSales: string; cashWithBills: string; receipts: string; udhaar: string; expenses: string; grossProfit: string; netProfit: string };
+  today: { bills: number; netSales: string; cashWithBills: string; receipts: string; udhaar: string; expenses: string; grossProfit: string; netProfit: string; bottles: string; rice: string; bottlesProfit: string; riceProfit: string };
   month: { bills: number; netSales: string; expenses: string; grossProfit: string; netProfit: string; bottles: string; rice: string; bottlesProfit: string; riceProfit: string };
   trend: { date: string; sales: string; bills: number }[];
   khata: { receivable: string; customersOwing: number; overLimit: number; topDebtors: { id: string; name: string; shopName: string | null; area: string | null; balance: string; overLimit: boolean }[] };
@@ -134,15 +135,19 @@ export default function DashboardPage() {
             </div>
 
             <div className="card">
-              <div className="card-head"><h2>This month</h2></div>
-              <ul className="list">
-                <li><span className="muted">Net sales</span><span className="amt">Rs {rupees(data.month.netSales)}</span></li>
-                <li><span className="muted">Bottles profit <small>on {rupees(data.month.bottles)}</small></span><span className="amt">Rs {rupees(data.month.bottlesProfit)}</span></li>
-                <li><span className="muted">Rice profit <small>on {rupees(data.month.rice)}</small></span><span className="amt">Rs {rupees(data.month.riceProfit)}</span></li>
-                <li><span className="muted">Both together</span><span className="amt">Rs {rupees(data.month.grossProfit)}</span></li>
-                <li><span className="muted">Expenses</span><span className="amt">Rs {rupees(data.month.expenses)}</span></li>
-                <li><strong>Net profit</strong><span className={`amt ${Number(data.month.netProfit) < 0 ? 'error' : 'ok'}`}>Rs {rupees(data.month.netProfit)}</span></li>
-              </ul>
+              <div className="card-head"><h2>Profit by line</h2><Link href="/reports">Reports</Link></div>
+              <table className="mini">
+                <thead><tr><th /><th className="num">Today</th><th className="num">This month</th></tr></thead>
+                <tbody>
+                  <tr><td className="muted">Net sales</td><td className="num">{rupees(data.today.netSales)}</td><td className="num">{rupees(data.month.netSales)}</td></tr>
+                  <tr><td><LineBadge line="BOTTLES" /> profit <small className="muted">on {rupees(data.month.bottles)}</small></td><td className="num"><b className={Number(data.today.bottlesProfit) < 0 ? 'error' : ''}>{rupees(data.today.bottlesProfit)}</b></td><td className="num"><b className={Number(data.month.bottlesProfit) < 0 ? 'error' : ''}>{rupees(data.month.bottlesProfit)}</b></td></tr>
+                  <tr><td><LineBadge line="RICE" /> profit <small className="muted">on {rupees(data.month.rice)}</small></td><td className="num"><b className={Number(data.today.riceProfit) < 0 ? 'error' : ''}>{rupees(data.today.riceProfit)}</b></td><td className="num"><b className={Number(data.month.riceProfit) < 0 ? 'error' : ''}>{rupees(data.month.riceProfit)}</b></td></tr>
+                  <tr><td className="muted">Both together</td><td className="num">{rupees(data.today.grossProfit)}</td><td className="num">{rupees(data.month.grossProfit)}</td></tr>
+                  <tr><td className="muted">Expenses</td><td className="num">{rupees(data.today.expenses)}</td><td className="num">{rupees(data.month.expenses)}</td></tr>
+                  <tr><td><strong>Net profit</strong></td><td className={`num ${Number(data.today.netProfit) < 0 ? 'error' : 'ok'}`}><strong>{rupees(data.today.netProfit)}</strong></td><td className={`num ${Number(data.month.netProfit) < 0 ? 'error' : 'ok'}`}><strong>{rupees(data.month.netProfit)}</strong></td></tr>
+                </tbody>
+              </table>
+              <p className="muted chart-note">Expenses are not split between the lines; they come off the combined profit.</p>
             </div>
           </div>
 

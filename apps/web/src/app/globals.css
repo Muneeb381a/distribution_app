@@ -699,6 +699,9 @@ input[type='number'] { font-variant-numeric: tabular-nums; }
 .stat .value small { font-size: 13px; font-weight: 650; color: var(--muted); margin-right: 4px; letter-spacing: 0; }
 .stat .value.neg { color: var(--danger); }
 .stat .sub { font-size: 12.5px; color: var(--muted); }
+table.mini { width: 100%; }
+table.mini th, table.mini td { padding: 9px 6px; }
+table.mini small { font-weight: 400; }
 .mini-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 20px; }
 .mini-stats .stat .value { font-size: 22px; }
 
