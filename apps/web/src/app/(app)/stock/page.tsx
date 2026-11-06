@@ -42,6 +42,7 @@ export default function StockPage() {
   const [transfer, setTransfer] = useState({ from: '', to: '', lines: [{ ...emptyLine }] });
   const [adjust, setAdjust] = useState({ locationId: '', ...emptyLine, kind: 'MARK_DAMAGED', note: '' });
   const [error, setError] = useState('');
+  const [tab, setTab] = useState<'stock' | 'transfer' | 'adjust'>('stock');
 
   const load = useCallback(() => {
     const qs = new URLSearchParams(Object.entries(filter).filter(([, v]) => v)).toString();
@@ -108,6 +109,27 @@ export default function StockPage() {
   }
 
   const showCost = !!rows?.some((r) => 'latestUnitCost' in r);
+  const lowIds = useMemo(() => new Set((low ?? []).map((l) => l.productId)), [low]);
+  const stats = useMemo(() => ({
+    products: new Set(allStock.map((r) => r.productId)).size,
+    places: new Set(allStock.filter((r) => Number(r.ok) > 0).map((r) => r.locationId)).size,
+    damagedRows: allStock.filter((r) => Number(r.damaged) > 0).length,
+    value: allStock.reduce((t, r) => t + Number(r.value ?? 0), 0),
+    hasValue: allStock.some((r) => r.value != null),
+  }), [allStock]);
+  const canMove = can(user, 'STOCK_TRANSFER');
+  const canAdjust = can(user, 'STOCK_ADJUST');
+  // "Move" / "Adjust" on a row: open that form with the product and place already filled in.
+  const startTransfer = (r: Row) => {
+    setTransfer({ from: r.locationId, to: transfer.to === r.locationId ? '' : transfer.to, lines: [{ productId: r.productId, unitName: prod(r.productId)?.units[0]?.unitName ?? '', qty: '' }] });
+    setFresh((f) => ({ ...f, transfer: f.transfer + 1 }));
+    setTab('transfer');
+  };
+  const startAdjust = (r: Row) => {
+    setAdjust({ ...adjust, locationId: r.locationId, ...pickProduct(r.productId), qty: '', note: '' });
+    setFresh((f) => ({ ...f, adjust: f.adjust + 1 }));
+    setTab('adjust');
+  };
 
   return (
     <>
@@ -115,6 +137,21 @@ export default function StockPage() {
         <div className="actions"><Link className="btn secondary" href="/stock/history"><Icon name="history" />Stock history</Link></div>
       </div>
       {(error || lookupError) && <p className="error">{error || lookupError}</p>}
+      <div className="stats">
+        <div className="stat"><span className="label"><span className="icon"><Icon name="products" /></span>Products in stock</span><span className="value">{stats.products}</span><span className="sub">across {stats.places} location{stats.places === 1 ? '' : 's'}</span></div>
+        <button type="button" className="stat stat-btn" onClick={() => { setTab('stock'); setShowLow(true); }}>
+          <span className="label"><span className={`icon ${low && low.length ? 'amber' : 'green'}`}><Icon name="alert" /></span>Reorder now</span>
+          <span className="value">{low ? low.length : '…'}</span><span className="sub">{low && low.length ? 'at or below their reorder level' : 'nothing running low'}</span>
+        </button>
+        <div className="stat"><span className="label"><span className={`icon ${stats.damagedRows ? 'red' : 'green'}`}><Icon name="ban" /></span>Damaged</span><span className="value">{stats.damagedRows}</span><span className="sub">{stats.damagedRows ? 'product / location rows with damaged stock' : 'no damaged stock'}</span></div>
+        {stats.hasValue && <div className="stat"><span className="label"><span className="icon green"><Icon name="wallet" /></span>Stock value</span><span className="value"><small>Rs</small>{money(stats.value)}</span><span className="sub">at latest cost</span></div>}
+      </div>
+      <div className="tabs" role="tablist" aria-label="Stock views">
+        <button type="button" role="tab" aria-selected={tab === 'stock'} onClick={() => setTab('stock')}>Stock levels</button>
+        {canMove && <button type="button" role="tab" aria-selected={tab === 'transfer'} onClick={() => setTab('transfer')}>Transfer stock</button>}
+        {canAdjust && <button type="button" role="tab" aria-selected={tab === 'adjust'} onClick={() => setTab('adjust')}>Adjust / damaged</button>}
+      </div>
+      {tab === 'stock' && <>
       <div className="list-head">
         <div className="filter"><Icon name="search" /><input aria-label="Search stock" placeholder="Search product…" value={filter.search} onChange={(e) => setFilter({ ...filter, search: e.target.value })} /></div>
         <select aria-label="Location" value={filter.locationId} onChange={(e) => setFilter({ ...filter, locationId: e.target.value })}>
@@ -160,10 +197,12 @@ export default function StockPage() {
             <SortTh k="ok" sort={sort} toggle={toggle} num>Saleable</SortTh>
             <SortTh k="damaged" sort={sort} toggle={toggle} num>Damaged</SortTh>
             {showCost && <><th className="num">Cost / base unit</th><SortTh k="value" sort={sort} toggle={toggle} num>Value</SortTh></>}
+            <th>Status</th>
+            {(canMove || canAdjust) && <th className="no-print"><span className="sr-only">Actions</span></th>}
           </tr>
         </thead>
         <tbody>
-          {!rows && <SkeletonRows cols={4} />}
+          {!rows && <SkeletonRows cols={showCost ? 8 : 6} />}
           {page.map((r) => (
             <tr key={`${r.productId}|${r.locationId}`}>
               <td><Link href={`/stock/history?product=${r.productId}&location=${r.locationId}`} title="Stock card"><strong>{productLabel({ name: r.productName, size: r.size })}</strong></Link></td>
@@ -176,17 +215,25 @@ export default function StockPage() {
                   <td className="num">{r.value ? <strong>{money(r.value)}</strong> : '—'}</td>
                 </>
               )}
+              <td>{Number(r.ok) <= 0 ? <span className="badge red">Out</span> : lowIds.has(r.productId) ? <span className="badge amber">Low</span> : <span className="badge green">In stock</span>}</td>
+              {(canMove || canAdjust) && (
+                <td className="row-actions no-print">
+                  {canMove && Number(r.ok) > 0 && <button type="button" className="secondary sm" onClick={() => startTransfer(r)}>Move</button>}
+                  {canAdjust && <button type="button" className="secondary sm" onClick={() => startAdjust(r)}>Adjust</button>}
+                </td>
+              )}
             </tr>
           ))}
           {rows && !rows.length && (
-            <tr><td colSpan={showCost ? 6 : 4}><Empty icon="stock" title={filter.search || filter.locationId || filter.line ? 'Nothing matches these filters' : 'No stock yet'} text="Record a purchase or import opening stock." action={<a className="btn primary" href="/purchases">Record a purchase</a>} /></td></tr>
+            <tr><td colSpan={showCost ? 8 : 6}><Empty icon="stock" title={filter.search || filter.locationId || filter.line ? 'Nothing matches these filters' : 'No stock yet'} text="Record a purchase or import opening stock." action={<a className="btn primary" href="/purchases">Record a purchase</a>} /></td></tr>
           )}
         </tbody>
       </table>
       <LoadMore shown={page.length} total={sorted.length} onMore={loadMore} />
+      </>}
 
-      <div className="dash-grid stock-forms">
-      {can(user, 'STOCK_TRANSFER') && (
+      <div className="stock-forms">
+      {canMove && tab === 'transfer' && (
         <FormCard
           key={`t${fresh.transfer}`}
           onSubmit={submitTransfer}
@@ -217,7 +264,7 @@ export default function StockPage() {
         </FormCard>
       )}
 
-      {can(user, 'STOCK_ADJUST') && (
+      {canAdjust && tab === 'adjust' && (
         <FormCard
           key={`a${fresh.adjust}`}
           onSubmit={submitAdjust}

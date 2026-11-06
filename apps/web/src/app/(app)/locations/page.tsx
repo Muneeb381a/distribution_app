@@ -23,6 +23,10 @@ export default function LocationsPage() {
           description: value === 'GODOWN' ? 'Stores stock; no selling' : value === 'SHOP' ? 'Counter sales are made from here' : 'Delivery van; load it each morning',
         })) },
       ]}
+      summary={(rows) => LOCATION_TYPES.map((t) => ({
+        label: t.label, value: rows.filter((r) => r.type === t.value).length,
+        icon: (t.value === 'VEHICLE' ? 'suppliers' : t.value === 'SHOP' ? 'sales' : 'stock') as 'suppliers' | 'sales' | 'stock',
+      }))}
       columns={[
         { header: 'Name', render: (r) => <b>{r.name}</b>, value: (r) => r.name },
         { header: 'Type', render: (r) => <Badge tone={TYPE[r.type]?.tone}>{TYPE[r.type]?.label ?? r.type}</Badge>, value: (r) => r.type },

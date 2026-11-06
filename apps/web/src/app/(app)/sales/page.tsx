@@ -3,12 +3,14 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+import { Avatar } from '@/components/Avatar';
 import { Empty, SkeletonRows } from '@/components/Feedback';
+import { StatTiles } from '@/components/StatTiles';
 import { DueBadge, LineBadge } from '@/components/Badge';
 import { Icon } from '@/components/Icon';
 import { LoadMore, rowLink, SortTh, usePaged, useSort } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
-import { money, saleTypeLabel } from '@dist/shared';
+import { formatDate, money, saleTypeLabel } from '@dist/shared';
 
 interface SaleRow {
   id: string; billNo: string; date: string; businessLine: string; saleType: string; net: string; paidNow: string; status: string;
@@ -56,19 +58,21 @@ export default function SalesPage() {
       </div>
       {error && <p className="error">{error}</p>}
 
-      <div className="sum-bar">
-        <div><span>Total sales</span><b>Rs {money(total)}</b></div>
-        <div><span>Paid</span><b>Rs {money(paid)}</b></div>
-        <div><span>Udhaar</span><b>Rs {money(udhaar)}</b></div>
-        <div><span>Bills</span><b>{active.length}</b></div>
-      </div>
+      <StatTiles items={[
+        { label: 'Total sales', value: <><small>Rs</small>{money(total)}</>, sub: 'all bills shown, cancelled left out', icon: 'sales' },
+        { label: 'Paid', value: <><small>Rs</small>{money(paid)}</>, sub: total ? `${Math.round((paid / total) * 100)}% collected` : undefined, icon: 'wallet', tone: 'green' },
+        { label: 'Udhaar', value: <><small>Rs</small>{money(udhaar)}</>, sub: udhaar ? 'still to collect' : 'nothing owed', icon: 'khata', tone: udhaar ? 'amber' : 'green' },
+        { label: 'Bills', value: active.length, sub: rows.length !== active.length ? `${rows.length - active.length} cancelled` : undefined, icon: 'file' },
+      ]} />
 
       <div className="list-head">
-        <div className="filter"><Icon name="search" /><input aria-label="Search bills" placeholder="Search bill no, customer, salesman…" value={text} onChange={(e) => { setText(e.target.value); reset(); }} /></div>
-        {[['', 'All'], ['BOTTLES', 'Bottles'], ['RICE', 'Rice']].map(([v, l]) => (
-          <button key={v} className={`chip${line === v ? ' on' : ''}`} onClick={() => setLine(v)}>{l}</button>
-        ))}
-        <button className={`chip${pending ? ' on' : ''}`} aria-pressed={pending} onClick={() => setPending(!pending)}><Icon name="file" />Not delivered yet</button>
+        <div className="filter"><Icon name="search" /><input aria-label="Search bills" placeholder="Search bill, customer, salesman…" value={text} onChange={(e) => { setText(e.target.value); reset(); }} /></div>
+        <div className="chips">
+          {[['', 'All'], ['BOTTLES', 'Bottles'], ['RICE', 'Rice']].map(([v, l]) => (
+            <button key={v} type="button" className={`chip${line === v ? ' on' : ''}`} aria-pressed={line === v} onClick={() => setLine(v)}>{l}</button>
+          ))}
+          <button type="button" className={`chip${pending ? ' on' : ''}`} data-tone="amber" aria-pressed={pending} onClick={() => setPending(!pending)}><Icon name="suppliers" />Not delivered yet</button>
+        </div>
       </div>
 
       <table className="sticky-head">
@@ -89,15 +93,23 @@ export default function SalesPage() {
           {page.map((r) => {
             return (
               <tr key={r.id} {...rowLink(() => router.push(`/sales/${r.id}`))} style={r.status === 'CANCELLED' ? { opacity: 0.55 } : undefined}>
-                <td><Link href={`/sales/${r.id}`}>{r.billNo}</Link></td>
-                <td>{r.date.slice(0, 10)}</td>
-                <td>{r.customer?.name ?? <span className="muted">Cash sale</span>}{r.customer?.shopName && <span className="muted"> · {r.customer.shopName}</span>}</td>
+                <td><Link className="bill-no" href={`/sales/${r.id}`}>{r.billNo}</Link></td>
+                <td className="nowrap">{formatDate(r.date, 'short')}</td>
+                <td>
+                  <span className="person">
+                    <Avatar user={{ username: r.customer?.name ?? 'Cash sale' }} size={30} />
+                    <span className="person-text">
+                      <b>{r.customer?.name ?? 'Cash sale'}</b>
+                      {r.customer?.shopName && <span>{r.customer.shopName}</span>}
+                    </span>
+                  </span>
+                </td>
                 <td><LineBadge line={r.businessLine} /></td>
-                <td>{saleTypeLabel(r.saleType)}</td>
-                <td>{r.salesman?.name ?? ''}</td>
+                <td><span className={`badge${r.saleType === 'DELIVERY' ? ' blue' : ''}`}>{saleTypeLabel(r.saleType)}</span></td>
+                <td className="muted">{r.salesman?.name ?? '—'}</td>
                 <td className="num"><strong>{money(r.net)}</strong></td>
                 <td className="num">{money(r.paid ?? r.paidNow)}</td>
-                <td className="num">{r.status !== 'CANCELLED' && Number(r.remaining ?? 0) > 0 ? <strong>{money(r.remaining ?? 0)}</strong> : ''}</td>
+                <td className="num">{r.status !== 'CANCELLED' && Number(r.remaining ?? 0) > 0 ? <strong className="left-amt">{money(r.remaining ?? 0)}</strong> : <span className="muted">—</span>}</td>
                 <td>
                   {r.deliveryStatus === 'PENDING' && <span className="badge blue" style={{ marginRight: 6 }}>{r.vehicleName ? `On ${r.vehicleName}` : 'Not delivered'}</span>}
                   {r.payStatus === 'PART' ? <span className="badge amber">Part paid · left {money(r.remaining ?? 0)}</span>

@@ -5,12 +5,13 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import Combobox from '@/components/Combobox';
 import { BusyButton, Empty, SkeletonRows, useConfirm, useToast } from '@/components/Feedback';
 import { DueBadge } from '@/components/Badge';
+import { StatTiles } from '@/components/StatTiles';
 import { Affix, Field, FormActions, FormCard, FormSection } from '@/components/Form';
 import { Icon } from '@/components/Icon';
 import { LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import { api } from '@/lib/api';
 import { productOptions, useLookups } from '@/lib/lookups';
-import { localDay, money, unitLabel } from '@dist/shared';
+import { formatDate, localDay, money, unitLabel } from '@dist/shared';
 
 interface Purchase {
   id: string; purchaseNo: string; date: string; total: string; paidNow: string; status: string;
@@ -156,7 +157,20 @@ export default function PurchasesPage() {
           </Field>
         </FormSection>
       </FormCard>
-      <h2>Purchase history</h2>
+      <div className="section-head"><h2>Purchase history</h2>{list && <span className="count-pill">{list.length}</span>}</div>
+      {list && list.length > 0 && (() => {
+        const live = list.filter((p) => p.status !== 'CANCELLED');
+        const bought = live.reduce((s, p) => s + Number(p.total), 0);
+        const paidOut = live.reduce((s, p) => s + Number(p.paidNow), 0);
+        const owed = Math.max(0, bought - paidOut);
+        return (
+          <StatTiles items={[
+            { label: 'Bought', value: <><small>Rs</small>{money(bought)}</>, sub: `${live.length} purchase${live.length === 1 ? '' : 's'}`, icon: 'purchases' },
+            { label: 'Paid', value: <><small>Rs</small>{money(paidOut)}</>, icon: 'wallet', tone: 'green' },
+            { label: 'On supplier ledger', value: <><small>Rs</small>{money(owed)}</>, sub: owed ? 'still to pay suppliers' : 'nothing owed', icon: 'suppliers', tone: owed ? 'amber' : 'green' },
+          ]} />
+        );
+      })()}
       <table className="sticky-head">
         <thead>
           <tr>
@@ -173,14 +187,14 @@ export default function PurchasesPage() {
           {!list && <SkeletonRows cols={8} />}
           {page.map((p) => (
             <tr key={p.id}>
-              <td><strong>{p.purchaseNo}</strong></td>
-              <td>{p.date.slice(0, 10)}</td>
-              <td>{p.supplier.name}</td>
-              <td>{p.location.name}</td>
+              <td><span className="bill-no">{p.purchaseNo}</span></td>
+              <td className="nowrap">{formatDate(p.date, 'short')}</td>
+              <td><b>{p.supplier.name}</b></td>
+              <td><span className="badge">{p.location.name}</span></td>
               <td className="num"><strong>{money(p.total)}</strong></td>
               <td className="num">{money(p.paidNow)}</td>
               <td><DueBadge status={p.status} total={p.total} paid={p.paidNow} word="Due" /></td>
-              <td>{p.status === 'ACTIVE' && <button className="secondary" onClick={() => cancel(p)}>Cancel</button>}</td>
+              <td>{p.status === 'ACTIVE' && <button className="secondary danger-hover" onClick={() => cancel(p)}>Cancel</button>}</td>
             </tr>
           ))}
           {list && !list.length && (

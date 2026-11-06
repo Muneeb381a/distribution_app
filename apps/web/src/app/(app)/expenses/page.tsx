@@ -4,9 +4,13 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { BusyButton, Empty, SkeletonRows, useConfirm, useToast } from '@/components/Feedback';
 import { Affix, Choice, Field, FormActions, FormCard, FormSection } from '@/components/Form';
 import { Icon } from '@/components/Icon';
+import { StatTiles } from '@/components/StatTiles';
 import { downloadCsv, LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import { api } from '@/lib/api';
 import { formatDate, localDay, monthStart, rupees } from '@dist/shared';
+
+/** A steady colour per category name, so the same category looks the same everywhere. */
+const catColor = (name: string) => `hsl(${[...name.toLowerCase()].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 11)} 62% 48%)`;
 
 interface Place { id: string; name: string; type: 'GODOWN' | 'SHOP' | 'VEHICLE'; isActive: boolean }
 interface Expense {
@@ -119,11 +123,11 @@ export default function ExpensesPage() {
             </div>
           </div>
 
-          <div className="sum-bar">
-            <div><span>Total</span><b>Rs {rupees(total)}</b></div>
-            <div><span>Entries</span><b>{active.length}</b></div>
-            <div><span>Biggest</span><b style={{ fontSize: 15 }}>{byCategory[0] ? `${byCategory[0][0]} · ${rupees(byCategory[0][1])}` : '—'}</b></div>
-          </div>
+          <StatTiles items={[
+            { label: 'Total spent', value: <><small>Rs</small>{rupees(total)}</>, sub: `${formatDate(range.from, 'short')} to ${formatDate(range.to, 'short')}`, icon: 'expenses', tone: 'red' },
+            { label: 'Entries', value: active.length, icon: 'file' },
+            { label: 'Biggest', value: byCategory[0] ? byCategory[0][0] : '—', sub: byCategory[0] ? `Rs ${rupees(byCategory[0][1])}` : undefined, icon: 'trend', tone: 'amber' },
+          ]} />
 
           <table className="sticky-head">
             <thead>
@@ -140,7 +144,7 @@ export default function ExpensesPage() {
               {page.map((r) => (
                 <tr key={r.id} className={r.status === 'CANCELLED' ? 'inactive' : ''}>
                   <td>{formatDate(r.date, 'short')}</td>
-                  <td><b>{r.category}</b></td>
+                  <td><span className="cat"><i className="cat-dot" style={{ background: catColor(r.category) }} /><b>{r.category}</b></span></td>
                   <td>{r.location ? <span className={`badge ${r.location.type === 'GODOWN' ? 'amber' : 'blue'}`}>{r.location.name}</span> : <span className="badge">General</span>}</td>
                   <td className="num">{r.status === 'CANCELLED' ? <s>{rupees(r.amount)}</s> : <b>{rupees(r.amount)}</b>}</td>
                   <td className="muted">{r.note}</td>

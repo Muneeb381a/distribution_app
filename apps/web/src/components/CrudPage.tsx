@@ -1,5 +1,6 @@
 'use client';
 
+import { StatTiles, type Tile } from '@/components/StatTiles';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { BusyButton, Empty, SkeletonRows, useConfirm, useToast } from '@/components/Feedback';
 import { Affix, Choice, Field as FormField, FormActions, FormCard, FormSection, type Span } from '@/components/Form';
@@ -60,6 +61,8 @@ interface Props<T extends { id: string }> {
   sections?: FormSectionDef[];
   /** One line under the form title, e.g. what the record is used for. */
   formDescription?: string;
+  /** Summary tiles above the list, worked out from the active rows. */
+  summary?: (rows: T[]) => Tile[];
 }
 
 type Row = { id: string; isActive?: boolean } & Record<string, unknown>;
@@ -72,7 +75,7 @@ function textOf(v: unknown, f: Field): string {
   return String(v);
 }
 
-export default function CrudPage<T extends { id: string }>({ title, path, fields, columns, editPermission, toBody, extraRowActions, noun, icon = 'file', editable = true, sections, formDescription }: Props<T>) {
+export default function CrudPage<T extends { id: string }>({ title, path, fields, columns, editPermission, toBody, extraRowActions, noun, icon = 'file', editable = true, sections, formDescription, summary }: Props<T>) {
   const [rows, setRows] = useState<T[] | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
@@ -189,6 +192,7 @@ export default function CrudPage<T extends { id: string }>({ title, path, fields
         )}
       </div>
       {error && <p className="error">{error}</p>}
+      {summary && rows && rows.length > 0 && <StatTiles items={summary(rows.filter((r) => (r as unknown as Row).isActive !== false))} />}
       {canEdit && mode && (
         <div ref={formRef}>
           <FormCard
@@ -222,7 +226,7 @@ export default function CrudPage<T extends { id: string }>({ title, path, fields
         {inactiveCount > 0 && (
           <button type="button" className={`chip${showInactive ? ' on' : ''}`} aria-pressed={showInactive} onClick={() => setShowInactive(!showInactive)}>Show inactive ({inactiveCount})</button>
         )}
-        {filter && <span className="count">{shown.length} of {rows?.length ?? 0}</span>}
+        {filter ? <span className="count">{shown.length} of {rows?.length ?? 0}</span> : rows ? <span className="count-pill">{shown.length}</span> : null}
       </div>
       <table className="sticky-head">
         <thead>

@@ -1,7 +1,9 @@
 'use client';
 
 import Link from 'next/link';
+import { Avatar } from '@/components/Avatar';
 import CrudPage from '@/components/CrudPage';
+import { Icon } from '@/components/Icon';
 import { CUSTOMER_TYPES, money, PRICE_TIERS } from '@dist/shared';
 
 interface Customer {
@@ -37,16 +39,36 @@ export default function CustomersPage() {
         { name: 'creditLimit', label: 'Credit limit', type: 'number', prefix: 'Rs', section: 'account', showWhen: (v) => v.type === 'CREDIT', hint: 'Bills that would cross it need the override permission. Leave empty for no limit.' },
         { name: 'openingBalance', label: 'Opening balance', type: 'number', prefix: 'Rs', section: 'account', hint: 'What they owe you today, from the old register' },
       ]}
+      summary={(rows) => {
+        const udhaar = rows.filter((r) => r.type === 'CREDIT');
+        const owed = rows.reduce((s, r) => s + Math.max(0, Number(r.openingBalance)), 0);
+        return [
+          { label: 'Customers', value: rows.length, sub: `${rows.length - udhaar.length} cash`, icon: 'customers' },
+          { label: 'On udhaar', value: udhaar.length, sub: 'run a khata', icon: 'khata', tone: 'amber' },
+          { label: 'Opening balances', value: <><small>Rs</small>{money(owed)}</>, sub: 'brought from the old register', icon: 'wallet', tone: owed ? 'red' : 'green' },
+          { label: 'Wholesale list', value: rows.filter((r) => r.priceTier === 'WHOLESALE').length, sub: 'use wholesale rates', icon: 'stock' },
+        ];
+      }}
       columns={[
-        { header: 'Name', render: (r) => <b>{r.name}</b>, value: (r) => r.name },
-        { header: 'Shop', render: (r) => r.shopName ?? '', value: (r) => r.shopName },
-        { header: 'Area', render: (r) => r.area ?? '', value: (r) => r.area },
-        { header: 'Type', render: (r) => <span className={`badge ${r.type === 'CREDIT' ? 'amber' : 'green'}`}>{r.type === 'CREDIT' ? 'Udhaar' : 'Cash'}</span> },
+        {
+          header: 'Customer', value: (r) => r.name,
+          render: (r) => (
+            <span className="person">
+              <Avatar user={{ username: r.name }} size={36} />
+              <span className="person-text">
+                <b>{r.name}</b>
+                <span>{[r.shopName, r.area].filter(Boolean).join(' · ') || 'No shop or area saved'}</span>
+              </span>
+            </span>
+          ),
+        },
+        { header: 'Phone', render: (r) => (r.phone ? <span className="nowrap">{r.phone}</span> : <span className="muted">—</span>) },
+        { header: 'Type', value: (r) => r.type, render: (r) => <span className={`badge ${r.type === 'CREDIT' ? 'amber' : 'green'}`}>{r.type === 'CREDIT' ? 'Udhaar' : 'Cash'}</span> },
         { header: 'Price list', value: (r) => r.priceTier, render: (r) => (r.priceTier === 'WHOLESALE' ? <span className="badge blue">Wholesale</span> : <span className="muted">Retail</span>) },
-        { header: 'Credit limit', num: true, value: (r) => r.creditLimit, render: (r) => (r.creditLimit ? money(r.creditLimit) : '—') },
-        { header: 'Opening balance', num: true, value: (r) => r.openingBalance, render: (r) => money(r.openingBalance) },
+        { header: 'Credit limit', num: true, value: (r) => r.creditLimit, render: (r) => (r.creditLimit ? `Rs ${money(r.creditLimit)}` : <span className="muted">—</span>) },
+        { header: 'Opening balance', num: true, value: (r) => r.openingBalance, render: (r) => (Number(r.openingBalance) > 0 ? <strong className="left-amt">Rs {money(r.openingBalance)}</strong> : <span className="muted">—</span>) },
       ]}
-      extraRowActions={(r) => <><Link href={`/khata/${r.id}`}>Khata</Link><Link href={`/customers/${r.id}`}>Rates</Link></>}
+      extraRowActions={(r) => <><Link className="pill-link" href={`/khata/${r.id}`}><Icon name="khata" />Khata</Link><Link className="pill-link" href={`/customers/${r.id}`}><Icon name="sales" />Rates</Link></>}
     />
   );
 }
