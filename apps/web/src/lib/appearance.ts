@@ -10,9 +10,10 @@ import { LOOK_KEY } from './lookBoot';
  */
 export type CardStyle = 'soft' | 'outline' | 'raised' | 'tinted';
 export type TabStyle = 'underline' | 'pill' | 'boxed';
-export interface Look { accent: string | null; side: string | null; card: CardStyle; tabs: TabStyle }
+export type FillStyle = 'gradient' | 'solid';
+export interface Look { accent: string | null; side: string | null; fill: FillStyle; card: CardStyle; tabs: TabStyle }
 
-export const DEFAULT_LOOK: Look = { accent: null, side: null, card: 'soft', tabs: 'underline' };
+export const DEFAULT_LOOK: Look = { accent: null, side: null, fill: 'gradient', card: 'soft', tabs: 'underline' };
 
 export const ACCENTS: { name: string; hex: string }[] = [
   { name: 'Teal', hex: '#0f766e' },
@@ -40,6 +41,11 @@ export const SIDES: { name: string; hex: string }[] = [
   { name: 'Mint', hex: '#d1fae5' },
 ];
 
+export const FILLS: { id: FillStyle; name: string; hint: string }[] = [
+  { id: 'gradient', name: 'Gradient', hint: 'Soft blend of two shades' },
+  { id: 'solid', name: 'Solid', hint: 'One flat colour, no blend' },
+];
+
 export const CARDS: { id: CardStyle; name: string; hint: string }[] = [
   { id: 'soft', name: 'Soft', hint: 'Light shadow' },
   { id: 'outline', name: 'Outline', hint: 'Flat, clear border' },
@@ -55,7 +61,7 @@ export const TABS: { id: TabStyle; name: string; hint: string }[] = [
 
 const KEY = LOOK_KEY;
 const HEX = /^#[0-9a-f]{6}$/i;
-const ATTRS = ['data-card', 'data-tabs', 'data-accent', 'data-side-tone'];
+const ATTRS = ['data-card', 'data-tabs', 'data-fill', 'data-accent', 'data-side-tone'];
 const VARS = ['--brand', '--on-brand', '--side', '--side-accent'];
 const listeners = new Set<() => void>();
 
@@ -74,7 +80,7 @@ function lighten(hex: string, t: number) {
 }
 
 function bundle(look: Look) {
-  const attrs: Record<string, string> = { 'data-card': look.card, 'data-tabs': look.tabs };
+  const attrs: Record<string, string> = { 'data-card': look.card, 'data-tabs': look.tabs, 'data-fill': look.fill };
   const vars: Record<string, string> = {};
   if (look.accent) {
     attrs['data-accent'] = '1';
@@ -109,6 +115,7 @@ function parse(raw: string | null): Look {
     return {
       accent: HEX.test(l.accent) ? l.accent : null,
       side: HEX.test(l.side) ? l.side : null,
+      fill: FILLS.some((x) => x.id === l.fill) ? l.fill : DEFAULT_LOOK.fill,
       card: CARDS.some((c) => c.id === l.card) ? l.card : DEFAULT_LOOK.card,
       tabs: TABS.some((t) => t.id === l.tabs) ? l.tabs : DEFAULT_LOOK.tabs,
     };

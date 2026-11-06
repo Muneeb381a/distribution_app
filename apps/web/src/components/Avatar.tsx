@@ -12,8 +12,8 @@ export function Avatar({ user, size = 32, className = '' }: { user: Who; size?: 
   const h = hue(user.username);
   return (
     <span
-      className={`pic ${className}`}
-      style={{ width: size, height: size, fontSize: Math.round(size * 0.38), background: user.avatar ? undefined : `linear-gradient(135deg, hsl(${h} 62% 46%), hsl(${(h + 42) % 360} 68% 38%))` }}
+      className={`pic ${className}${user.avatar ? " has-img" : ""}`}
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.38), '--pa': `hsl(${h} 62% 46%)`, '--pb': `hsl(${(h + 42) % 360} 68% 38%)` } as React.CSSProperties}
       aria-hidden="true"
     >
       {user.avatar

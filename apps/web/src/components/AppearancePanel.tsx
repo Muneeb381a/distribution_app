@@ -1,7 +1,7 @@
 'use client';
 
 import { Icon } from '@/components/Icon';
-import { ACCENTS, CARDS, SIDES, TABS, resetLook, setLook, useLook } from '@/lib/appearance';
+import { ACCENTS, CARDS, FILLS, SIDES, TABS, resetLook, setLook, useLook } from '@/lib/appearance';
 import { setTheme, useTheme, type ThemePref } from '@/lib/theme';
 
 const MODES: [ThemePref, string, 'monitor' | 'sun' | 'moon'][] = [['system', 'Follow device', 'monitor'], ['light', 'Light', 'sun'], ['dark', 'Dark', 'moon']];
@@ -59,6 +59,18 @@ export default function AppearancePanel() {
             <input type="color" aria-label="Custom sidebar colour" value={look.side ?? SIDES[0].hex} onChange={(e) => setLook({ side: e.target.value })} />
             <Icon name="plus" />
           </label>
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="card-head"><h2>Colour style</h2><span className="muted look-note">Buttons, sidebar, tiles and badges</span></div>
+        <div className="tiles" role="radiogroup" aria-label="Colour style">
+          {FILLS.map((x) => (
+            <button key={x.id} type="button" role="radio" aria-checked={look.fill === x.id} className={`look-tile${look.fill === x.id ? ' on' : ''}`} onClick={() => setLook({ fill: x.id })}>
+              <span className="mini-stage"><span className="mini-fill" data-kind={x.id}><i /><i /></span></span>
+              <b>{x.name}</b><span>{x.hint}</span>
+            </button>
+          ))}
         </div>
       </section>
 

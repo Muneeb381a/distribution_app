@@ -1757,3 +1757,37 @@ tr:hover td.row-end a.pill-link, td.row-end a.pill-link:hover { background: var(
 .pick-chip:hover:not(:disabled) { border-color: var(--accent); color: var(--text); background: var(--surface); }
 .pick-chip.on, .pick-chip.on:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
 .pick-chip .pic { box-shadow: none; }
+
+/* =====================================================================
+   Theme v9: colour style. Gradient is the default; "Solid" (Settings -> Appearance) flattens every
+   blend to one colour. The selector is deliberately specific so it beats the accent and dark-mode tokens.
+   ===================================================================== */
+.pic:not(.has-img) { background: linear-gradient(135deg, var(--pa), var(--pb)); }
+
+:root[data-fill='solid'][data-card][data-tabs] {
+  --grad: var(--accent);
+  --grad-hover: var(--accent-hover);
+  --glow: 0 6px 16px -8px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+:root[data-fill='solid'] .pic:not(.has-img) { background: var(--pa); }
+:root[data-fill='solid'] .topbar::after { display: none; }
+:root[data-fill='solid'] .user-pop-head { background: var(--accent-soft); }
+:root[data-fill='solid'] .stat .icon.green { background: var(--success); }
+:root[data-fill='solid'] .stat .icon.red { background: var(--danger); }
+:root[data-fill='solid'] .stat .icon.amber { background: #f59e0b; }
+:root[data-fill='solid'] .trip-card::before { background: #f59e0b; }
+:root[data-fill='solid'] .trip-truck { background: #f59e0b; }
+:root[data-fill='solid'] .sidebar .logo { background: var(--accent); }
+
+/* coloured sidebars become one flat colour */
+:root[data-fill='solid'][data-side-tone='dark'] .sidebar,
+:root[data-fill='solid'][data-side-tone='light'] .sidebar { background: var(--side); }
+:root[data-fill='solid'][data-side-tone='dark'] .sidebar .logo { background: #ffffff; }
+:root[data-fill='solid'] button.swatch.side, :root[data-fill='solid'] button.swatch.side:hover:not(:disabled) { background: var(--c); }
+
+/* Appearance preview of the colour style */
+.mini-fill { width: 100%; display: grid; gap: 7px; }
+.mini-fill i { height: 20px; border-radius: 7px; }
+.mini-fill i:last-child { width: 62%; height: 12px; border-radius: 99px; }
+.mini-fill[data-kind='gradient'] i { background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+.mini-fill[data-kind='solid'] i { background: var(--accent); }
