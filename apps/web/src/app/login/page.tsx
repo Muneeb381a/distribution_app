@@ -1,9 +1,11 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
+import { Avatar } from '@/components/Avatar';
 import { BusyButton } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
+import { forgetAccount, knownAccounts, type KnownAccount } from '@/lib/accounts';
 import { api, saveSession, type SessionUser } from '@/lib/api';
 import { getSettings } from '@/lib/settings';
 import { DEFAULT_SETTINGS } from '@dist/shared';
@@ -17,6 +19,10 @@ export default function LoginPage() {
     api<{ businessName: string }>('/settings/public').then((s) => setBrand(s.businessName)).catch(() => {});
   }, []);
   const router = useRouter();
+  const [accounts, setAccounts] = useState<KnownAccount[]>([]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setAccounts(knownAccounts()); }, []);
+  const pw = useRef<HTMLInputElement>(null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -25,6 +31,7 @@ export default function LoginPage() {
   const [caps, setCaps] = useState(false);
   const [shake, setShake] = useState(0);
   const [welcome, setWelcome] = useState(false);
+  const who = accounts.find((a) => a.username === username.trim()) ?? null;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -62,8 +69,32 @@ export default function LoginPage() {
       <main className="login-side">
         <div className="login">
           <span className="logo login-logo"><Icon name="products" /></span>
-          <h1 className="rise" style={{ '--d': '80ms' } as CSSProperties}>Welcome back</h1>
-          <p className="muted rise" style={{ margin: 0, '--d': '140ms' } as CSSProperties}>Sign in to {brand}.</p>
+          {who ? (
+            <div className="who-card pop" key={who.username}>
+              <Avatar user={who} size={84} className="pic-ring" />
+              <h1>Welcome back, {(who.displayName || who.username).split(' ')[0]}</h1>
+              <p className="muted" style={{ margin: 0 }}>{who.roleName} · @{who.username}</p>
+            </div>
+          ) : (
+            <>
+              <h1 className="rise" style={{ '--d': '80ms' } as CSSProperties}>Welcome back</h1>
+              <p className="muted rise" style={{ margin: 0, '--d': '140ms' } as CSSProperties}>Sign in to {brand}.</p>
+            </>
+          )}
+          {accounts.length > 0 && (
+            <div className="acct-row rise" style={{ '--d': '160ms' } as CSSProperties} role="group" aria-label="Accounts used on this computer">
+              {accounts.map((a) => (
+                <span key={a.username} className="acct-wrap">
+                  <button type="button" className={`acct${a.username === username ? ' on' : ''}`} aria-pressed={a.username === username} title={`${a.displayName || a.username} (${a.roleName})`}
+                    onClick={() => { setUsername(a.username); setError(''); setTimeout(() => pw.current?.focus(), 0); }}>
+                    <Avatar user={a} size={46} />
+                    <span>{(a.displayName || a.username).split(' ')[0]}</span>
+                  </button>
+                  <button type="button" className="acct-x" aria-label={`Forget ${a.username} on this computer`} title="Not on this list" onClick={() => { forgetAccount(a.username); setAccounts(knownAccounts()); if (username === a.username) setUsername(''); }}><Icon name="x" /></button>
+                </span>
+              ))}
+            </div>
+          )}
           <form key={shake} className={`form${shake ? ' shake' : ''}`} onSubmit={submit}>
             <label className="field rise" style={{ '--d': '200ms' } as CSSProperties}>
               Username
@@ -77,6 +108,7 @@ export default function LoginPage() {
               <span className="input-wrap">
                 <Icon name="lock" />
                 <input
+                  ref={pw}
                   type={show ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}

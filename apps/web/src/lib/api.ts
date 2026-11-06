@@ -1,3 +1,4 @@
+import { rememberAccount } from './accounts';
 import { useMemo, useSyncExternalStore } from 'react';
 import type { Permission } from '@dist/shared';
 
@@ -8,6 +9,8 @@ export interface SessionUser {
   username: string;
   roleName: string;
   permissions: string[];
+  displayName?: string | null;
+  avatar?: string | null;
 }
 
 const TOKEN_KEY = 'dist.token';
@@ -16,11 +19,14 @@ const USER_KEY = 'dist.user';
 export function saveSession(token: string, user: SessionUser) {
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(USER_KEY, JSON.stringify(user));
+  rememberAccount(user);
 }
 
 /** Replace the stored user (role or permissions changed on the server). */
 export function updateUser(user: SessionUser) {
   localStorage.setItem(USER_KEY, JSON.stringify(user));
+  rememberAccount(user);
+  window.dispatchEvent(new Event(USER_EVENT));
 }
 
 export function clearSession() {
@@ -76,11 +82,17 @@ export async function download(path: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-const noSubscribe = () => () => {};
+/** Lets screens re-render when the stored user changes in this tab (e.g. a new profile picture). */
+const USER_EVENT = 'dist:user';
+const subscribeUser = (cb: () => void) => {
+  window.addEventListener(USER_EVENT, cb);
+  window.addEventListener('storage', cb);
+  return () => { window.removeEventListener(USER_EVENT, cb); window.removeEventListener('storage', cb); };
+};
 
 /** The signed-in user from localStorage; null on the server and before sign-in. */
 export function useUser(): SessionUser | null {
-  const raw = useSyncExternalStore(noSubscribe, () => localStorage.getItem(USER_KEY), () => null);
+  const raw = useSyncExternalStore(subscribeUser, () => localStorage.getItem(USER_KEY), () => null);
   return useMemo(() => (raw ? (JSON.parse(raw) as SessionUser) : null), [raw]);
 }
 

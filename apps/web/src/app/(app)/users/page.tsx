@@ -1,5 +1,6 @@
 'use client';
 
+import { Avatar } from '@/components/Avatar';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { BusyButton, SkeletonRows, useConfirm, usePrompt, useToast } from '@/components/Feedback';
@@ -9,7 +10,7 @@ import { api, can, useUser } from '@/lib/api';
 import { PERMISSION_GROUPS } from '@dist/shared';
 
 interface Role { id: string; name: string; permissions: { permissionCode: string }[] }
-interface User { id: string; username: string; isActive: boolean; role: { id: string; name: string } }
+interface User { id: string; username: string; displayName: string | null; avatar: string | null; isActive: boolean; role: { id: string; name: string } }
 
 
 function RoleEditor({ initial, onSave, onCancel }: { initial: { name: string; permissions: string[] }; onSave: (name: string, perms: string[]) => Promise<void>; onCancel: () => void }) {
@@ -167,8 +168,8 @@ export default function UsersPage() {
             <tr key={u.id} className={u.isActive ? '' : 'inactive'}>
               <td>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span className="avatar" style={{ width: 30, height: 30, fontSize: 11 }}>{u.username.slice(0, 2)}</span>
-                  <b>{u.username}</b>{u.id === me?.id && <span className="badge teal">You</span>}
+                  <Avatar user={u} size={32} />
+                  <b>{u.displayName || u.username}</b>{u.displayName && <span className="muted">@{u.username}</span>}{u.id === me?.id && <span className="badge teal">You</span>}
                 </span>
               </td>
               <td>
