@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { Avatar } from '@/components/Avatar';
 import { Icon } from '@/components/Icon';
 import { api, clearSession, type SessionUser } from '@/lib/api';
 import { setTheme, useTheme, type ThemePref } from '@/lib/theme';
@@ -22,6 +23,8 @@ export default function TopBar({ user, onMenu, crumbs, status }: { user: Session
   const [loading, setLoading] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const box = useRef<HTMLDivElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     const text = q.trim();
@@ -40,12 +43,20 @@ export default function TopBar({ user, onMenu, crumbs, status }: { user: Session
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
-      if (e.key === '/' && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+      if (e.key === 'Escape') setMenuOpen(false);
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        input.current?.focus();
+        input.current?.select();
+      } else if (e.key === '/' && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
         e.preventDefault();
         input.current?.focus();
       }
     };
-    const click = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const click = (e: MouseEvent) => {
+      if (!box.current?.contains(e.target as Node)) setOpen(false);
+      if (!menu.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
     window.addEventListener('keydown', key);
     window.addEventListener('mousedown', click);
     return () => { window.removeEventListener('keydown', key); window.removeEventListener('mousedown', click); };
@@ -67,7 +78,7 @@ export default function TopBar({ user, onMenu, crumbs, status }: { user: Session
     else if (e.key === 'Escape') { setOpen(false); input.current?.blur(); }
   }
 
-  const today = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' });
 
   return (
     <header className="topbar">
@@ -86,13 +97,13 @@ export default function TopBar({ user, onMenu, crumbs, status }: { user: Session
         <input
           ref={input}
           value={q}
-          placeholder="Search customers, products, suppliers, bills…"
+          placeholder="Search customers, products, bills…"
           onChange={(e) => { setQ(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
           onKeyDown={onKey}
           aria-label="Search"
         />
-        <kbd>/</kbd>
+        <kbd>Ctrl K</kbd>
         {open && q.trim().length >= 2 && (
           <div className="search-pop">
             {shown.map((h, i) => {
@@ -112,7 +123,6 @@ export default function TopBar({ user, onMenu, crumbs, status }: { user: Session
         )}
       </div>
       <div className="top-right">
-        <span className="top-date">{today}</span>
         {status}
         <button
           type="button" className="top-icon" onClick={() => setTheme(NEXT_THEME[theme])}
@@ -120,19 +130,28 @@ export default function TopBar({ user, onMenu, crumbs, status }: { user: Session
         >
           <Icon name={theme === 'dark' ? 'moon' : theme === 'light' ? 'sun' : 'monitor'} />
         </button>
-        <div className="top-user">
-          <div className="avatar">{user.username.slice(0, 2)}</div>
-          <div className="who-text"><b>{user.username}</b><span>{user.roleName}</span></div>
+        <div className="user-menu" ref={menu}>
+          <button type="button" className="avatar-btn" aria-haspopup="menu" aria-expanded={menuOpen} aria-label="Account menu" onClick={() => setMenuOpen(!menuOpen)}>
+            <Avatar user={user} size={32} />
+            <Icon name="chevronDown" />
+          </button>
+          {menuOpen && (
+            <div className="user-pop" role="menu">
+              <div className="user-pop-head">
+                <Avatar user={user} size={44} />
+                <div className="who-text"><b>{user.displayName || user.username}</b><span>{user.roleName}</span></div>
+              </div>
+              <div className="user-pop-date">{today}</div>
+              <Link href="/profile" role="menuitem" className="user-pop-item" onClick={() => setMenuOpen(false)}><Icon name="user" />My profile</Link>
+              <button
+                type="button" role="menuitem" className="user-pop-item"
+                onClick={() => { clearSession(); router.replace('/login'); }}
+              >
+                <Icon name="logout" />Sign out
+              </button>
+            </div>
+          )}
         </div>
-        <button
-          className="logout"
-          onClick={() => {
-            clearSession();
-            router.replace('/login');
-          }}
-        >
-          <Icon name="logout" /> Sign out
-        </button>
       </div>
     </header>
   );

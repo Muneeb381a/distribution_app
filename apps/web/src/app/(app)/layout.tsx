@@ -82,6 +82,7 @@ export interface Crumb { label: string; href?: string }
 function crumbsFor(pathname: string, detail?: string): Crumb[] {
   const all = NAV.flatMap((g) => g.items.map((i) => ({ ...i, group: g.title })));
   const item = pathname.startsWith('/receipts') ? { ...RECEIPT_PARENT, group: 'Selling' } : all.find((n) => pathname === n.href || pathname.startsWith(`${n.href}/`));
+  if (pathname === '/profile') return [{ label: 'Account' }, { label: 'My profile' }];
   if (!item) return [{ label: detail ?? getSettings().businessName }];
   const sub = DETAIL.find(([re]) => re.test(pathname))?.[1];
   const out: Crumb[] = [{ label: item.group }, { label: item.label, href: sub ? item.href : undefined }];
@@ -93,14 +94,27 @@ function NavLinks({ user, onNavigate, collapsed }: { user: SessionUser; onNaviga
   const pathname = usePathname();
   const sync = useSyncState();
   const waiting = sync.pending + sync.failed;
+  // Sections can be folded away; the choice is remembered, and the section you are in never hides.
+  const [closed, setClosed] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(GROUPS_KEY) ?? '[]') as string[]; } catch { return []; }
+  });
+  const toggle = (title: string) => setClosed((c) => {
+    const next = c.includes(title) ? c.filter((t) => t !== title) : [...c, title];
+    try { localStorage.setItem(GROUPS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+    return next;
+  });
   return (
     <>
       {NAV.map((g) => {
         const items = g.items.filter((n) => !n.permission || can(user, n.permission));
         if (!items.length) return null;
+        const open = collapsed || !closed.includes(g.title) || items.some((n) => active(pathname, n.href));
         return (
           <div className="nav-group" key={g.title}>
-            <div className="nav-title">{g.title}</div>
+            <button type="button" className="nav-title" aria-expanded={open} onClick={() => toggle(g.title)}>
+              <span>{g.title}</span><Icon name="chevronDown" />
+            </button>
+            <div className={`nav-items${open ? '' : ' folded'}`} inert={!open}><div>
             {items.map((n) => (
               <Link
                 key={n.href} href={n.href} onClick={onNavigate}
@@ -113,6 +127,7 @@ function NavLinks({ user, onNavigate, collapsed }: { user: SessionUser; onNaviga
                 {n.href === '/outbox' && waiting > 0 && <span className="nav-count" aria-label={`${waiting} waiting`}>{waiting}</span>}
               </Link>
             ))}
+            </div></div>
           </div>
         );
       })}
@@ -124,6 +139,7 @@ const active = (pathname: string, href: string) =>
   pathname === href || pathname.startsWith(`${href}/`) || (href === '/khata' && pathname.startsWith('/receipts'));
 
 const SIDEBAR_KEY = 'dist.sidebar';
+const GROUPS_KEY = 'dist.navgroups';
 
 /** Top bar with the breadcrumb; also names the browser tab. */
 function TitledTopBar({ user, onMenu, detail }: { user: SessionUser; onMenu: () => void; detail: { path: string; title: string } | null }) {
@@ -216,6 +232,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         if (JSON.stringify([fresh.roleName, [...fresh.permissions].sort()]) !== stored) {
           updateUser(fresh);
           window.location.reload();
+        } else {
+          updateUser(fresh); // name or picture changed on another computer
         }
       })
       .catch(() => {});

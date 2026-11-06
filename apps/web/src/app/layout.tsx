@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
+import { LOOK_BOOT } from "@/lib/lookBoot";
 import { urdu } from "@/lib/fonts";
 
 const sans = Plus_Jakarta_Sans({
@@ -20,7 +21,7 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f5f6f3" },
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
     { media: "(prefers-color-scheme: dark)", color: "#0d1110" },
   ],
 };
@@ -29,7 +30,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${sans.variable} ${urdu.variable}`} suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT + LOOK_BOOT }} />
       </head>
       <body>{children}</body>
     </html>

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
+import AppearancePanel from '@/components/AppearancePanel';
 import { BusyButton, useToast } from '@/components/Feedback';
 import { Choice, Field, FormActions, FormCard, FormSection } from '@/components/Form';
 import { Icon } from '@/components/Icon';
@@ -31,6 +32,7 @@ export default function SettingsPage() {
   const saved = useSettings();
   const [f, setF] = useState<BusinessSettings>(saved);
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<'business' | 'look'>('business');
   const [preview, setPreview] = useState('');
   const editable = can(user, 'SETTINGS_EDIT');
   const dirty = JSON.stringify(f) !== JSON.stringify(saved);
@@ -77,7 +79,13 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <div className="settings-grid">
+      <div className="tabs" role="tablist" aria-label="Settings sections">
+        <button type="button" role="tab" aria-selected={tab === 'business'} onClick={() => setTab('business')}>Business &amp; bills</button>
+        <button type="button" role="tab" aria-selected={tab === 'look'} onClick={() => setTab('look')}>Appearance</button>
+      </div>
+
+      {tab === 'look' && <AppearancePanel />}
+      {tab === 'business' && <div className="settings-grid">
         <FormCard onSubmit={submit}
           actions={editable ? (
             <FormActions note={dirty ? 'Unsaved changes' : 'All changes saved'}>
@@ -119,7 +127,7 @@ export default function SettingsPage() {
             <p className="muted" style={{ fontSize: 12.5, margin: '10px 0 0' }}>A sample bill, not saved anywhere. A4 bills and salary slips use the same details.</p>
           </div>
         </aside>
-      </div>
+      </div>}
     </>
   );
 }
