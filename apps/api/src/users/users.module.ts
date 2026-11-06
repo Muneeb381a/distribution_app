@@ -27,6 +27,8 @@ class RoleDto {
 const publicUser = {
   id: true,
   username: true,
+  displayName: true,
+  avatar: true,
   isActive: true,
   employeeId: true,
   role: { select: { id: true, name: true } },

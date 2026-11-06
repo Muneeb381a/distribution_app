@@ -71,6 +71,8 @@ model AppUser {
   roleId       String
   employeeId   String?    @unique
   isActive     Boolean    @default(true)
+  displayName  String?
+  avatar       String?
   createdAt    DateTime   @default(now())
   role         Role       @relation(fields: [roleId], references: [id])
   employee     Employee?  @relation(fields: [employeeId], references: [id])
