@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
 import { BusyButton } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
 import { api, saveSession, type SessionUser } from '@/lib/api';
@@ -21,6 +21,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [show, setShow] = useState(false);
+  const [caps, setCaps] = useState(false);
+  const [shake, setShake] = useState(0);
+  const [welcome, setWelcome] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -29,10 +33,11 @@ export default function LoginPage() {
     try {
       const res = await api<{ accessToken: string; user: SessionUser }>('/auth/login', { method: 'POST', json: { username, password } });
       saveSession(res.accessToken, res.user);
+      setWelcome(true);
       router.replace('/dashboard');
     } catch (err) {
       setError((err as Error).message);
-    } finally {
+      setShake((n) => n + 1);
       setBusy(false);
     }
   }
@@ -40,6 +45,7 @@ export default function LoginPage() {
   return (
     <div className="login-page">
       <aside className="login-art" aria-hidden="true">
+        <span className="orb orb-a" /><span className="orb orb-b" />
         <div className="brand-row"><span className="logo"><Icon name="products" /></span>{brand}</div>
         <div>
           <p className="ur-line" dir="rtl" lang="ur">چاول اور مشروبات کی تقسیم</p>
@@ -55,20 +61,38 @@ export default function LoginPage() {
       </aside>
       <main className="login-side">
         <div className="login">
-          <span className="logo" style={{ marginBottom: 18 }}><Icon name="products" /></span>
-          <h1>Welcome back</h1>
-          <p className="muted" style={{ margin: 0 }}>Sign in to your distribution account.</p>
-          <form className="form" onSubmit={submit}>
-            <label>
+          <span className="logo login-logo"><Icon name="products" /></span>
+          <h1 className="rise" style={{ '--d': '80ms' } as CSSProperties}>Welcome back</h1>
+          <p className="muted rise" style={{ margin: 0, '--d': '140ms' } as CSSProperties}>Sign in to {brand}.</p>
+          <form key={shake} className={`form${shake ? ' shake' : ''}`} onSubmit={submit}>
+            <label className="field rise" style={{ '--d': '200ms' } as CSSProperties}>
               Username
-              <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus required autoComplete="username" />
+              <span className="input-wrap">
+                <Icon name="user" />
+                <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus required autoComplete="username" autoCapitalize="none" spellCheck={false} />
+              </span>
             </label>
-            <label>
+            <label className="field rise" style={{ '--d': '260ms' } as CSSProperties}>
               Password
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="current-password" />
+              <span className="input-wrap">
+                <Icon name="lock" />
+                <input
+                  type={show ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyUp={(e) => setCaps(e.getModifierState('CapsLock'))}
+                  onBlur={() => setCaps(false)}
+                  required
+                  autoComplete="current-password"
+                />
+                <button type="button" className="eye" aria-label={show ? 'Hide password' : 'Show password'} aria-pressed={show} onClick={() => setShow(!show)}>
+                  <Icon name={show ? 'eyeOff' : 'eye'} />
+                </button>
+              </span>
+              {caps && <span className="caps-hint"><Icon name="alert" />Caps Lock is on</span>}
             </label>
-            {error && <p className="error" role="alert" style={{ margin: 0 }}>{error}</p>}
-            <BusyButton busy={busy}>{busy ? 'Signing in…' : 'Sign in'}</BusyButton>
+            {error && <p className="error pop" role="alert" style={{ margin: 0 }}>{error}</p>}
+            <BusyButton busy={busy}>{welcome ? 'Welcome…' : busy ? 'Signing in…' : 'Sign in'}</BusyButton>
           </form>
           <div className="foot"><span>Forgot your password? Ask the owner to reset it.</span></div>
         </div>

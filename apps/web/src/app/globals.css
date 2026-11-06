@@ -989,6 +989,47 @@ tr.row-link.open td { background: var(--surface-hover); }
   .pos { grid-template-columns: 1fr; }
   .pos-side { position: static; }
 }
+/* Sign-in motion */
+.login-art > * { position: relative; z-index: 1; }
+.login-art .orb { position: absolute; z-index: 0; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--on-accent) 16%, transparent), transparent 70%); pointer-events: none; }
+.login-art .orb-a { width: 380px; height: 380px; top: -120px; left: -100px; animation: orb-drift 14s ease-in-out infinite alternate; }
+.login-art .orb-b { width: 300px; height: 300px; bottom: 18%; right: -90px; animation: orb-drift 11s ease-in-out -4s infinite alternate-reverse; }
+.login-art .brand-row, .login-art .ur-line, .login-art h2, .login-art p:not(.ur-line), .login-art li, .login-art > span { animation: rise 0.7s cubic-bezier(.2,.7,.2,1) both; }
+.login-art .ur-line { animation-delay: 0.1s; }
+.login-art h2 { animation-delay: 0.18s; }
+.login-art p:not(.ur-line) { animation-delay: 0.26s; }
+.login-art li:nth-child(1) { animation-delay: 0.36s; }
+.login-art li:nth-child(2) { animation-delay: 0.46s; }
+.login-art li:nth-child(3) { animation-delay: 0.56s; }
+.login-art li svg { padding: 5px; width: 28px; height: 28px; border-radius: 8px; background: color-mix(in srgb, var(--on-accent) 16%, transparent); }
+.login-logo { margin-bottom: 18px; animation: logo-in 0.7s cubic-bezier(.2,.9,.3,1.3) both; }
+.login .rise, .login .form { animation: rise 0.6s cubic-bezier(.2,.7,.2,1) both; animation-delay: var(--d, 0ms); }
+.login .form { animation-delay: 0ms; }
+.login .field { display: grid; gap: 6px; }
+.login .input-wrap { position: relative; display: block; }
+.login .input-wrap > svg { position: absolute; left: 12px; top: 50%; width: 17px; height: 17px; transform: translateY(-50%); color: var(--faint); pointer-events: none; transition: color .2s; }
+.login .input-wrap:focus-within > svg { color: var(--accent); }
+.login .input-wrap input { padding-left: 38px; transition: box-shadow .2s, border-color .2s; }
+.login .input-wrap input:focus { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
+.login .input-wrap .eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 34px; min-height: 34px; height: 34px; padding: 0; margin: 0; display: grid; place-items: center; background: none; border: 0; box-shadow: none; color: var(--faint); border-radius: 8px; }
+.login .input-wrap .eye:hover { color: var(--text); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.login .input-wrap .eye svg { width: 17px; height: 17px; }
+.login .input-wrap:has(.eye) input { padding-right: 42px; }
+.login .caps-hint { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--danger); animation: pop 0.25s ease-out both; }
+.login .caps-hint svg { width: 14px; height: 14px; }
+.login .error.pop { animation: pop 0.3s ease-out both; }
+.login .form.shake { animation: shake 0.45s cubic-bezier(.36,.07,.19,.97) both; }
+.login button[type='submit'] { transition: transform .15s, box-shadow .2s; }
+.login button[type='submit']:not(:disabled):hover { transform: translateY(-1px); box-shadow: 0 8px 20px -8px var(--accent); }
+.login button[type='submit']:not(:disabled):active { transform: translateY(0); }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes pop { from { opacity: 0; transform: scale(.96) translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes logo-in { from { opacity: 0; transform: scale(.5) rotate(-12deg); } to { opacity: 1; transform: none; } }
+@keyframes shake { 10%, 90% { transform: translateX(-2px); } 20%, 80% { transform: translateX(4px); } 30%, 50%, 70% { transform: translateX(-7px); } 40%, 60% { transform: translateX(7px); } }
+@keyframes orb-drift { from { transform: translate(0, 0) scale(1); } to { transform: translate(40px, 30px) scale(1.15); } }
+@media (prefers-reduced-motion: reduce) {
+  .login-art *, .login *, .login-logo { animation: none !important; transition: none !important; }
+}
 @media (max-width: 1100px) {
   .doc-grid { grid-template-columns: 1fr; }
   .doc-side { position: static; }
