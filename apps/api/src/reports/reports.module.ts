@@ -183,6 +183,91 @@ class ReportsController {
     };
   }
 
+  /**
+   * Who sold what and who took the money, per person. A person is the salesman on the bill when there is one,
+   * otherwise whoever entered the bill; an app user linked to an employee counts as that employee, so a salesman
+   * who also signs in is one row. Khata receipts (payments not tied to a bill) go to whoever recorded them.
+   */
+  private async teamBase(q: RangeQuery) {
+    const { from, to } = range(q);
+    const [users, employees, sales, receipts] = await Promise.all([
+      this.prisma.appUser.findMany({ select: { id: true, username: true, displayName: true, avatar: true, employeeId: true, role: { select: { name: true } } } }),
+      this.prisma.employee.findMany({ select: { id: true, name: true, commissionPercent: true } }),
+      this.prisma.sale.findMany({
+        where: { date: { gte: from, lte: to } },
+        select: { id: true, billNo: true, status: true, saleType: true, salesmanId: true, createdById: true, net: true, paidNow: true, customerId: true, createdAt: true, customer: { select: { name: true } } },
+      }),
+      this.prisma.payment.findMany({
+        where: { status: 'ACTIVE', saleId: null, date: { gte: from, lte: to } },
+        select: { id: true, receiptNo: true, createdById: true, amount: true, method: true, createdAt: true, customer: { select: { name: true } } },
+      }),
+    ]);
+    const userById = new Map(users.map((u) => [u.id, u]));
+    const keyOfUser = (id: string) => { const u = userById.get(id); return u?.employeeId ? `emp:${u.employeeId}` : `usr:${id}`; };
+    const keyOfSale = (s: { salesmanId: string | null; createdById: string }) => (s.salesmanId ? `emp:${s.salesmanId}` : keyOfUser(s.createdById));
+    return { from, to, users, employees, sales, receipts, userById, keyOfUser, keyOfSale };
+  }
+
+  @Get('team') @RequirePermissions('REPORT_VIEW')
+  async team(@Query() q: RangeQuery) {
+    const { from, to, users, employees, sales, receipts, userById, keyOfUser, keyOfSale } = await this.teamBase(q);
+    type Row = { key: string; name: string; username: string | null; avatar: string | null; roleName: string | null; employeeId: string | null; commissionPercent: Dec | null; bills: number; cancelled: number; sales: Dec; cashWithBills: Dec; udhaar: Dec; receipts: Dec; receiptCount: number; byMethod: Record<string, Dec>; lastAt: Date | null };
+    const rows = new Map<string, Row>();
+    const row = (key: string): Row => {
+      let r = rows.get(key);
+      if (r) return r;
+      const [kind, id] = key.split(':');
+      const emp = kind === 'emp' ? employees.find((e) => e.id === id) : undefined;
+      const user = kind === 'usr' ? userById.get(id) : users.find((u) => u.employeeId === id);
+      r = {
+        key, name: emp?.name ?? user?.displayName ?? user?.username ?? 'Unknown', username: user?.username ?? null, avatar: user?.avatar ?? null, roleName: user?.role.name ?? (emp ? 'Employee' : null),
+        employeeId: emp?.id ?? null, commissionPercent: emp?.commissionPercent ?? null,
+        bills: 0, cancelled: 0, sales: ZERO(), cashWithBills: ZERO(), udhaar: ZERO(), receipts: ZERO(), receiptCount: 0, byMethod: {}, lastAt: null,
+      };
+      rows.set(key, r);
+      return r;
+    };
+    const touch = (r: Row, at: Date) => { if (!r.lastAt || at > r.lastAt) r.lastAt = at; };
+    for (const s of sales) {
+      const r = row(keyOfSale(s));
+      if (s.status !== 'ACTIVE') { r.cancelled += 1; continue; }
+      r.bills += 1;
+      r.sales = r.sales.plus(s.net);
+      r.cashWithBills = r.cashWithBills.plus(s.paidNow);
+      if (s.customerId && s.net.gt(s.paidNow)) r.udhaar = r.udhaar.plus(s.net.minus(s.paidNow));
+      touch(r, s.createdAt);
+    }
+    for (const p of receipts) {
+      const r = row(keyOfUser(p.createdById));
+      r.receipts = r.receipts.plus(p.amount);
+      r.receiptCount += 1;
+      r.byMethod[p.method] = (r.byMethod[p.method] ?? ZERO()).plus(p.amount);
+      touch(r, p.createdAt);
+    }
+    const people = [...rows.values()].map((r) => ({
+      ...r,
+      collected: r.cashWithBills.plus(r.receipts),
+      commission: r.commissionPercent && r.sales.gt(0) ? r.sales.mul(r.commissionPercent).div(100).toDecimalPlaces(2) : ZERO(),
+    })).sort((a, b) => b.sales.comparedTo(a.sales) || b.collected.comparedTo(a.collected));
+    const sum = (f: (p: (typeof people)[number]) => Dec) => people.reduce((t, p) => t.plus(f(p)), ZERO());
+    return {
+      from: iso(from), to: iso(to),
+      totals: { bills: people.reduce((t, p) => t + p.bills, 0), sales: sum((p) => p.sales), collected: sum((p) => p.collected), cashWithBills: sum((p) => p.cashWithBills), receipts: sum((p) => p.receipts), udhaar: sum((p) => p.udhaar) },
+      people,
+    };
+  }
+
+  /** One person's bills and khata receipts in the range, newest first. */
+  @Get('team/activity') @RequirePermissions('REPORT_VIEW')
+  async teamActivity(@Query() q: RangeQuery & { key?: string }) {
+    if (!q.key || !/^(emp|usr):[0-9a-f-]{36}$/.test(q.key)) throw new BadRequestException('key is required');
+    const { sales, receipts, keyOfUser, keyOfSale } = await this.teamBase(q);
+    const bills = sales.filter((s) => keyOfSale(s) === q.key).map((s) => ({ id: s.id, billNo: s.billNo, at: s.createdAt, saleType: s.saleType, status: s.status, customer: s.customer?.name ?? null, net: s.net, paidNow: s.paidNow }));
+    const got = receipts.filter((p) => keyOfUser(p.createdById) === q.key).map((p) => ({ id: p.id, receiptNo: p.receiptNo, at: p.createdAt, customer: p.customer.name, amount: p.amount, method: p.method }));
+    const byTime = <T extends { at: Date }>(a: T, b: T) => b.at.getTime() - a.at.getTime();
+    return { bills: bills.sort(byTime).slice(0, 300), receipts: got.sort(byTime).slice(0, 300) };
+  }
+
   /** Customers currently holding empties. */
   @Get('empties') @RequirePermissions('REPORT_VIEW')
   async empties() {

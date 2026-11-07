@@ -39,6 +39,27 @@ export default function CustomersPage() {
         { name: 'creditLimit', label: 'Credit limit', type: 'number', prefix: 'Rs', section: 'account', showWhen: (v) => v.type === 'CREDIT', hint: 'Bills that would cross it need the override permission. Leave empty for no limit.' },
         { name: 'openingBalance', label: 'Opening balance', type: 'number', prefix: 'Rs', section: 'account', hint: 'What they owe you today, from the old register' },
       ]}
+      preview={(v, editing) => {
+        const credit = v.type === 'CREDIT';
+        return (
+          <div className="cust-preview">
+            <Avatar user={{ username: v.name?.trim() || 'New customer' }} size={56} />
+            <div className="cust-preview-main">
+              <b>{v.name?.trim() || (editing ? 'Customer' : 'New customer')}</b>
+              <span>{[v.shopName, v.area].filter((x) => x && x.trim()).join(' · ') || 'Shop and area show here'}</span>
+              <span className="cust-preview-badges">
+                <span className={`badge ${credit ? 'amber' : 'green'}`}>{credit ? 'Udhaar' : 'Cash'}</span>
+                <span className={`badge ${v.priceTier === 'WHOLESALE' ? 'blue' : ''}`}>{v.priceTier === 'WHOLESALE' ? 'Wholesale' : 'Retail'} rates</span>
+                {v.phone && <span className="badge">{v.phone}</span>}
+              </span>
+            </div>
+            <div className="cust-preview-nums">
+              <span>Credit limit<b>{credit ? (v.creditLimit ? `Rs ${money(v.creditLimit)}` : 'No limit') : 'Not needed'}</b></span>
+              <span>Opening balance<b>{Number(v.openingBalance) > 0 ? `Rs ${money(v.openingBalance)}` : 'Rs 0'}</b></span>
+            </div>
+          </div>
+        );
+      }}
       summary={(rows) => {
         const udhaar = rows.filter((r) => r.type === 'CREDIT');
         const owed = rows.reduce((s, r) => s + Math.max(0, Number(r.openingBalance)), 0);

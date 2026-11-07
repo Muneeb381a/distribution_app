@@ -14,6 +14,8 @@ interface ProfitRow { period: string; lines: Record<'BOTTLES' | 'RICE', { netSal
 interface StockRow { productId: string; productName: string; size: string | null; line: string; baseUnit: string; units: { unitName: string; factorToBase: string }[]; locationId: string; locationName: string; ok: string; damaged: string }
 interface Collections { rows: { byMethod: Record<string, string>; total: string; count: number }[] }
 
+interface TeamToday { people: { key: string; name: string; avatar: string | null; roleName: string | null; bills: number; sales: string; collected: string; udhaar: string }[] }
+
 const SERIES = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)'];
 
 interface Summary {
@@ -124,6 +126,7 @@ export default function DashboardPage() {
   const [month, setMonth] = useState<ProfitRow[] | null>(null);
   const [stock, setStock] = useState<StockRow[] | null>(null);
   const [collections, setCollections] = useState<Collections | null>(null);
+  const [team, setTeam] = useState<TeamToday | null>(null);
 
   useEffect(() => {
     if (!allowed) return;
@@ -133,6 +136,7 @@ export default function DashboardPage() {
     api<{ rows: ProfitRow[] }>(`/reports/profit?from=${first}&to=${localDay(t)}&groupBy=day`).then((r) => setMonth(r.rows)).catch(() => setMonth([]));
     api<Collections>(`/reports/collections?from=${localDay(t)}&to=${localDay(t)}`).then(setCollections).catch(() => setCollections({ rows: [] }));
     api<StockRow[]>('/stock').then(setStock).catch(() => setStock([]));
+    api<TeamToday>(`/reports/team?from=${localDay(t)}&to=${localDay(t)}`).then(setTeam).catch(() => setTeam({ people: [] }));
   }, [allowed]);
 
   const monthChart = useMemo<Point[]>(() => {
@@ -334,6 +338,28 @@ export default function DashboardPage() {
               ) : <div className="empty">Nobody owes anything.</div>}
             </section>
           </div>
+
+          <section className="card dx-card">
+            <CardTitle icon="employees" title="Who sold today" to="/team" linkLabel="Team activity" />
+            {!team ? <span className="skeleton" style={{ display: 'block', height: 96 }} />
+              : team.people.length ? (
+                <ul className="dx-team">
+                  {team.people.slice(0, 5).map((p) => {
+                    const top = Math.max(...team.people.map((x) => n(x.sales)), 1);
+                    return (
+                      <li key={p.key}>
+                        <Avatar user={{ username: p.name, displayName: p.name, avatar: p.avatar }} size={36} />
+                        <span className="dx-team-main">
+                          <b>{p.name}</b>
+                          <span className="meter" aria-hidden="true"><span style={{ width: `${pct(n(p.sales), top)}%` }} /></span>
+                        </span>
+                        <span className="dx-team-nums"><b>Rs {rupees(p.sales)}</b><span>{p.bills} bill{p.bills === 1 ? '' : 's'} · took Rs {rupees(p.collected)}</span></span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : <div className="empty">Nobody has made a bill or taken a payment yet today.</div>}
+          </section>
 
           <section className="card dx-card">
             <CardTitle icon="sales" title="Recent bills" to="/sales" />

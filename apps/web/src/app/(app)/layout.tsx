@@ -42,6 +42,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
     items: [
       { href: '/expenses', label: 'Expenses', icon: 'expenses', permission: 'EXPENSE_MANAGE' },
       { href: '/payroll', label: 'Payroll', icon: 'payroll', permission: 'PAYROLL_MANAGE' },
+      { href: '/team', label: 'Team activity', icon: 'employees', permission: 'REPORT_VIEW' },
       { href: '/reports', label: 'Reports', icon: 'reports', permission: 'REPORT_VIEW' },
     ],
   },

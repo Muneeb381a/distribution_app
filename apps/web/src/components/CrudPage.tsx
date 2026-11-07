@@ -3,7 +3,7 @@
 import { StatTiles, type Tile } from '@/components/StatTiles';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { BusyButton, Empty, SkeletonRows, useConfirm, useToast } from '@/components/Feedback';
-import { Affix, Choice, Field as FormField, FormActions, FormCard, FormSection, type Span } from '@/components/Form';
+import { Affix, Choice, Field as FormField, FormSection, type Span } from '@/components/Form';
 import { Icon, type IconName } from '@/components/Icon';
 import { LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import type { Permission } from '@dist/shared';
@@ -61,6 +61,8 @@ interface Props<T extends { id: string }> {
   sections?: FormSectionDef[];
   /** One line under the form title, e.g. what the record is used for. */
   formDescription?: string;
+  /** A live preview drawn above the form fields from what is typed so far. */
+  preview?: (values: Record<string, string>, editing: boolean) => ReactNode;
   /** Summary tiles above the list, worked out from the active rows. */
   summary?: (rows: T[]) => Tile[];
 }
@@ -75,12 +77,13 @@ function textOf(v: unknown, f: Field): string {
   return String(v);
 }
 
-export default function CrudPage<T extends { id: string }>({ title, path, fields, columns, editPermission, toBody, extraRowActions, noun, icon = 'file', editable = true, sections, formDescription, summary }: Props<T>) {
+export default function CrudPage<T extends { id: string }>({ title, path, fields, columns, editPermission, toBody, extraRowActions, noun, icon = 'file', editable = true, sections, formDescription, preview, summary }: Props<T>) {
   const [rows, setRows] = useState<T[] | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<null | 'add' | { edit: T }>(null);
+  const [initial, setInitial] = useState('');
   const [filter, setFilter] = useState('');
   const [showInactive, setShowInactive] = useState(false);
   const canEdit = can(useUser(), editPermission);
@@ -127,19 +130,35 @@ export default function CrudPage<T extends { id: string }>({ title, path, fields
   };
 
   function startAdd() {
-    setValues(Object.fromEntries(fields.filter((f) => f.initial !== undefined).map((f) => [f.name, f.initial!])));
+    const v = Object.fromEntries(fields.filter((f) => f.initial !== undefined).map((f) => [f.name, f.initial!]));
+    setValues(v);
+    setInitial(JSON.stringify(v));
     setMode('add');
   }
   function startEdit(r: T) {
     const row = r as unknown as Row;
-    setValues(Object.fromEntries(fields.map((f) => [f.name, textOf(row[f.name], f)])));
+    const v = Object.fromEntries(fields.map((f) => [f.name, textOf(row[f.name], f)]));
+    setValues(v);
+    setInitial(JSON.stringify(v));
     setMode({ edit: r });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   function close() {
     setMode(null);
     setValues({});
   }
+  const dirty = !!mode && JSON.stringify(values) !== initial;
+  /** Closing with typed-in changes asks first, so a stray click or Esc cannot throw them away. */
+  async function requestClose() {
+    if (dirty && !(await confirm({ title: 'Discard your changes?', body: <p>What you typed has not been saved.</p>, confirmLabel: 'Discard', cancelLabel: 'Keep editing', danger: true }))) return;
+    close();
+  }
+  // The page behind the drawer does not scroll while it is open.
+  useEffect(() => {
+    if (!mode) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [mode]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -194,28 +213,36 @@ export default function CrudPage<T extends { id: string }>({ title, path, fields
       {error && <p className="error">{error}</p>}
       {summary && rows && rows.length > 0 && <StatTiles items={summary(rows.filter((r) => (r as unknown as Row).isActive !== false))} />}
       {canEdit && mode && (
-        <div ref={formRef}>
-          <FormCard
-            onSubmit={submit}
-            title={editing ? `Edit ${String((editing as unknown as Row).name ?? singular)}` : `New ${singular}`}
-            description={formDescription}
-            actions={
-              <FormActions note={<><span className="req">*</span> required</>}>
-                <button type="button" className="secondary" onClick={close}>Cancel</button>
-                <BusyButton busy={busy}>{busy ? 'Saving…' : editing ? 'Save changes' : `Save ${singular}`}</BusyButton>
-              </FormActions>
-            }
-          >
-            {(sections ?? [{ key: '', title: '' }]).map((sec) => {
-              const inSection = fields.filter((f) => (sections ? f.section === sec.key : true) && (!f.showWhen || f.showWhen(values)));
-              if (!inSection.length) return null;
-              return (
-                <FormSection key={sec.key} title={sec.title || undefined} description={sec.description}>
-                  {inSection.map((f) => <FieldInput key={f.name} f={f} value={values[f.name] ?? ''} onChange={(v) => setValues({ ...values, [f.name]: v })} />)}
-                </FormSection>
-              );
-            })}
-          </FormCard>
+        <div className="drawer-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) void requestClose(); }}>
+          <aside ref={formRef} className="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); void requestClose(); } }}>
+            <form onSubmit={submit}>
+              <header className="drawer-head">
+                <span className="drawer-icon"><Icon name={icon} /></span>
+                <div>
+                  <h2 id="drawer-title">{editing ? `Edit ${String((editing as unknown as Row).name ?? singular)}` : `New ${singular}`}</h2>
+                  {formDescription && <p>{formDescription}</p>}
+                </div>
+                <button type="button" className="drawer-x" onClick={() => void requestClose()} aria-label="Close"><Icon name="x" /></button>
+              </header>
+              <div className="drawer-body">
+                {preview && <div className="drawer-preview" aria-live="polite">{preview(values, !!editing)}</div>}
+                {(sections ?? [{ key: '', title: '' }]).map((sec) => {
+                  const inSection = fields.filter((f) => (sections ? f.section === sec.key : true) && (!f.showWhen || f.showWhen(values)));
+                  if (!inSection.length) return null;
+                  return (
+                    <FormSection key={sec.key} title={sec.title || undefined} description={sec.description}>
+                      {inSection.map((f) => <FieldInput key={f.name} f={f} value={values[f.name] ?? ''} onChange={(v) => setValues({ ...values, [f.name]: v })} />)}
+                    </FormSection>
+                  );
+                })}
+              </div>
+              <footer className="drawer-foot">
+                <span className="drawer-note">{dirty ? 'Unsaved changes' : <><span className="req">*</span> required</>}</span>
+                <button type="button" className="secondary" onClick={() => void requestClose()}>Cancel</button>
+                <BusyButton busy={busy}><Icon name="check" />{busy ? 'Saving…' : editing ? 'Save changes' : `Save ${singular}`}</BusyButton>
+              </footer>
+            </form>
+          </aside>
         </div>
       )}
       <div className="list-head">
