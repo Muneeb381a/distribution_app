@@ -2,8 +2,10 @@
 
 import Link from 'next/link';
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import { BusyButton, Empty, SkeletonRows, useToast } from '@/components/Feedback';
-import { Icon } from '@/components/Icon';
+import { Avatar } from '@/components/Avatar';
+import { BusyButton, Empty, useToast } from '@/components/Feedback';
+import { Icon, type IconName } from '@/components/Icon';
+import { StatTiles } from '@/components/StatTiles';
 import { downloadCsv } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
 import { addDays, localDay, presetRange } from '@dist/shared';
@@ -19,17 +21,20 @@ const ENTITIES: [string, string][] = [
   ['PurchaseReturn', 'Purchase returns'], ['SupplierPayment', 'Supplier payments'], ['Supplier', 'Suppliers'], ['SupplierEmpties', 'Supplier empties'],
   ['StockTransfer', 'Stock transfers'], ['StockAdjustment', 'Stock adjustments'], ['Expense', 'Expenses'], ['PayrollRun', 'Payroll'],
   ['SalaryAdvance', 'Advances'], ['Attendance', 'Attendance'], ['Employee', 'Employees'], ['Location', 'Locations'], ['Category', 'Categories'],
-  ['AppUser', 'Users'], ['Role', 'Roles'],
+  ['AppUser', 'Users'], ['Role', 'Roles'], ['Holiday', 'Holidays'], ['Device', 'Devices'],
 ];
 const ONE: Record<string, string> = {
   Sale: 'Bill', Payment: 'Receipt', Customer: 'Customer', Product: 'Product', Purchase: 'Purchase', PurchaseReturn: 'Purchase return',
   SupplierPayment: 'Supplier payment', Supplier: 'Supplier', SupplierEmpties: 'Supplier empties', StockTransfer: 'Stock transfer',
   StockAdjustment: 'Stock adjustment', Expense: 'Expense', PayrollRun: 'Payroll', SalaryAdvance: 'Advance', Attendance: 'Attendance',
-  Employee: 'Employee', Location: 'Location', Category: 'Category', AppUser: 'User', Role: 'Role',
+  Employee: 'Employee', Location: 'Location', Category: 'Category', AppUser: 'User', Role: 'Role', Holiday: 'Holiday', Device: 'Device',
 };
-const ACTIONS: Record<string, [string, string]> = {
-  CREATE: ['Created', 'green'], UPDATE: ['Changed', 'blue'], CANCEL: ['Cancelled', 'red'], RUN: ['Finalised', 'teal'],
-  SET_PRICES: ['Prices set', 'blue'], credit_override: ['Credit override', 'amber'], CREDIT_OVERRIDE: ['Credit override', 'amber'], LOGIN: ['Signed in', ''], SET_RATES: ['Rates set', 'blue'], ATTENDANCE: ['Attendance', ''], IMPORT: ['Imported', 'amber'],
+const ACTIONS: Record<string, [string, string, IconName]> = {
+  CREATE: ['Created', 'green', 'plus'], UPDATE: ['Changed', 'blue', 'edit'], CANCEL: ['Cancelled', 'red', 'ban'], RUN: ['Finalised', 'teal', 'check'],
+  SET_PRICES: ['Prices set', 'blue', 'trend'], SET_RATES: ['Rates set', 'blue', 'trend'], credit_override: ['Credit override', 'amber', 'alert'], CREDIT_OVERRIDE: ['Credit override', 'amber', 'alert'],
+  LOGIN: ['Signed in', '', 'user'], ATTENDANCE: ['Attendance', '', 'employees'], IMPORT: ['Imported', 'amber', 'import'], DELIVER: ['Delivered', 'green', 'check'],
+  HOLIDAY_ADD: ['Holiday added', 'green', 'history'], HOLIDAY_REMOVE: ['Holiday removed', 'red', 'history'], WEEKLY_OFF: ['Weekly off set', 'blue', 'history'],
+  UPDATE_PASSWORD: ['Password changed', 'amber', 'lock'], STOCK_MARK_DAMAGED: ['Marked damaged', 'red', 'ban'],
 };
 const HREF: Record<string, (id: string) => string> = {
   Sale: (id) => `/sales/${id}`, Payment: (id) => `/receipts/${id}`, Customer: (id) => `/customers/${id}`, Supplier: (id) => `/suppliers/${id}`,
@@ -55,6 +60,16 @@ function nameOf(e: Entry): string {
   const o = asObj(e.afterJson) ?? asObj(e.beforeJson);
   const v = o && (o.billNo ?? o.receiptNo ?? o.purchaseNo ?? o.name ?? o.username ?? o.category ?? o.month);
   return typeof v === 'string' ? v : '';
+}
+
+/** "price 120 → 130 · name Coke → Cola +1 more" for a changed record. */
+function changeSummary(e: Entry): string {
+  const before = asObj(e.beforeJson), after = asObj(e.afterJson);
+  if (!before || !after) return '';
+  const changed = [...new Set([...Object.keys(before), ...Object.keys(after)])].filter((k) => !HIDDEN.has(k) && JSON.stringify(before[k]) !== JSON.stringify(after[k]));
+  if (!changed.length) return '';
+  const first = changed.slice(0, 2).map((k) => `${k} ${show(before[k])} → ${show(after[k])}`).join(' · ');
+  return changed.length > 2 ? `${first} · +${changed.length - 2} more` : first;
 }
 
 /** One line per item of a list (prices, rates, lines): "CARTON · rate 1350". */
@@ -164,16 +179,6 @@ export default function AuditPage() {
   const toggle = (id: string) => setOpen((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const choose = (p: Preset) => { setPreset(p); setRange(rangeOf(p)); };
 
-  // Group by day for scanning.
-  const days = useMemo(() => {
-    const out: { day: string; items: Entry[] }[] = [];
-    for (const r of rows ?? []) {
-      const d = localDay(new Date(r.at));
-      if (out[out.length - 1]?.day !== d) out.push({ day: d, items: [] });
-      out[out.length - 1].items.push(r);
-    }
-    return out;
-  }, [rows]);
   const dayLabel = (d: string) => {
     const t = localDay(new Date());
     if (d === t) return 'Today';
@@ -187,6 +192,36 @@ export default function AuditPage() {
   }
 
   const filtered = !!(entity || action || userId);
+  const [search, setSearch] = useState('');
+  const quick = entity === 'PayrollRun' ? 'payroll' : entity === 'AppUser' ? 'users' : action === 'CANCEL' ? 'cancel' : action === 'CREDIT_OVERRIDE' ? 'credit' : filtered ? 'custom' : 'all';
+  const QUICK: [string, string, { entity: string; action: string }][] = [
+    ['all', 'Everything', { entity: '', action: '' }],
+    ['cancel', 'Cancellations', { entity: '', action: 'CANCEL' }],
+    ['credit', 'Credit overrides', { entity: '', action: 'CREDIT_OVERRIDE' }],
+    ['payroll', 'Payroll', { entity: 'PayrollRun', action: '' }],
+    ['users', 'Users', { entity: 'AppUser', action: '' }],
+  ];
+
+  const text = search.trim().toLowerCase();
+  const shown = useMemo(() => (rows ?? []).filter((r) => !text || `${r.user?.username ?? 'system'} ${ONE[r.entity] ?? r.entity} ${nameOf(r)} ${(ACTIONS[r.action] ?? [r.action])[0]}`.toLowerCase().includes(text)), [rows, text]);
+  const shownDays = useMemo(() => {
+    const out: { day: string; items: Entry[] }[] = [];
+    for (const r of shown) {
+      const d = localDay(new Date(r.at));
+      if (out[out.length - 1]?.day !== d) out.push({ day: d, items: [] });
+      out[out.length - 1].items.push(r);
+    }
+    return out;
+  }, [shown]);
+  const stats = useMemo(() => {
+    const list = rows ?? [];
+    return {
+      people: new Set(list.map((r) => r.userId ?? 'system')).size,
+      made: list.filter((r) => r.action === 'CREATE' || r.action === 'UPDATE').length,
+      cancelled: list.filter((r) => r.action === 'CANCEL').length,
+      credit: list.filter((r) => r.action === 'CREDIT_OVERRIDE' || r.action === 'credit_override').length,
+    };
+  }, [rows]);
 
   return (
     <>
@@ -194,6 +229,13 @@ export default function AuditPage() {
         <div><h1>Audit log</h1><p>Every change, who made it and when. Entries cannot be edited or deleted.</p></div>
         <button className="secondary btn-icon" onClick={exportCsv} disabled={!rows?.length}><Icon name="download" />Export CSV</button>
       </div>
+
+      <StatTiles items={[
+        { label: 'Entries', value: rows ? `${rows.length}${more ? '+' : ''}` : '…', sub: from ? `${from} to ${to || 'now'}` : 'all time', icon: 'history' },
+        { label: 'People active', value: rows ? stats.people : '…', sub: 'who made changes', icon: 'users' },
+        { label: 'Cancellations', value: rows ? stats.cancelled : '…', sub: stats.cancelled ? 'bills, receipts, purchases…' : 'none in this period', icon: 'ban', tone: stats.cancelled ? 'red' : 'green' },
+        { label: 'Credit overrides', value: rows ? stats.credit : '…', sub: stats.credit ? 'sold over the credit limit' : 'none in this period', icon: 'alert', tone: stats.credit ? 'amber' : 'green' },
+      ]} />
 
       <div className="filters">
         <div className="chips">
@@ -207,6 +249,13 @@ export default function AuditPage() {
           <input type="date" aria-label="To" value={to} min={from || undefined} onChange={(e) => { setPreset('custom'); setRange([from, e.target.value]); }} />
         </div>
       </div>
+
+      <div className="list-head">
+        <div className="filter"><Icon name="search" /><input aria-label="Search the log" placeholder="Search person, record or action…" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
+        <div className="chips" role="group" aria-label="Quick filters">
+          {QUICK.map(([k, l, f]) => <button key={k} type="button" className={`chip${quick === k ? ' on' : ''}`} data-tone={k === 'cancel' ? 'red' : k === 'credit' ? 'amber' : undefined} aria-pressed={quick === k} onClick={() => { setEntity(f.entity); setAction(f.action); }}>{l}</button>)}
+        </div>
+      </div>
       <div className="list-head">
         <select aria-label="Record type" value={entity} onChange={(e) => setEntity(e.target.value)}>
           <option value="">All records</option>
@@ -214,7 +263,7 @@ export default function AuditPage() {
         </select>
         <select aria-label="Action" value={action} onChange={(e) => setAction(e.target.value)}>
           <option value="">All actions</option>
-          {Object.entries(ACTIONS).map(([v, [l]]) => <option key={v} value={v}>{l}</option>)}
+          {Object.entries(ACTIONS).filter(([v]) => v !== 'credit_override').map(([v, [l]]) => <option key={v} value={v}>{l}</option>)}
         </select>
         <select aria-label="User" value={userId} onChange={(e) => setUserId(e.target.value)}>
           <option value="">All users</option>
@@ -226,52 +275,50 @@ export default function AuditPage() {
       </div>
 
       {error && <p className="error">{error}</p>}
+      {!rows && !error && <div className="au-skel">{[0, 1, 2, 3, 4].map((i) => <span key={i} className="skeleton" style={{ height: 64 }} />)}</div>}
 
-      <table className="sticky-head audit-table">
-        <thead><tr><th style={{ width: 90 }}>Time</th><th>User</th><th>Action</th><th>Record</th><th><span className="sr-only">Details</span></th></tr></thead>
-        <tbody>
-          {!rows && !error && <SkeletonRows cols={5} rows={8} />}
-          {days.map(({ day, items }) => (
-            <Fragment key={day}>
-              <tr className="day-row"><td colSpan={5}>{dayLabel(day)} <span className="muted">· {items.length}{items.length === PAGE ? '+' : ''} entries</span></td></tr>
-              {items.map((e) => {
-                const [label, tone] = ACTIONS[e.action] ?? [e.action.toLowerCase(), ''];
-                const href = e.entityId && HREF[e.entity]?.(e.entityId);
-                const isOpen = open.has(e.id);
-                const name = nameOf(e);
-                return (
-                  <Fragment key={e.id}>
-                    <tr className={`row-link${isOpen ? ' open' : ''}`} tabIndex={0} aria-expanded={isOpen}
-                      onClick={(ev) => { if (!(ev.target as HTMLElement).closest('a')) toggle(e.id); }}
-                      onKeyDown={(ev) => { if ((ev.key === 'Enter' || ev.key === ' ') && ev.target === ev.currentTarget) { ev.preventDefault(); toggle(e.id); } }}>
-                      <td className="muted">{new Date(e.at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</td>
-                      <td>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                          <span className="avatar" style={{ width: 26, height: 26, fontSize: 10 }}>{(e.user?.username ?? 'sy').slice(0, 2)}</span>
-                          <span className="uname">{e.user?.username ?? <span className="muted">system</span>}</span>
-                        </span>
-                      </td>
-                      <td><span className={`badge ${tone}`}>{label}</span></td>
-                      <td>
-                        <b>{ONE[e.entity] ?? e.entity}</b>
-                        {name && <> · {href ? <Link href={href}>{name}</Link> : name}</>}
-                        {!name && href && <> · <Link href={href}>open</Link></>}
-                      </td>
-                      <td className="num"><span className="chev" aria-hidden="true"><Icon name={isOpen ? 'chevronDown' : 'chevronRight'} /></span></td>
-                    </tr>
-                    {isOpen && (
-                      <tr className="detail-row"><td colSpan={5}><Diff e={e} onlyChanged={onlyChanged} /></td></tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </Fragment>
-          ))}
-          {rows && !rows.length && (
-            <tr><td colSpan={5}><Empty icon="history" title="Nothing recorded" text={filtered || from ? 'Try clearing the filters or a longer date range.' : 'Changes show here as people use the app.'} /></td></tr>
-          )}
-        </tbody>
-      </table>
+      {shownDays.map(({ day, items }) => (
+        <section key={day} className="au-day">
+          <h2 className="au-day-head">{dayLabel(day)}<span className="count-pill">{items.length}</span></h2>
+          <ol className="au-list">
+            {items.map((e) => {
+              const [label, tone, icon] = ACTIONS[e.action] ?? [e.action.toLowerCase().replace(/_/g, ' '), '', 'file'];
+              const href = e.entityId && HREF[e.entity]?.(e.entityId);
+              const isOpen = open.has(e.id);
+              const name = nameOf(e);
+              const who = e.user?.username ?? 'system';
+              const sum = e.action === 'UPDATE' ? changeSummary(e) : '';
+              return (
+                <li key={e.id} className={`au-item${isOpen ? ' open' : ''}`}>
+                  <button type="button" className="au-row" aria-expanded={isOpen} onClick={() => toggle(e.id)}>
+                    <span className={`au-icon ${tone}`}><Icon name={icon} /></span>
+                    <span className="au-text">
+                      <span className="au-line"><b>{who}</b> <span className={`au-verb ${tone}`}>{label.toLowerCase()}</span> {(ONE[e.entity] ?? e.entity).toLowerCase()}{name && <> <b className="au-name">{name}</b></>}</span>
+                      {sum && <span className="au-sum">{sum}</span>}
+                    </span>
+                    <span className="au-time">{new Date(e.at).toLocaleTimeString('en-GB', { hour: 'numeric', minute: '2-digit', hour12: true })}</span>
+                    <span className="chev" aria-hidden="true"><Icon name={isOpen ? 'chevronDown' : 'chevronRight'} /></span>
+                  </button>
+                  {isOpen && (
+                    <div className="au-detail">
+                      <div className="au-meta">
+                        <span className="person"><Avatar user={{ username: who }} size={24} /><b>{who}</b></span>
+                        <span className="muted">{new Date(e.at).toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'medium' })}</span>
+                        {href && <Link href={href} className="au-open">Open record<Icon name="chevronRight" /></Link>}
+                      </div>
+                      <Diff e={e} onlyChanged={onlyChanged} />
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      ))}
+
+      {rows && !shown.length && (
+        <Empty icon="history" title="Nothing recorded" text={filtered || from || text ? 'Try clearing the search or filters, or a longer date range.' : 'Changes show here as people use the app.'} />
+      )}
       {more && (
         <div className="load-more">
           <span className="muted">Showing {rows?.length ?? 0} entries</span>
