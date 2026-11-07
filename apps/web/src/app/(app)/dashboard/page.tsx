@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Avatar } from '@/components/Avatar';
 import StackedColumns, { LINE_SERIES, type Point } from '@/components/Chart';
 import { LineBadge } from '@/components/Badge';
 import { Icon, type IconName } from '@/components/Icon';
 import { api, can, useUser } from '@/lib/api';
-import { formatQty, productLabel } from '@/lib/lookups';
+import { productLabel } from '@/lib/lookups';
 import { lineLabel, localDay, methodLabel, rupees } from '@dist/shared';
 
 interface ProfitRow { period: string; lines: Record<'BOTTLES' | 'RICE', { netSales: string }> }
@@ -29,15 +30,77 @@ interface Summary {
   recentSales: { id: string; billNo: string; date: string; net: string; paidNow: string; businessLine: string; customer: string | null }[];
 }
 
+const n = (v: string | number) => Number(v);
+const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
 
-function Stat({ label, value, sub, icon, tone = '', negative = false }: { label: string; value: string; sub?: string; icon: IconName; tone?: string; negative?: boolean }) {
+/** A small area line of a few values; takes its colour from the parent (currentColor). */
+function Spark({ values, height = 46 }: { values: number[]; height?: number }) {
+  const w = 220;
+  const max = Math.max(...values, 1);
+  const step = values.length > 1 ? w / (values.length - 1) : w;
+  const pts = values.map((v, i) => [i * step, height - 6 - (v / max) * (height - 14)] as const);
+  const line = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ');
+  const [lx, ly] = pts[pts.length - 1];
   return (
-    <div className="stat">
-      <div className="label"><span className={`icon ${tone}`}><Icon name={icon} /></span>{label}</div>
-      <div className={`value${negative ? ' neg' : ''}`}><small>Rs</small>{value}</div>
-      {sub && <div className="sub">{sub}</div>}
+    <svg className="dx-spark" viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" aria-hidden="true">
+      <path d={`${line} L${w} ${height} L0 ${height} Z`} className="dx-spark-area" />
+      <path d={line} className="dx-spark-line" />
+      <circle cx={lx} cy={ly} r="3.5" className="dx-spark-dot" />
+    </svg>
+  );
+}
+
+/** "12% more than yesterday" style change badge. */
+function Delta({ now, before, label }: { now: number; before: number; label: string }) {
+  if (before <= 0 && now <= 0) return <span className="dx-delta flat">No sales yet {label}</span>;
+  if (before <= 0) return <span className="dx-delta up"><Icon name="trend" />New {label}</span>;
+  const change = Math.round(((now - before) / before) * 100);
+  return (
+    <span className={`dx-delta ${change > 0 ? 'up' : change < 0 ? 'down' : 'flat'}`}>
+      <Icon name="trend" />{change === 0 ? `Same as ${label}` : `${Math.abs(change)}% ${change > 0 ? 'more' : 'less'} than ${label}`}
+    </span>
+  );
+}
+
+function Donut({ parts, size = 132 }: { parts: { label: string; value: number; color: string }[]; size?: number }) {
+  const total = parts.reduce((s, p) => s + p.value, 0);
+  const r = 46;
+  const c = 2 * Math.PI * r;
+  let offset = 0;
+  return (
+    <svg className="dx-donut" width={size} height={size} viewBox="0 0 120 120" role="img" aria-label={parts.map((p) => `${p.label} ${pct(p.value, total)}%`).join(', ')}>
+      <circle cx="60" cy="60" r={r} className="dx-donut-track" />
+      {total > 0 && parts.map((p) => {
+        const len = (p.value / total) * c;
+        const seg = <circle key={p.label} cx="60" cy="60" r={r} stroke={p.color} strokeDasharray={`${Math.max(0, len - 2)} ${c - Math.max(0, len - 2)}`} strokeDashoffset={-offset} className="dx-donut-seg" />;
+        offset += len;
+        return seg;
+      })}
+    </svg>
+  );
+}
+
+function CardTitle({ icon, title, to, linkLabel }: { icon: IconName; title: string; to?: string; linkLabel?: string }) {
+  return (
+    <div className="dx-title">
+      <span className="dx-title-icon"><Icon name={icon} /></span>
+      <h2>{title}</h2>
+      {to && <Link href={to} className="dx-title-link">{linkLabel ?? 'View all'}<Icon name="chevronRight" /></Link>}
     </div>
   );
+}
+
+function Kpi({ icon, tone, label, value, sub, to, bar, children }: { icon: IconName; tone?: 'green' | 'red' | 'amber'; label: string; value: ReactNode; sub?: ReactNode; to?: string; bar?: number; children?: ReactNode }) {
+  const body = (
+    <>
+      <span className="dx-kpi-top"><span className={`dx-kpi-icon${tone ? ` ${tone}` : ''}`}><Icon name={icon} /></span><span className="dx-kpi-label">{label}</span></span>
+      <span className="dx-kpi-value">{value}</span>
+      {bar !== undefined && <span className="meter dx-kpi-bar" aria-hidden="true"><span style={{ width: `${Math.min(100, Math.max(0, bar))}%` }} /></span>}
+      {sub && <span className="dx-kpi-sub">{sub}</span>}
+      {children}
+    </>
+  );
+  return to ? <Link href={to} className="card dx-kpi dx-kpi-link">{body}</Link> : <div className="card dx-kpi">{body}</div>;
 }
 
 function Welcome({ name, canSell }: { name: string; canSell: boolean }) {
@@ -94,168 +157,208 @@ export default function DashboardPage() {
   }, [collections]);
   const collectedTotal = byMethod.reduce((s, [, v]) => s + v, 0);
   const damaged = (stock ?? []).filter((r) => Number(r.damaged) > 0);
-  const low = data?.lowStock ?? [];
 
   if (!user) return null;
-  if (!allowed) return <Welcome name={user.username} canSell={can(user, 'SALE_CREATE')} />;
+  if (!allowed) return <Welcome name={user.displayName || user.username} canSell={can(user, 'SALE_CREATE')} />;
 
-  const todayLabel = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const now = new Date();
+  const hour = now.getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const todayLabel = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const first = (user.displayName || user.username).split(' ')[0];
+
+  const trend = data?.trend ?? [];
+  const sparkValues = trend.map((t) => n(t.sales));
+  const todaySales = data ? n(data.today.netSales) : 0;
+  const yesterdaySales = trend.length > 1 ? n(trend[trend.length - 2].sales) : 0;
+  const monthSales = data ? n(data.month.netSales) : 0;
+  const monthProfit = data ? n(data.month.netProfit) : 0;
+  const monthDays = monthChart.filter((d) => d.values.BOTTLES + d.values.RICE > 0);
+  const best = monthDays.reduce<Point | null>((b, d) => (!b || d.values.BOTTLES + d.values.RICE > b.values.BOTTLES + b.values.RICE ? d : b), null);
+  const avgDay = monthChart.length ? monthSales / monthChart.length : 0;
+  const receivable = data ? n(data.khata.receivable) : 0;
+  const payable = data ? n(data.payable) : 0;
+  const cash = data ? n(data.today.cashWithBills) + n(data.today.receipts) : 0;
+  const bottlesShare = data ? n(data.month.bottles) : 0;
+  const riceShare = data ? n(data.month.rice) : 0;
+  const low = data?.lowStock ?? [];
+
+  const attention: { icon: IconName; tone: 'red' | 'amber'; title: string; sub: string; to: string }[] = [];
+  if (data) {
+    if (data.khata.overLimit > 0) attention.push({ icon: 'alert', tone: 'red', title: `${data.khata.overLimit} customer${data.khata.overLimit === 1 ? '' : 's'} over their credit limit`, sub: 'Collect before giving more udhaar', to: '/khata' });
+    if (data.chequesDue.count > 0) attention.push({ icon: 'wallet', tone: 'amber', title: `${data.chequesDue.count} cheque${data.chequesDue.count === 1 ? '' : 's'} to deposit`, sub: `Rs ${rupees(data.chequesDue.amount)}, dated today or earlier`, to: '/cheques' });
+    if (data.lowStockCount > 0) attention.push({ icon: 'stock', tone: 'amber', title: `${data.lowStockCount} product${data.lowStockCount === 1 ? '' : 's'} to reorder`, sub: low.slice(0, 2).map((p) => productLabel(p)).join(', ') + (data.lowStockCount > 2 ? '…' : ''), to: '/stock?low=1' });
+    if (damaged.length > 0) attention.push({ icon: 'ban', tone: 'red', title: `${damaged.length} damaged stock line${damaged.length === 1 ? '' : 's'}`, sub: damaged.slice(0, 2).map((r) => productLabel({ name: r.productName, size: r.size })).join(', '), to: '/stock' });
+  }
 
   return (
-    <>
-      <div className="page-head">
-        <div><h1>Dashboard</h1><p>{todayLabel}</p></div>
-        <div className="quick">
-          {can(user, 'SALE_CREATE') && <Link href="/sales/new" className="primary"><Icon name="plus" />New bill</Link>}
-          {can(user, 'PAYMENT_RECORD') && <Link href="/khata"><Icon name="khata" />Receive payment</Link>}
-          {can(user, 'EXPENSE_MANAGE') && <Link href="/expenses"><Icon name="expenses" />Add expense</Link>}
-        </div>
-      </div>
-
+    <div className="dx">
       {error && <p className="error">{error}</p>}
-      {!data && !error && (
-        <div className="stats">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: 112 }} />)}</div>
-      )}
+
+      <section className="dx-hero">
+        <div className="dx-hero-main">
+          <div className="dx-hero-hello">
+            <Avatar user={user} size={46} className="dx-hero-pic" />
+            <div><p>{greeting}, {first}</p><span>{todayLabel}</span></div>
+          </div>
+          <div className="dx-hero-big">
+            <span className="dx-hero-label">Sales today</span>
+            <b>{data ? <><small>Rs</small>{rupees(data.today.netSales)}</> : <span className="skeleton" style={{ display: 'inline-block', width: 200, height: 44 }} />}</b>
+            {data && <Delta now={todaySales} before={yesterdaySales} label="yesterday" />}
+          </div>
+          <div className="dx-hero-actions">
+            {can(user, 'SALE_CREATE') && <Link href="/sales/new" className="dx-act lead"><Icon name="plus" />New bill</Link>}
+            {can(user, 'PAYMENT_RECORD') && <Link href="/khata" className="dx-act"><Icon name="khata" />Receive payment</Link>}
+            {can(user, 'EXPENSE_MANAGE') && <Link href="/expenses" className="dx-act"><Icon name="expenses" />Add expense</Link>}
+          </div>
+        </div>
+        <div className="dx-hero-side">
+          <div className="dx-hero-spark">{data ? <Spark values={sparkValues} height={70} /> : null}<span>Last 7 days{data ? ` · Rs ${rupees(trend.reduce((s, t) => s + n(t.sales), 0))}` : ''}</span></div>
+          <div className="dx-hero-stats">
+            <div><span>Bills</span><b>{data ? data.today.bills : '—'}</b></div>
+            <div><span>Cash in</span><b>{data ? rupees(cash) : '—'}</b></div>
+            <div><span>Udhaar given</span><b>{data ? rupees(data.today.udhaar) : '—'}</b></div>
+            <div><span>Profit</span><b className={data && n(data.today.netProfit) < 0 ? 'neg' : ''}>{data ? rupees(data.today.netProfit) : '—'}</b></div>
+          </div>
+        </div>
+      </section>
+
+      {!data && !error && <div className="dx-kpis">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: 132 }} />)}</div>}
 
       {data && (
         <>
-          <div className="stats">
-            <Stat label="Sales today" value={rupees(data.today.netSales)} sub={`${data.today.bills} bill${data.today.bills === 1 ? '' : 's'}`} icon="sales" />
-            <Stat label="Cash received" value={rupees(Number(data.today.cashWithBills) + Number(data.today.receipts))} sub={`${rupees(data.today.receipts)} from old khata`} icon="wallet" tone="green" />
-            <Stat label="Udhaar given today" value={rupees(data.today.udhaar)} sub="unpaid part of today's bills" icon="khata" tone="amber" />
-            <Stat label="Profit today" value={rupees(data.today.netProfit)} sub={`after ${rupees(data.today.expenses)} expenses`} icon="trend" tone={Number(data.today.netProfit) < 0 ? 'red' : 'green'} negative={Number(data.today.netProfit) < 0} />
+          <div className="dx-kpis">
+            <Kpi icon="trend" tone={monthProfit < 0 ? 'red' : 'green'} label="Net profit this month" value={<><small>Rs</small>{rupees(monthProfit)}</>} bar={pct(Math.max(0, monthProfit), monthSales)} sub={monthProfit < 0 ? 'Expenses are higher than the profit so far' : `${pct(monthProfit, monthSales)}% margin on Rs ${rupees(monthSales)} sales`} to="/reports" />
+            <Kpi icon="customers" tone="amber" label="Customers owe us" value={<><small>Rs</small>{rupees(receivable)}</>} sub={`${data.khata.customersOwing} customer${data.khata.customersOwing === 1 ? '' : 's'}${data.khata.overLimit ? ` · ${data.khata.overLimit} over limit` : ''}`} to="/khata" />
+            <Kpi icon="suppliers" tone="red" label="We owe suppliers" value={<><small>Rs</small>{rupees(payable)}</>} sub="open supplier balances" to="/suppliers" />
+            <Kpi icon="wallet" tone="green" label="Collected today" value={<><small>Rs</small>{rupees(collectedTotal)}</>} sub={byMethod.length ? byMethod.map(([m, v]) => `${methodLabel(m)} ${rupees(v)}`).join(' · ') : 'No receipts yet today'}>
+              {byMethod.length > 0 && <span className="method-bar" aria-hidden="true">{byMethod.map(([m, v], i) => <span key={m} style={{ flex: v, background: SERIES[i % 4] }} />)}</span>}
+            </Kpi>
           </div>
 
-          <div className="dash-grid">
-            <div className="card">
-              <div className="card-head"><h2>Sales this month</h2><Link href="/reports">Reports</Link></div>
+          <div className="dx-row dx-row-main">
+            <section className="card dx-card">
+              <CardTitle icon="reports" title="Sales this month" to="/reports" linkLabel="Reports" />
+              <div className="dx-chart-stats">
+                <div><span>Month so far</span><b>Rs {rupees(monthSales)}</b></div>
+                <div><span>Average a day</span><b>Rs {rupees(Math.round(avgDay))}</b></div>
+                <div><span>Best day</span><b>{best ? `${best.label} ${now.toLocaleDateString('en-GB', { month: 'short' })}` : '—'}</b></div>
+                <div><span>Bills</span><b>{data.month.bills}</b></div>
+              </div>
               {!month ? <span className="skeleton" style={{ display: 'block', height: 250 }} />
-                : <StackedColumns data={monthChart} series={LINE_SERIES} caption="Net sales per day this month, bottles and rice" highlight={String(new Date().getDate())} />}
-              <p className="muted chart-note">Last 7 days: Rs {rupees(data.trend.reduce((s, t) => s + Number(t.sales), 0))} · {data.trend.reduce((s, t) => s + t.bills, 0)} bills</p>
-            </div>
+                : <StackedColumns data={monthChart} series={LINE_SERIES} caption="Net sales per day this month, bottles and rice" highlight={String(now.getDate())} />}
+            </section>
 
-            <div className="card">
-              <div className="card-head"><h2>Profit by line</h2><Link href="/reports">Reports</Link></div>
-              <table className="mini">
-                <thead><tr><th /><th className="num">Today</th><th className="num">This month</th></tr></thead>
-                <tbody>
-                  <tr><td className="muted">Net sales</td><td className="num">{rupees(data.today.netSales)}</td><td className="num">{rupees(data.month.netSales)}</td></tr>
-                  <tr><td><LineBadge line="BOTTLES" /> profit <small className="muted">on {rupees(data.month.bottles)}</small></td><td className="num"><b className={Number(data.today.bottlesProfit) < 0 ? 'error' : ''}>{rupees(data.today.bottlesProfit)}</b></td><td className="num"><b className={Number(data.month.bottlesProfit) < 0 ? 'error' : ''}>{rupees(data.month.bottlesProfit)}</b></td></tr>
-                  <tr><td><LineBadge line="RICE" /> profit <small className="muted">on {rupees(data.month.rice)}</small></td><td className="num"><b className={Number(data.today.riceProfit) < 0 ? 'error' : ''}>{rupees(data.today.riceProfit)}</b></td><td className="num"><b className={Number(data.month.riceProfit) < 0 ? 'error' : ''}>{rupees(data.month.riceProfit)}</b></td></tr>
-                  <tr><td className="muted">Both together</td><td className="num">{rupees(data.today.grossProfit)}</td><td className="num">{rupees(data.month.grossProfit)}</td></tr>
-                  <tr><td className="muted">Expenses</td><td className="num">{rupees(data.today.expenses)}</td><td className="num">{rupees(data.month.expenses)}</td></tr>
-                  <tr><td><strong>Net profit</strong></td><td className={`num ${Number(data.today.netProfit) < 0 ? 'error' : 'ok'}`}><strong>{rupees(data.today.netProfit)}</strong></td><td className={`num ${Number(data.month.netProfit) < 0 ? 'error' : 'ok'}`}><strong>{rupees(data.month.netProfit)}</strong></td></tr>
-                </tbody>
-              </table>
-              <p className="muted chart-note">Expenses are not split between the lines; they come off the combined profit.</p>
-            </div>
-          </div>
-
-          <div className="stats" style={{ marginTop: 20 }}>
-            <Stat label="Customers owe us" value={rupees(data.khata.receivable)} sub={`${data.khata.customersOwing} customers${data.khata.overLimit ? ` · ${data.khata.overLimit} over limit` : ''}`} icon="customers" tone="amber" />
-            <Stat label="We owe suppliers" value={rupees(data.payable)} sub="open supplier balances" icon="suppliers" tone="red" />
-            {data.chequesDue.count > 0 && (
-              <Link href="/cheques" className="stat stat-link">
-                <div className="label"><span className="icon amber"><Icon name="wallet" /></span>Cheques to deposit</div>
-                <div className="value"><small>Rs</small>{rupees(data.chequesDue.amount)}</div>
-                <div className="sub">{data.chequesDue.count} dated today or earlier</div>
-              </Link>
-            )}
-            <div className="stat">
-              <div className="label"><span className="icon green"><Icon name="wallet" /></span>Collected today</div>
-              <div className="value"><small>Rs</small>{rupees(collectedTotal)}</div>
-              <div className="method-bar" aria-hidden="true">
-                {byMethod.map(([m, v], i) => <span key={m} style={{ flex: v, background: SERIES[i % 4] }} />)}
-              </div>
-              <div className="sub method-list">
-                {byMethod.length ? byMethod.map(([m, v], i) => <span key={m}><i style={{ background: SERIES[i % 4] }} />{methodLabel(m)} {rupees(v)}</span>) : 'No receipts yet today'}
-              </div>
-            </div>
-          </div>
-
-          {stock && (low.length > 0 || damaged.length > 0) && data && (
-            <div className="card alert-card">
-              <div className="card-head">
-                <h2><Icon name="alert" /> Stock needs attention</h2>
-                <Link href="/stock">Open stock</Link>
-              </div>
-              <div className="alert-cols">
-                <div>
-                  <h3>Reorder now <span className="badge amber">{data.lowStockCount}</span></h3>
-                  <ul className="list">
-                    {low.slice(0, 5).map((r) => (
-                      <li key={r.productId}>
-                        <span className="who-line">
-                          <Link href={`/stock/history?product=${r.productId}`}><b>{productLabel(r)}</b></Link>
-                          <span>{r.where.length ? r.where.map((w) => w.name).join(', ') : 'out of stock everywhere'} · reorder at {formatQty(r.reorderLevel, r.units, r.baseUnit)}</span>
-                        </span>
-                        <span className={`amt${Number(r.onHand) <= 0 ? ' error' : ''}`}>{formatQty(r.onHand, r.units, r.baseUnit)}</span>
-                      </li>
-                    ))}
-                    {!low.length && <li className="muted">Nothing is at its reorder level.</li>}
-                  </ul>
-                  {data.lowStockCount > 5 && <p className="muted" style={{ margin: '8px 0 0', fontSize: 13 }}><Link href="/stock?low=1">+{data.lowStockCount - 5} more</Link></p>}
+            <section className="card dx-card">
+              <CardTitle icon="products" title="Bottles and rice" to="/reports" linkLabel="Reports" />
+              <div className="dx-mix">
+                <div className="dx-donut-wrap">
+                  <Donut parts={[{ label: 'Bottles', value: bottlesShare, color: 'var(--series-1)' }, { label: 'Rice', value: riceShare, color: 'var(--series-2)' }]} />
+                  <span className="dx-donut-center"><b>{pct(Math.max(bottlesShare, riceShare), bottlesShare + riceShare)}%</b><span>{bottlesShare >= riceShare ? 'bottles' : 'rice'}</span></span>
                 </div>
-                <div>
-                  <h3>Damaged stock <span className="badge red">{damaged.length}</span></h3>
-                  <ul className="list">
-                    {damaged.slice(0, 5).map((r) => (
-                      <li key={`${r.productId}|${r.locationId}`}>
-                        <span className="who-line"><b>{productLabel({ name: r.productName, size: r.size })}</b><span>{r.locationName}</span></span>
-                        <span className="amt">{formatQty(r.damaged, r.units, r.baseUnit)}</span>
-                      </li>
-                    ))}
-                    {!damaged.length && <li className="muted">No damaged stock waiting.</li>}
-                  </ul>
-                </div>
-              </div>
-              <p className="muted" style={{ margin: '12px 0 0', fontSize: 12.5 }}>Reorder levels are set per product (all locations together) on the Products page.</p>
-            </div>
-          )}
-
-          <div className="dash-grid">
-            <div className="card">
-              <div className="card-head"><h2>Recent bills</h2><Link href="/sales">View all</Link></div>
-              {data.recentSales.length ? (
-                <ul className="list">
-                  {data.recentSales.map((s) => (
-                    <li key={s.id}>
-                      <div className="who-line">
-                        <b><Link href={`/sales/${s.id}`}>{s.billNo}</Link></b>
-                        <span>{s.customer ?? 'Walk-in'} · {s.date.slice(0, 10)} · {lineLabel(s.businessLine)}</span>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div className="amt">Rs {rupees(s.net)}</div>
-                        {Number(s.net) > Number(s.paidNow) ? <span className="badge amber">Udhaar {rupees(Number(s.net) - Number(s.paidNow))}</span> : <span className="badge green">Paid</span>}
-                      </div>
+                <ul className="dx-legend">
+                  {[['BOTTLES', 'Bottles', bottlesShare, n(data.month.bottlesProfit), 'var(--series-1)'], ['RICE', 'Rice', riceShare, n(data.month.riceProfit), 'var(--series-2)']].map(([key, , sales, profit, color]) => (
+                    <li key={key as string}>
+                      <span className="dx-legend-top"><i style={{ background: color as string }} /><LineBadge line={key as string} /><b>Rs {rupees(sales as number)}</b></span>
+                      <span className="dx-legend-sub">{pct(sales as number, bottlesShare + riceShare)}% of sales · profit <b className={(profit as number) < 0 ? 'error' : 'ok'}>Rs {rupees(profit as number)}</b></span>
                     </li>
                   ))}
                 </ul>
-              ) : <div className="empty">No bills yet.{can(user, 'SALE_CREATE') && <> <Link href="/sales/new">Create the first one</Link>.</>}</div>}
-            </div>
+              </div>
+              <div className="dx-mini-table">
+                <div><span>Combined profit</span><b>Rs {rupees(data.month.grossProfit)}</b></div>
+                <div><span>Expenses</span><b>Rs {rupees(data.month.expenses)}</b></div>
+                <div className="total"><span>Net profit</span><b className={monthProfit < 0 ? 'error' : 'ok'}>Rs {rupees(monthProfit)}</b></div>
+              </div>
+            </section>
+          </div>
 
-            <div className="card">
-              <div className="card-head"><h2>Biggest balances</h2><Link href="/khata">Khata</Link></div>
-              {data.khata.topDebtors.length ? (
-                <ul className="list">
-                  {data.khata.topDebtors.map((c) => (
-                    <li key={c.id}>
-                      <div className="who-line">
-                        <b><Link href={`/khata/${c.id}`}>{c.name}</Link></b>
-                        <span>{[c.shopName, c.area].filter(Boolean).join(' · ') || '—'}</span>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div className="amt">Rs {rupees(c.balance)}</div>
-                        {c.overLimit && <span className="badge red">Over limit</span>}
-                      </div>
+          <div className="dx-row dx-row-three">
+            <section className="card dx-card">
+              <CardTitle icon="alert" title="Needs attention" />
+              {attention.length ? (
+                <ul className="dx-attn">
+                  {attention.map((a) => (
+                    <li key={a.to + a.title}>
+                      <Link href={a.to}>
+                        <span className={`dx-attn-icon ${a.tone}`}><Icon name={a.icon} /></span>
+                        <span className="dx-attn-text"><b>{a.title}</b><span>{a.sub}</span></span>
+                        <Icon name="chevronRight" />
+                      </Link>
                     </li>
                   ))}
+                </ul>
+              ) : (
+                <div className="dx-allgood"><span><Icon name="check" /></span><b>All clear</b><p>No credit, cheque or stock problems right now.</p></div>
+              )}
+            </section>
+
+            <section className="card dx-card">
+              <CardTitle icon="wallet" title="Money position" />
+              <div className="dx-position">
+                <div className="dx-pos-row">
+                  <span className="dx-pos-label"><i className="amber" />To receive from customers</span>
+                  <b>Rs {rupees(receivable)}</b>
+                  <span className="meter" aria-hidden="true"><span style={{ width: `${pct(receivable, receivable + payable)}%`, background: 'var(--warn)' }} /></span>
+                </div>
+                <div className="dx-pos-row">
+                  <span className="dx-pos-label"><i className="red" />To pay suppliers</span>
+                  <b>Rs {rupees(payable)}</b>
+                  <span className="meter" aria-hidden="true"><span style={{ width: `${pct(payable, receivable + payable)}%`, background: 'var(--danger)' }} /></span>
+                </div>
+                <div className="dx-pos-net">
+                  <span>Net outstanding</span>
+                  <b className={receivable - payable < 0 ? 'error' : 'ok'}>{receivable - payable < 0 ? '−' : ''}Rs {rupees(Math.abs(receivable - payable))}</b>
+                  <p>{receivable >= payable ? 'Customers owe you more than you owe suppliers.' : 'You owe suppliers more than customers owe you.'}</p>
+                </div>
+              </div>
+            </section>
+
+            <section className="card dx-card">
+              <CardTitle icon="khata" title="Biggest balances" to="/khata" linkLabel="Khata" />
+              {data.khata.topDebtors.length ? (
+                <ul className="dx-people">
+                  {data.khata.topDebtors.slice(0, 5).map((c) => {
+                    const top = n(data.khata.topDebtors[0].balance) || 1;
+                    return (
+                      <li key={c.id}>
+                        <Link href={`/khata/${c.id}`} className="dx-person">
+                          <Avatar user={{ username: c.name }} size={34} />
+                          <span className="dx-person-text"><b>{c.name}</b><span className="meter" aria-hidden="true"><span className={c.overLimit ? 'over' : ''} style={{ width: `${pct(n(c.balance), top)}%`, background: c.overLimit ? 'var(--danger)' : 'var(--warn)' }} /></span></span>
+                          <span className="dx-person-amt">Rs {rupees(c.balance)}{c.overLimit && <small>Over limit</small>}</span>
+                        </Link>
+                      </li>
+                    );
+                  })}
                 </ul>
               ) : <div className="empty">Nobody owes anything.</div>}
-            </div>
+            </section>
           </div>
+
+          <section className="card dx-card">
+            <CardTitle icon="sales" title="Recent bills" to="/sales" />
+            {data.recentSales.length ? (
+              <div className="table-wrap">
+                <table className="dx-table">
+                  <thead><tr><th>Bill</th><th>Customer</th><th>Line</th><th className="num">Total</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {data.recentSales.map((s) => (
+                      <tr key={s.id}>
+                        <td><Link className="bill-no" href={`/sales/${s.id}`}>{s.billNo}</Link><span className="dx-date">{s.date.slice(0, 10)}</span></td>
+                        <td>{s.customer ? <span className="person"><Avatar user={{ username: s.customer }} size={28} /><b>{s.customer}</b></span> : <span className="muted">Walk-in</span>}</td>
+                        <td>{lineLabel(s.businessLine)}</td>
+                        <td className="num"><b>Rs {rupees(s.net)}</b></td>
+                        <td>{n(s.net) > n(s.paidNow) ? <span className="badge amber">Udhaar {rupees(n(s.net) - n(s.paidNow))}</span> : <span className="badge green">Paid</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : <div className="empty">No bills yet.{can(user, 'SALE_CREATE') && <> <Link href="/sales/new">Create the first one</Link>.</>}</div>}
+          </section>
+          <p className="dx-foot muted">Reorder levels are set per product on the Products page. Expenses come off the combined profit, not each line.</p>
         </>
       )}
-    </>
+    </div>
   );
 }

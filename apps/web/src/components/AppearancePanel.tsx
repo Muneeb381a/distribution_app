@@ -27,6 +27,18 @@ export default function AppearancePanel() {
       </section>
 
       <section className="card">
+        <div className="card-head"><h2>Colour style</h2><span className="muted look-note">Buttons, sidebar, tiles and badges</span></div>
+        <div className="tiles" role="radiogroup" aria-label="Colour style">
+          {FILLS.map((x) => (
+            <button key={x.id} type="button" role="radio" aria-checked={look.fill === x.id} className={`look-tile${look.fill === x.id ? ' on' : ''}`} onClick={() => setLook({ fill: x.id })}>
+              <span className="mini-stage"><span className="mini-fill" data-kind={x.id}><i /><i /></span></span>
+              <b>{x.name}</b><span>{x.hint}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="card">
         <div className="card-head"><h2>Accent colour</h2><span className="muted look-note">Buttons, links, highlights</span></div>
         <div className="swatches" role="radiogroup" aria-label="Accent colour">
           <button type="button" role="radio" aria-checked={!look.accent} title="Default teal" className={`swatch${!look.accent ? ' on' : ''}`} style={{ background: '#0f766e' }} onClick={() => setLook({ accent: null })}>
@@ -59,18 +71,6 @@ export default function AppearancePanel() {
             <input type="color" aria-label="Custom sidebar colour" value={look.side ?? SIDES[0].hex} onChange={(e) => setLook({ side: e.target.value })} />
             <Icon name="plus" />
           </label>
-        </div>
-      </section>
-
-      <section className="card">
-        <div className="card-head"><h2>Colour style</h2><span className="muted look-note">Buttons, sidebar, tiles and badges</span></div>
-        <div className="tiles" role="radiogroup" aria-label="Colour style">
-          {FILLS.map((x) => (
-            <button key={x.id} type="button" role="radio" aria-checked={look.fill === x.id} className={`look-tile${look.fill === x.id ? ' on' : ''}`} onClick={() => setLook({ fill: x.id })}>
-              <span className="mini-stage"><span className="mini-fill" data-kind={x.id}><i /><i /></span></span>
-              <b>{x.name}</b><span>{x.hint}</span>
-            </button>
-          ))}
         </div>
       </section>
 
