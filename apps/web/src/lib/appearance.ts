@@ -27,6 +27,7 @@ export const ACCENTS: { name: string; hex: string }[] = [
 ];
 
 export const SIDES: { name: string; hex: string }[] = [
+  { name: 'Clean', hex: '#f3f5f8' },
   { name: 'Indigo', hex: '#3b3bb8' },
   { name: 'Royal blue', hex: '#1d4fd8' },
   { name: 'Ocean', hex: '#0b6bb5' },
@@ -90,6 +91,8 @@ function bundle(look: Look) {
   if (look.side) {
     vars['--side'] = look.side;
     attrs['data-side-tone'] = lightness(look.side) > 0.6 ? 'light' : 'dark';
+  } else {
+    attrs['data-side-tone'] = 'dark'; // the default Ink sidebar
   }
   const lightSide = !!look.side && lightness(look.side) > 0.6;
   if (look.accent) vars['--side-accent'] = lightSide ? look.accent : lighten(look.accent, 0.4);

@@ -28,7 +28,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${sans.variable} ${urdu.variable}`} suppressHydrationWarning>
+    <html lang="en" data-side-tone="dark" className={`${sans.variable} ${urdu.variable}`} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT + LOOK_BOOT }} />
       </head>

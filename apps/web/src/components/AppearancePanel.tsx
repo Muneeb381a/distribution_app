@@ -59,7 +59,7 @@ export default function AppearancePanel() {
       <section className="card">
         <div className="card-head"><h2>Sidebar colour</h2><span className="muted look-note">The menu on the left</span></div>
         <div className="swatches" role="radiogroup" aria-label="Sidebar colour">
-          <button type="button" role="radio" aria-checked={!look.side} title="Clean (default)" className={`swatch side${!look.side ? ' on' : ''}`} style={{ '--c': '#ffffff' } as React.CSSProperties} onClick={() => setLook({ side: null })}>
+          <button type="button" role="radio" aria-checked={!look.side} title="Ink (default)" className={`swatch side${!look.side ? ' on' : ''}`} style={{ '--c': '#0f1b2d' } as React.CSSProperties} onClick={() => setLook({ side: null })}>
             {!look.side && <Icon name="check" />}
           </button>
           {SIDES.map((c) => (
@@ -68,7 +68,7 @@ export default function AppearancePanel() {
             </button>
           ))}
           <label className="swatch side custom" title="Pick any colour">
-            <input type="color" aria-label="Custom sidebar colour" value={look.side ?? SIDES[0].hex} onChange={(e) => setLook({ side: e.target.value })} />
+            <input type="color" aria-label="Custom sidebar colour" value={look.side ?? '#0f1b2d'} onChange={(e) => setLook({ side: e.target.value })} />
             <Icon name="plus" />
           </label>
         </div>
