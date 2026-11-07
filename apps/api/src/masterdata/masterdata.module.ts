@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Get, Module, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { PartialType } from '@nestjs/mapped-types';
 import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsEnum, IsIn, IsNumber, IsOptional, IsString, IsUUID, Max, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Max, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { CustomerType, EmployeeType, LocationType, SupplierType, UnitName } from '@prisma/client';
 import { PrismaService } from '../prisma.service.js';
 import { AuditService } from '../audit/audit.module.js';
@@ -58,6 +58,8 @@ class EmployeeDto {
   @IsOptional() @IsNumber() @Min(0) dailyWage?: number;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100) commissionPercent?: number;
   @IsOptional() @IsString() joinDate?: string;
+  /** 0 = Sunday .. 6 = Saturday; null = no fixed day off. */
+  @IsOptional() @ValidateIf((_, v) => v !== null) @IsInt() @Min(0) @Max(6) weeklyOff?: number | null;
 }
 class UpdateEmployeeDto extends PartialType(EmployeeDto) {
   @IsOptional() @IsBoolean() isActive?: boolean;
@@ -176,7 +178,7 @@ class MasterDataController {
   /** Names only, for dropdowns (e.g. choosing a salesman). No pay data, so no special permission. */
   @Get('employees/options')
   employeeOptions() {
-    return this.prisma.employee.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } });
+    return this.prisma.employee.findMany({ where: { isActive: true }, select: { id: true, name: true, type: true, weeklyOff: true }, orderBy: { name: 'asc' } });
   }
 
   @Get('employees') @RequirePermissions('USER_MANAGE')

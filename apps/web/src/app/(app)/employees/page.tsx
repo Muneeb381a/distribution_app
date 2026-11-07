@@ -6,7 +6,7 @@ import CrudPage from '@/components/CrudPage';
 import { can, useUser } from '@/lib/api';
 import { money } from '@dist/shared';
 
-interface Employee { id: string; isActive: boolean; name: string; phone: string | null; type: string; monthlySalary: string | null; dailyWage: string | null; commissionPercent: string | null }
+interface Employee { id: string; weeklyOff: number | null; isActive: boolean; name: string; phone: string | null; type: string; monthlySalary: string | null; dailyWage: string | null; commissionPercent: string | null }
 
 export default function EmployeesPage() {
   const canPayroll = can(useUser(), 'PAYROLL_MANAGE');
@@ -56,6 +56,7 @@ export default function EmployeesPage() {
             return canPayroll ? <Link className="plain" href={`/employees/${r.id}`}>{who}</Link> : who;
           },
         },
+        { header: 'Weekly off', render: (r) => (r.weeklyOff != null ? <span className="badge">{['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][r.weeklyOff]}</span> : <span className="muted">—</span>) },
         { header: 'Pay type', value: (r) => r.type, render: (r) => <span className={`badge ${r.type === 'DAILY' ? 'amber' : 'blue'}`}>{r.type === 'DAILY' ? 'Daily wage' : 'Monthly salary'}</span> },
         { header: 'Pay', num: true, value: (r) => r.monthlySalary ?? r.dailyWage, render: (r) => <span className="pay"><b>Rs {money(r.monthlySalary ?? r.dailyWage ?? 0)}</b><span>{r.type === 'DAILY' ? 'per day' : 'per month'}</span></span> },
         { header: 'Commission', num: true, render: (r) => (r.commissionPercent ? <span className="badge teal">{Number(r.commissionPercent)}% of sales</span> : <span className="muted">—</span>) },

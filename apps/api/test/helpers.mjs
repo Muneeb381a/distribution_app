@@ -30,6 +30,7 @@ export async function boot() {
       post: (p, b = {}) => call('POST', p, b),
       put: (p, b) => call('PUT', p, b),
       patch: (p, b) => call('PATCH', p, b),
+      delete: (p) => call('DELETE', p),
     };
   };
 

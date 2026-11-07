@@ -16,7 +16,7 @@ interface Slip {
   details: { attendance?: Record<string, number>; salesNet?: string; commissionPercent?: string | null } | null;
 }
 
-const ATT: Record<string, string> = { present: 'present', absent: 'absent', halfday: 'half day', half_day: 'half day', paidleave: 'paid leave', paid_leave: 'paid leave', unpaidleave: 'unpaid leave', unpaid_leave: 'unpaid leave' };
+const ATT: Record<string, string> = { present: 'present', absent: 'absent', halfday: 'half day', half_day: 'half day', paidleave: 'paid leave', paid_leave: 'paid leave', unpaidleave: 'unpaid leave', unpaid_leave: 'unpaid leave', holidays: 'holiday day(s), not cut', weeklyoffs: 'weekly off day(s), not cut', workedonoff: 'worked on a day off' };
 /** "22 present · 2 absent", leaving out zeros. */
 function attendanceText(a: Record<string, number>) {
   const parts = Object.entries(a).filter(([, v]) => Number(v) > 0).map(([k, v]) => `${v} ${ATT[k.toLowerCase()] ?? k.toLowerCase()}`);

@@ -1,6 +1,6 @@
-import { BadRequestException, Body, ConflictException, Controller, Get, Injectable, Module, NotFoundException, Param, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, Injectable, Module, NotFoundException, Param, Post, Put, Query } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsEnum, IsISO8601, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Matches, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsEnum, IsInt, IsISO8601, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateIf, ValidateNested } from 'class-validator';
 import { AttendanceStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service.js';
 import { AuditService } from '../audit/audit.module.js';
@@ -63,6 +63,23 @@ class AttendanceEntryDto {
   @IsUUID() employeeId: string;
   @IsEnum(AttendanceStatus) status: AttendanceStatus;
 }
+class HolidayDto {
+  @IsString() @MinLength(2) @MaxLength(80) name: string;
+  /** First day (YYYY-MM-DD). */
+  @IsString() date: string;
+  /** Last day for a holiday of several days (inclusive); leave out for one day. */
+  @IsOptional() @IsString() toDate?: string;
+  /** Leave empty for everyone. */
+  @IsOptional() @IsArray() @ArrayMaxSize(200) @IsUUID('all', { each: true }) employeeIds?: string[];
+}
+
+class WeeklyOffDto {
+  /** 0 = Sunday .. 6 = Saturday; null clears it. */
+  @ValidateIf((_, v) => v !== null) @IsInt() @Min(0) @Max(6) weeklyOff: number | null;
+  /** Leave out to set it for every active employee. */
+  @IsOptional() @IsArray() @ArrayMaxSize(200) @IsUUID('all', { each: true }) employeeIds?: string[];
+}
+
 class AttendanceDto {
   @IsISO8601() date: string;
   @IsArray() @ArrayMaxSize(200) @ValidateNested({ each: true }) @Type(() => AttendanceEntryDto) entries: AttendanceEntryDto[];
@@ -122,6 +139,22 @@ export function planCuts(open: OpenAdvance[], available: Dec, overrides?: { adva
   return cuts;
 }
 
+/**
+ * The days of a month an employee does not have to work: holidays that cover them, and their weekly day off.
+ * A holiday wins over the weekly off when both fall on the same day.
+ */
+export function offDays(emp: { id: string; weeklyOff: number | null }, holidays: { date: Date; name: string; employeeIds: string[] }[], start: Date, end: Date) {
+  const out = new Map<string, { kind: 'HOLIDAY' | 'WEEKLY_OFF'; name: string | null }>();
+  const mine = new Map(holidays.filter((h) => !h.employeeIds.length || h.employeeIds.includes(emp.id)).map((h) => [h.date.toISOString().slice(0, 10), h.name]));
+  for (let t = start.getTime(); t <= end.getTime(); t += 86_400_000) {
+    const d = new Date(t);
+    const key = d.toISOString().slice(0, 10);
+    if (mine.has(key)) out.set(key, { kind: 'HOLIDAY', name: mine.get(key)! });
+    else if (emp.weeklyOff != null && d.getUTCDay() === emp.weeklyOff) out.set(key, { kind: 'WEEKLY_OFF', name: null });
+  }
+  return out;
+}
+
 @Injectable()
 export class PayrollService {
   constructor(private prisma: PrismaService) {}
@@ -132,16 +165,21 @@ export class PayrollService {
     const emp = await db.employee.findUnique({ where: { id: employeeId } });
     if (!emp) throw new NotFoundException('Unknown employee');
 
-    const att = await db.attendance.groupBy({
-      by: ['status'],
-      where: { employeeId, date: { gte: start, lte: end } },
-      _count: true,
-    });
-    const days = (s: AttendanceStatus) => att.find((a) => a.status === s)?._count ?? 0;
-    const present = days('PRESENT');
-    const half = days('HALF_DAY');
-    const paidLeave = days('PAID_LEAVE');
-    const absentDays = days('ABSENT') + days('UNPAID_LEAVE') + half * 0.5;
+    const [rows, holidays] = await Promise.all([
+      db.attendance.findMany({ where: { employeeId, date: { gte: start, lte: end } }, select: { date: true, status: true } }),
+      db.holiday.findMany({ where: { date: { gte: start, lte: end } } }),
+    ]);
+    const off = offDays(emp, holidays, start, end);
+    // A day off is never an absence: marks on it cannot cut a monthly salary, and a daily wage is only paid if they worked.
+    const working = rows.filter((r) => !off.has(r.date.toISOString().slice(0, 10)));
+    const count = (list: typeof rows, s: AttendanceStatus) => list.filter((r) => r.status === s).length;
+    const present = count(rows, 'PRESENT');
+    const half = count(rows, 'HALF_DAY');
+    const paidLeave = count(rows, 'PAID_LEAVE');
+    const absentDays = count(working, 'ABSENT') + count(working, 'UNPAID_LEAVE') + count(working, 'HALF_DAY') * 0.5;
+    const holidayDays = [...off.values()].filter((o) => o.kind === 'HOLIDAY').length;
+    const weeklyOffDays = off.size - holidayDays;
+    const workedOnOff = rows.filter((r) => off.has(r.date.toISOString().slice(0, 10)) && (r.status === 'PRESENT' || r.status === 'HALF_DAY')).length;
 
     let base: Dec;
     let absenceDeduction = new D(0);
@@ -189,7 +227,7 @@ export class PayrollService {
       netPaid: D.max(net, 0),
       carryOut: D.max(net.neg(), 0),
       details: {
-        attendance: { present, halfDay: half, absent: days('ABSENT'), paidLeave, unpaidLeave: days('UNPAID_LEAVE') },
+        attendance: { present, halfDay: half, absent: count(working, 'ABSENT'), paidLeave, unpaidLeave: count(working, 'UNPAID_LEAVE'), holidays: holidayDays, weeklyOffs: weeklyOffDays, workedOnOff },
         absentDaysDeducted: absentDays,
         salesNet: salesNet.toString(),
         commissionPercent: emp.commissionPercent?.toString() ?? null,
@@ -284,6 +322,62 @@ class HrController {
     );
     await this.audit.log(u.id, 'ATTENDANCE', 'Attendance', undefined, undefined, { date: dto.date, count: dto.entries.length });
     return { ok: true };
+  }
+
+  // ------------------------------------------------ holidays and weekly off
+
+  @Get('holidays') @RequirePermissions('PAYROLL_MANAGE')
+  holidays(@Query('from') from?: string, @Query('to') to?: string) {
+    const y = new Date().getUTCFullYear();
+    const gte = from ? dayOf(from) : new Date(Date.UTC(y, 0, 1));
+    const lte = to ? dayOf(to) : new Date(Date.UTC(y + 1, 11, 31));
+    return this.prisma.holiday.findMany({ where: { date: { gte, lte } }, orderBy: { date: 'asc' } });
+  }
+
+  /** Adds a holiday for one day or a run of days; adding the same date again renames it and changes who it covers. */
+  @Post('holidays') @RequirePermissions('PAYROLL_MANAGE')
+  async addHoliday(@Body() dto: HolidayDto, @CurrentUser() u: AuthUser) {
+    const first = dayOf(dto.date);
+    const last = dto.toDate ? dayOf(dto.toDate) : first;
+    if (last < first) throw new BadRequestException('The last day is before the first day');
+    if ((last.getTime() - first.getTime()) / 86_400_000 > 30) throw new BadRequestException('A holiday can be at most 31 days long');
+    const employeeIds = [...new Set(dto.employeeIds ?? [])];
+    if (employeeIds.length) {
+      const found = await this.prisma.employee.count({ where: { id: { in: employeeIds } } });
+      if (found !== employeeIds.length) throw new BadRequestException('Some of the chosen employees do not exist');
+    }
+    const days: Date[] = [];
+    for (let t = first.getTime(); t <= last.getTime(); t += 86_400_000) days.push(new Date(t));
+    const name = dto.name.trim();
+    const rows = await this.prisma.$transaction(days.map((date) => this.prisma.holiday.upsert({
+      where: { date }, update: { name, employeeIds }, create: { date, name, employeeIds, createdById: u.id },
+    })));
+    // Payroll already finalised for a month is never recalculated; say so instead of changing it silently.
+    const months = [...new Set(days.map((d) => d.toISOString().slice(0, 7)))];
+    const final = await this.prisma.payrollRun.findMany({
+      where: { month: { in: months }, status: 'ACTIVE', ...(employeeIds.length ? { employeeId: { in: employeeIds } } : {}) },
+      select: { month: true }, distinct: ['month', 'employeeId'],
+    });
+    await this.audit.log(u.id, 'HOLIDAY_ADD', 'Holiday', undefined, undefined, { name, from: dto.date, to: dto.toDate ?? dto.date, employees: employeeIds.length || 'all' });
+    return { holidays: rows, finalised: final.length, finalisedMonths: [...new Set(final.map((f) => f.month))] };
+  }
+
+  @Delete('holidays/:id') @RequirePermissions('PAYROLL_MANAGE')
+  async removeHoliday(@Param('id') id: string, @CurrentUser() u: AuthUser) {
+    const row = await this.prisma.holiday.findUnique({ where: { id } });
+    if (!row) throw new NotFoundException('Unknown holiday');
+    await this.prisma.holiday.delete({ where: { id } });
+    await this.audit.log(u.id, 'HOLIDAY_REMOVE', 'Holiday', id, row, undefined);
+    return { ok: true };
+  }
+
+  /** The weekly day off, for chosen employees or for every active one. */
+  @Put('weekly-off') @RequirePermissions('PAYROLL_MANAGE')
+  async setWeeklyOff(@Body() dto: WeeklyOffDto, @CurrentUser() u: AuthUser) {
+    const where = dto.employeeIds?.length ? { id: { in: dto.employeeIds } } : { isActive: true };
+    const r = await this.prisma.employee.updateMany({ where, data: { weeklyOff: dto.weeklyOff } });
+    await this.audit.log(u.id, 'WEEKLY_OFF', 'Employee', undefined, undefined, { weeklyOff: dto.weeklyOff, count: r.count });
+    return { updated: r.count };
   }
 
   // ----------------------------------------------------------- advances

@@ -184,6 +184,8 @@ model Employee {
   sales             Sale[]
   /// Percent of the employee's delivered net sales paid as commission (e.g. 1.5). Null = none.
   commissionPercent Decimal?        @db.Decimal(5, 2)
+  /// The day of the week this person is off (0 = Sunday .. 6 = Saturday); null = no fixed day off.
+  weeklyOff         Int?
   attendance        Attendance[]
   advances          SalaryAdvance[]
   payrollRuns       PayrollRun[]
@@ -632,6 +634,18 @@ model Expense {
 
   @@index([date])
   @@index([locationId])
+}
+
+/// A day off for the business (Eid, 14 August) or for chosen employees. Monthly staff are not cut for it;
+/// daily-wage staff are not paid for it unless they worked.
+model Holiday {
+  id          String   @id @default(uuid())
+  date        DateTime @unique @db.Date
+  name        String
+  /// Empty = everyone; otherwise only these employees.
+  employeeIds String[]
+  createdById String
+  createdAt   DateTime @default(now())
 }
 
 model Attendance {

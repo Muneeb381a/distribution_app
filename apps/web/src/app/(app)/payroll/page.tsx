@@ -11,7 +11,14 @@ import { advanceState, type Advance } from '@/lib/advances';
 import { api } from '@/lib/api';
 import { ATTENDANCE_STATUSES, formatDate, localDay, monthName, round2, rupees } from '@dist/shared';
 
-interface Option { id: string; name: string }
+interface Option { id: string; name: string; type?: string; weeklyOff?: number | null }
+interface Holiday { id: string; date: string; name: string; employeeIds: string[] }
+/** Why this person is off on a date: a holiday that covers them, or their weekly day off. */
+const offReason = (e: Option, date: string, holidays: Holiday[]): string | null => {
+  const h = holidays.find((x) => x.date.slice(0, 10) === date && (!x.employeeIds.length || x.employeeIds.includes(e.id)));
+  if (h) return `Holiday: ${h.name}`;
+  return e.weeklyOff != null && new Date(`${date}T00:00:00Z`).getUTCDay() === e.weeklyOff ? 'Weekly off' : null;
+};
 interface Cut { advanceId: string; date: string; note: string | null; total: string; installment: string | null; remaining: string; planned: string; amount: string }
 interface Preview {
   alreadyRun: { id: string; status?: string } | null;
@@ -29,6 +36,7 @@ export default function PayrollPage() {
   const [previews, setPreviews] = useState<Preview[] | null>(null);
   const [advances, setAdvances] = useState<Advance[] | null>(null);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [attDate, setAttDate] = useState(localDay());
   const [att, setAtt] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
@@ -41,11 +49,13 @@ export default function PayrollPage() {
     try {
       const emps = await api<Option[]>('/employees/options');
       setEmployees(emps);
-      const [pv, ad, at] = await Promise.all([
+      const [pv, ad, at, hol] = await Promise.all([
         Promise.all(emps.map((e) => api<Preview>(`/payroll/preview?employeeId=${e.id}&month=${month}`))),
         api<Advance[]>('/advances'),
         api<Attendance[]>(`/attendance?month=${attDate.slice(0, 7)}`),
+        api<Holiday[]>('/holidays').catch(() => [] as Holiday[]),
       ]);
+      setHolidays(hol);
       setPreviews(pv);
       setAdvances(ad);
       setAttendance(at);
@@ -112,7 +122,7 @@ export default function PayrollPage() {
   const saveAttendance = () =>
     act(
       'att',
-      () => api('/attendance', { method: 'PUT', json: { date: attDate, entries: employees.map((e) => ({ employeeId: e.id, status: att[e.id] ?? 'PRESENT' })) } }),
+      () => api('/attendance', { method: 'PUT', json: { date: attDate, entries: employees.filter((e) => (att[e.id] ?? (offReason(e, attDate, holidays) ? 'OFF' : 'PRESENT')) !== 'OFF').map((e) => ({ employeeId: e.id, status: att[e.id] ?? 'PRESENT' })) } }),
       `Attendance saved for ${new Date(`${attDate}T00:00:00`).toLocaleDateString('en-GB', { dateStyle: 'medium' })}`,
     );
 
@@ -204,10 +214,12 @@ export default function PayrollPage() {
               <BusyButton busy={busy === 'att'} onClick={saveAttendance} disabled={!employees.length}>Save</BusyButton>
             </div>
           </div>
-          <p className="card-sub" style={{ margin: '-4px 0 14px' }}>{markedToday ? 'Already marked for this day — saving updates it.' : 'Not marked yet. Everyone starts as present.'}</p>
+          <p className="card-sub" style={{ margin: '-4px 0 14px' }}>{markedToday ? 'Already marked for this day — saving updates it.' : 'Not marked yet. Everyone starts as present, except people who are off today.'} <Link href="/holidays">Holidays &amp; days off</Link></p>
           <ul className="list">
             {employees.map((e) => {
               const c = monthCounts[e.id] ?? {};
+              const off = offReason(e, attDate, holidays);
+              const current = att[e.id] ?? (off ? 'OFF' : 'PRESENT');
               return (
                 <li key={e.id} style={{ flexWrap: 'wrap' }}>
                   <span className="who-line">
@@ -215,9 +227,10 @@ export default function PayrollPage() {
                     <span>This month: {c.PRESENT ?? 0} present{c.ABSENT ? ` · ${c.ABSENT} absent` : ''}{c.HALF_DAY ? ` · ${c.HALF_DAY} half` : ''}{c.PAID_LEAVE || c.UNPAID_LEAVE ? ` · ${(c.PAID_LEAVE ?? 0) + (c.UNPAID_LEAVE ?? 0)} leave` : ''}</span>
                   </span>
                   <div className="chips" role="radiogroup" aria-label={`${e.name} attendance`}>
-                    {STATUSES.map(([v, l, tone]) => {
-                      const on = (att[e.id] ?? 'PRESENT') === v;
-                      return <button key={v} type="button" role="radio" aria-checked={on} className={`chip${on ? ' on' : ''}`} data-tone={tone} onClick={() => setAtt({ ...att, [e.id]: v })}>{l}</button>;
+                    {off && <button type="button" role="radio" aria-checked={current === 'OFF'} className={`chip${current === 'OFF' ? ' on' : ''}`} data-tone="blue" title="Not a working day: no salary cut, no daily wage" onClick={() => setAtt({ ...att, [e.id]: 'OFF' })}>{off}</button>}
+                    {(off ? STATUSES.filter(([v]) => v === 'PRESENT' || v === 'HALF_DAY') : STATUSES).map(([v, l, tone]) => {
+                      const on = current === v;
+                      return <button key={v} type="button" role="radio" aria-checked={on} className={`chip${on ? ' on' : ''}`} data-tone={tone} onClick={() => setAtt({ ...att, [e.id]: v })}>{off && v === 'PRESENT' ? 'Worked' : off && v === 'HALF_DAY' ? 'Worked half' : l}</button>;
                     })}
                   </div>
                 </li>
