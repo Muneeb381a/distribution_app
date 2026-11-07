@@ -7,6 +7,7 @@ import { LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import { api, can, useUser } from '@/lib/api';
 import Link from 'next/link';
 import ChangeRatesDialog from '@/components/ChangeRatesDialog';
+import { StatTiles } from '@/components/StatTiles';
 import { Affix, Field, Toggle } from '@/components/Form';
 import { DRINK_SIZE_PRESETS, defaultPack, money, PRICE_TIERS, round2, unitLabel } from '@dist/shared';
 
@@ -51,6 +52,14 @@ export default function ProductsPage() {
   const [showInactive, setShowInactive] = useState(false);
   const [editing, setEditing] = useState<Product | 'new' | null>(null);
   const [changingRates, setChangingRates] = useState(false);
+  const [cat, setCat] = useState('');
+  const [view, setView] = useState<'list' | 'cards'>('list');
+  // The view you last used comes back next time (read after mount so the server and browser render the same first).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (localStorage.getItem('dist.productsView') === 'cards') setView('cards');
+  }, []);
+  const changeView = (v: 'list' | 'cards') => { setView(v); try { localStorage.setItem('dist.productsView', v); } catch { /* ignore */ } };
 
   const load = useCallback(async () => {
     try {
@@ -88,15 +97,37 @@ export default function ProductsPage() {
   const priceOf = (p: Product) => prices.filter((x) => x.productId === p.id);
 
   const inactiveCount = products?.filter((p) => !p.isActive).length ?? 0;
+  const topOf = useCallback((p: Product) => pathOf(p.categoryId).split(' › ')[0] || p.category.name, [pathOf]);
+  const inScope = useMemo(() => (products ?? []).filter((p) => showInactive || p.isActive), [products, showInactive]);
+  const topCategories = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of inScope) m.set(topOf(p), (m.get(topOf(p)) ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [inScope, topOf]);
   const shown = useMemo(() => {
     const f = filter.trim().toLowerCase();
-    return (products ?? []).filter((p) => (showInactive || p.isActive) && (!f || `${p.name} ${p.brand ?? ''} ${p.size ?? ''} ${pathOf(p.categoryId)}`.toLowerCase().includes(f)));
-  }, [products, filter, showInactive, pathOf]);
+    return inScope.filter((p) => (!cat || topOf(p) === cat) && (!f || `${p.name} ${p.brand ?? ''} ${p.size ?? ''} ${pathOf(p.categoryId)}`.toLowerCase().includes(f)));
+  }, [inScope, filter, cat, pathOf, topOf]);
   type Key = 'name' | 'category' | 'size' | 'rate';
   const { sorted, sort, toggle } = useSort<Product, Key>(shown, (p, k) =>
     k === 'name' ? p.name : k === 'category' ? pathOf(p.categoryId) : k === 'size' ? p.size : priceOf(p)[0]?.rate ?? null);
   const { page, loadMore, reset } = usePaged(sorted, 30);
   const missingRate = (products ?? []).filter((p) => p.isActive && !priceOf(p).length).length;
+  const activeCount = (products ?? []).filter((p) => p.isActive).length;
+  const returnable = (products ?? []).filter((p) => p.isActive && p.returnableEmpty).length;
+  const bagged = (products ?? []).filter((p) => p.isActive && p.isPacked).length;
+
+  const rowActions = (p: Product) => (
+    <div className="row-actions">
+      <button type="button" className="secondary icon-only" title={canEdit ? 'Edit' : 'Edit rates'} aria-label={`Edit ${p.name}`} onClick={() => setEditing(p)}><Icon name="edit" /></button>
+      {!canEdit ? null : p.isActive
+        ? <button type="button" className="secondary icon-only danger-hover" title="Deactivate" aria-label={`Deactivate ${p.name}`} onClick={() => setActive(p, false)}><Icon name="ban" /></button>
+        : <button type="button" className="secondary" onClick={() => setActive(p, true)}>Activate</button>}
+    </div>
+  );
+  const emptyState = () => (filter || cat
+    ? <Empty icon="search" title={filter ? `No product matches “${filter}”` : 'No product in this category'} />
+    : <Empty icon="products" title={`No ${line === 'BOTTLES' ? 'bottle' : 'rice'} products yet`} text="Add one here or bring a list in with Import." action={canEdit && <button type="button" onClick={() => setEditing('new')}><Icon name="plus" />Add first product</button>} />);
 
   async function setActive(p: Product, isActive: boolean) {
     if (!isActive && !(await confirm({ title: `Deactivate ${p.name}?`, body: <p>It is hidden from bills, purchases and stock pickers. Stock and history stay; you can activate it again.</p>, confirmLabel: 'Deactivate', danger: true }))) return;
@@ -124,7 +155,7 @@ export default function ProductsPage() {
   return (
     <>
       <div className="page-head">
-        <div><h1>Products</h1><p>{products ? `${products.length - inactiveCount} active ${line === 'BOTTLES' ? 'bottle' : 'rice'} products` : 'Loading…'}</p></div>
+        <div><h1>Products</h1><p>{products ? `${activeCount} active ${line === 'BOTTLES' ? 'bottle' : 'rice'} product${activeCount === 1 ? '' : 's'}` : 'Loading…'}</p></div>
         {canEdit && (
           <div className="actions">
             <button className="secondary btn-icon" onClick={addCategory}><Icon name="plus" />Category</button>
@@ -134,78 +165,105 @@ export default function ProductsPage() {
         )}
       </div>
 
+      <StatTiles items={[
+        { label: 'Products', value: activeCount, sub: inactiveCount ? `${inactiveCount} inactive` : 'all active', icon: 'products' },
+        { label: 'Categories', value: topCategories.length, sub: line === 'BOTTLES' ? 'brands and companies' : 'rice varieties', icon: 'stock' },
+        { label: 'Without a rate', value: missingRate, sub: missingRate ? 'bills will ask for a rate' : 'every product has a rate', icon: 'alert', tone: missingRate ? 'red' : 'green' },
+        line === 'BOTTLES'
+          ? { label: 'Returnable empties', value: returnable, sub: 'tracked per customer', icon: 'refresh' as const, tone: 'amber' as const }
+          : { label: 'Sold in bags', value: bagged, sub: 'the rest by kg and maund', icon: 'purchases' as const, tone: 'amber' as const },
+      ]} />
+
       <div className="list-head">
         <div className="seg" role="radiogroup" aria-label="Business line" style={{ margin: 0 }}>
           {(['BOTTLES', 'RICE'] as Line[]).map((l) => (
-            <button key={l} type="button" role="radio" aria-checked={line === l} className={line === l ? 'on' : ''} onClick={() => { setLine(l); reset(); }}>{l === 'BOTTLES' ? 'Bottles' : 'Rice'}</button>
+            <button key={l} type="button" role="radio" aria-checked={line === l} className={line === l ? 'on' : ''} onClick={() => { setLine(l); setCat(''); reset(); }}>{l === 'BOTTLES' ? 'Bottles' : 'Rice'}</button>
           ))}
         </div>
-        <div className="filter"><Icon name="search" /><input aria-label="Filter products" placeholder="Filter by name, brand, size, category…" value={filter} onChange={(e) => { setFilter(e.target.value); reset(); }} /></div>
-        {inactiveCount > 0 && <button type="button" className={`chip${showInactive ? ' on' : ''}`} aria-pressed={showInactive} onClick={() => setShowInactive(!showInactive)}>Show inactive ({inactiveCount})</button>}
-        {canRate && shown.some((p) => p.isActive) && (
-          <button type="button" className="secondary btn-icon" style={{ marginLeft: 'auto' }} onClick={() => setChangingRates(true)} title="Change the list rates of the products shown">
-            <Icon name="trend" />Change rates{filter ? ` (${shown.filter((p) => p.isActive).length})` : ''}
-          </button>
-        )}
+        <div className="filter"><Icon name="search" /><input aria-label="Filter products" placeholder="Search name, brand, size, category…" value={filter} onChange={(e) => { setFilter(e.target.value); reset(); }} /></div>
+        <div className="list-head-end">
+          {inactiveCount > 0 && <button type="button" className={`chip${showInactive ? ' on' : ''}`} aria-pressed={showInactive} onClick={() => setShowInactive(!showInactive)}>Show inactive<span className="chip-count">{inactiveCount}</span></button>}
+          {canRate && shown.some((p) => p.isActive) && (
+            <button type="button" className="secondary btn-icon" onClick={() => setChangingRates(true)} title="Change the list rates of the products shown">
+              <Icon name="trend" />Change rates{filter || cat ? ` (${shown.filter((p) => p.isActive).length})` : ''}
+            </button>
+          )}
+          <div className="view-toggle" role="radiogroup" aria-label="View">
+            <button type="button" role="radio" aria-checked={view === 'list'} className={view === 'list' ? 'on' : ''} onClick={() => changeView('list')} title="List"><Icon name="menu" /></button>
+            <button type="button" role="radio" aria-checked={view === 'cards'} className={view === 'cards' ? 'on' : ''} onClick={() => changeView('cards')} title="Cards"><Icon name="dashboard" /></button>
+          </div>
+        </div>
       </div>
+
+      {topCategories.length > 1 && (
+        <div className="chips cat-chips" role="group" aria-label="Category">
+          <button type="button" className={`chip${!cat ? ' on' : ''}`} aria-pressed={!cat} onClick={() => { setCat(''); reset(); }}>All<span className="chip-count">{inScope.length}</span></button>
+          {topCategories.map(([name, count]) => (
+            <button key={name} type="button" className={`chip${cat === name ? ' on' : ''}`} aria-pressed={cat === name} onClick={() => { setCat(cat === name ? '' : name); reset(); }}>{name}<span className="chip-count">{count}</span></button>
+          ))}
+        </div>
+      )}
 
       {missingRate > 0 && (
         <p className="error" role="status"><Icon name="alert" /> {missingRate} active product{missingRate === 1 ? ' has' : 's have'} no default sale rate. Bills for customers without a fixed rate will ask for one.</p>
       )}
 
-      <table className="sticky-head">
-        <thead>
-          <tr>
-            <SortTh k="name" sort={sort} toggle={toggle}>Product</SortTh>
-            <SortTh k="category" sort={sort} toggle={toggle}>Category</SortTh>
-            <SortTh k="size" sort={sort} toggle={toggle}>Size</SortTh>
-            <th>Units</th>
-            <SortTh k="rate" sort={sort} toggle={toggle} num>Default rate</SortTh>
-            {(canEdit || canRate) && <th><span className="sr-only">Actions</span></th>}
-          </tr>
-        </thead>
-        <tbody>
-          {!products && <SkeletonRows cols={canEdit || canRate ? 6 : 5} />}
-          {page.map((p) => {
-            const pr = priceOf(p);
-            return (
+      {view === 'list' ? (
+        <table className="sticky-head prod-table">
+          <thead>
+            <tr>
+              <SortTh k="name" sort={sort} toggle={toggle}>Product</SortTh>
+              <SortTh k="category" sort={sort} toggle={toggle}>Category</SortTh>
+              <th>Packing</th>
+              <SortTh k="rate" sort={sort} toggle={toggle} num>Default rate</SortTh>
+              {(canEdit || canRate) && <th><span className="sr-only">Actions</span></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {!products && <SkeletonRows cols={canEdit || canRate ? 5 : 4} />}
+            {page.map((p) => (
               <tr key={p.id} className={p.isActive ? '' : 'inactive'}>
-                <td><b>{p.name}</b>{p.brand && <span className="muted"> · {p.brand}</span>}{!p.isActive && <> <span className="badge">Inactive</span></>}</td>
-                <td>{pathOf(p.categoryId) || p.category.name}</td>
-                <td>{p.size ?? <span className="muted">—</span>}</td>
                 <td>
-                  <span className="chips" style={{ gap: 5 }}>
-                    {p.units.filter((u) => Number(u.factorToBase) !== 1).map((u) => <span key={u.unitName} className="badge blue">1 {unitLabel(u.unitName)} = {Number(u.factorToBase)} {p.baseUnit === 'KG' ? 'kg' : 'bottles'}</span>)}
-                    {p.returnableEmpty && <span className="badge teal">returnable</span>}
+                  <span className="person">
+                    <ProductTile line={line} />
+                    <span className="person-text">
+                      <b>{p.name}{!p.isActive && <> <span className="badge">Inactive</span></>}</b>
+                      <span>{[p.brand, p.size].filter(Boolean).join(' · ') || 'No brand or size'}</span>
+                    </span>
                   </span>
                 </td>
-                <td className="num">
-                  {pr.length ? pr.filter((x) => (x.tier ?? 'RETAIL') === 'RETAIL').map((x) => {
-                    const w = pr.find((y) => y.unitName === x.unitName && y.tier === 'WHOLESALE');
-                    return <div key={x.unitName}><b>{money(x.rate)}</b> <span className="muted">/ {unitLabel(x.unitName)}</span>{w && <span className="whole-rate" title="Wholesale"> · W {money(w.rate)}</span>}</div>;
-                  }) : <span className="badge amber">Not set</span>}
-                </td>
-                {(canEdit || canRate) && (
-                  <td>
-                    <div className="row-actions">
-                      <button type="button" className="secondary icon-only" title={canEdit ? 'Edit' : 'Edit rates'} aria-label={`Edit ${p.name}`} onClick={() => setEditing(p)}><Icon name="edit" /></button>
-                      {!canEdit ? null : p.isActive
-                        ? <button type="button" className="secondary icon-only danger-hover" title="Deactivate" aria-label={`Deactivate ${p.name}`} onClick={() => setActive(p, false)}><Icon name="ban" /></button>
-                        : <button type="button" className="secondary" onClick={() => setActive(p, true)}>Activate</button>}
-                    </div>
-                  </td>
-                )}
+                <td><span className="cat-path">{(pathOf(p.categoryId) || p.category.name).split(' › ').map((part, i) => <span key={i}>{part}</span>)}</span></td>
+                <td><Packing p={p} /></td>
+                <td className="num"><Rates rows={priceOf(p)} /></td>
+                {(canEdit || canRate) && <td>{rowActions(p)}</td>}
               </tr>
-            );
-          })}
-          {products && !shown.length && (
-            <tr><td colSpan={6}>
-              {filter ? <Empty icon="search" title={`No product matches “${filter}”`} />
-                : <Empty icon="products" title={`No ${line === 'BOTTLES' ? 'bottle' : 'rice'} products yet`} text="Add one here or bring a list in with Import." action={canEdit && <button type="button" onClick={() => setEditing('new')}><Icon name="plus" />Add first product</button>} />}
-            </td></tr>
-          )}
-        </tbody>
-      </table>
+            ))}
+            {products && !shown.length && <tr><td colSpan={5}>{emptyState()}</td></tr>}
+          </tbody>
+        </table>
+      ) : (
+        <>
+          {!products && <div className="prod-cards">{[0, 1, 2].map((i) => <span key={i} className="skeleton" style={{ height: 190 }} />)}</div>}
+          <div className="prod-cards">
+            {page.map((p) => (
+              <article key={p.id} className={`card prod-card${p.isActive ? '' : ' inactive'}`}>
+                <header>
+                  <ProductTile line={line} size={46} />
+                  <span className="prod-card-title">
+                    <b>{p.name}</b>
+                    <span>{[p.brand, p.size].filter(Boolean).join(' · ') || 'No brand or size'}</span>
+                  </span>
+                  {(canEdit || canRate) && rowActions(p)}
+                </header>
+                <span className="cat-path">{(pathOf(p.categoryId) || p.category.name).split(' › ').map((part, i) => <span key={i}>{part}</span>)}{!p.isActive && <span className="badge">Inactive</span>}</span>
+                <Packing p={p} />
+                <div className="prod-card-rates"><span>Default rate</span><Rates rows={priceOf(p)} left /></div>
+              </article>
+            ))}
+          </div>
+          {products && !shown.length && emptyState()}
+        </>
+      )}
       <LoadMore shown={page.length} total={sorted.length} onMore={loadMore} />
 
       {changingRates && (
@@ -228,6 +286,41 @@ export default function ProductsPage() {
         />
       )}
     </>
+  );
+}
+
+function ProductTile({ line, size = 40 }: { line: Line; size?: number }) {
+  return <span className={`prod-tile ${line === 'BOTTLES' ? 'bottles' : 'rice'}`} style={{ width: size, height: size }}><Icon name="products" /></span>;
+}
+
+/** How it is packed: units bigger than the base unit, and whether empties come back. */
+function Packing({ p }: { p: Product }) {
+  const packs = p.units.filter((u) => Number(u.factorToBase) !== 1);
+  return (
+    <span className="chips" style={{ gap: 5 }}>
+      {packs.map((u) => <span key={u.unitName} className="badge blue">1 {unitLabel(u.unitName)} = {Number(u.factorToBase)} {p.baseUnit === 'KG' ? 'kg' : 'bottles'}</span>)}
+      {p.returnableEmpty && <span className="badge teal">returnable</span>}
+      {!packs.length && !p.returnableEmpty && <span className="muted">—</span>}
+    </span>
+  );
+}
+
+/** Retail rate per unit, with the wholesale rate beside it when there is one. */
+function Rates({ rows, left }: { rows: Price[]; left?: boolean }) {
+  const retail = rows.filter((x) => (x.tier ?? 'RETAIL') === 'RETAIL');
+  if (!retail.length) return <span className="badge amber">Not set</span>;
+  return (
+    <div className={`rates${left ? ' left' : ''}`}>
+      {retail.map((x) => {
+        const w = rows.find((y) => y.unitName === x.unitName && y.tier === 'WHOLESALE');
+        return (
+          <div key={x.unitName}>
+            <b>Rs {money(x.rate)}</b><span className="muted"> / {unitLabel(x.unitName)}</span>
+            {w && <span className="whole-rate" title="Wholesale rate">W {money(w.rate)}</span>}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
