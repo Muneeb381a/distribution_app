@@ -250,7 +250,11 @@ class HrController {
 
   @Get('expenses/categories') @RequirePermissions('EXPENSE_MANAGE')
   async categories() {
-    const used = await this.prisma.expense.findMany({ distinct: ['category'], select: { category: true } });
+    const [managed, used] = await Promise.all([
+      this.prisma.expenseCategory.findMany({ where: { isActive: true }, orderBy: { name: 'asc' }, select: { name: true } }),
+      this.prisma.expense.findMany({ distinct: ['category'], select: { category: true } }),
+    ]);
+    if (managed.length) return managed.map((c) => c.name);
     return [...new Set([...DEFAULT_EXPENSE_CATEGORIES, ...used.map((u) => u.category)])];
   }
 
@@ -270,14 +274,18 @@ class HrController {
 
   @Post('expenses') @RequirePermissions('EXPENSE_MANAGE')
   async addExpense(@Body() dto: ExpenseDto, @CurrentUser() u: AuthUser) {
-    const category = dto.category.trim();
+    const category = dto.category.trim().replace(/\s+/g, ' ');
     if (!category) throw new BadRequestException('Category is required');
+    // A name typed here that is not in the list yet becomes a category; one the owner has hidden stays hidden.
+    const known = await this.prisma.expenseCategory.findFirst({ where: { name: { equals: category, mode: 'insensitive' } } });
+    if (known && !known.isActive) throw new BadRequestException(`“${known.name}” is hidden; show it again under Categories first`);
+    if (!known) await this.prisma.expenseCategory.create({ data: { name: category } });
     if (dto.locationId) {
       const loc = await this.prisma.location.findUnique({ where: { id: dto.locationId } });
       if (!loc?.isActive || loc.type === 'VEHICLE') throw new BadRequestException('Pick a godown or shop');
     }
     const row = await this.prisma.expense.create({
-      data: { date: dayOf(dto.date), category, locationId: dto.locationId, amount: dto.amount, note: dto.note, createdById: u.id },
+      data: { date: dayOf(dto.date), category: known?.name ?? category, locationId: dto.locationId, amount: dto.amount, note: dto.note, createdById: u.id },
     });
     await this.audit.log(u.id, 'CREATE', 'Expense', row.id, undefined, row);
     return row;

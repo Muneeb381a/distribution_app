@@ -18,12 +18,13 @@ import { SearchModule } from './search/search.module.js';
 import { SyncModule } from './sync/sync.module.js';
 import { SettingsModule } from './settings/settings.module.js';
 import { TripsModule } from './trips/trips.module.js';
+import { ExpenseCategoriesModule } from './expenses/expense-categories.module.js';
 import { VehiclesModule } from './vehicles/vehicles.module.js';
 import { BackupModule } from './backup/backup.module.js';
 import { DayEndModule } from './dayend/dayend.module.js';
 import { ProofModule } from './sales/proof.module.js';
 
 @Module({
-  imports: [PrismaModule, AuditModule, AuthModule, CatalogModule, MasterDataModule, UsersModule, ImportModule, StockCoreModule, StockModule, PurchasingModule, SalesModule, HrModule, ReportsModule, DashboardModule, SearchModule, SupplierEmptiesModule, SyncModule, SettingsModule, TripsModule, VehiclesModule, BackupModule, DayEndModule, ProofModule],
+  imports: [PrismaModule, AuditModule, AuthModule, CatalogModule, MasterDataModule, UsersModule, ImportModule, StockCoreModule, StockModule, PurchasingModule, SalesModule, HrModule, ReportsModule, DashboardModule, SearchModule, SupplierEmptiesModule, SyncModule, SettingsModule, TripsModule, VehiclesModule, ExpenseCategoriesModule, BackupModule, DayEndModule, ProofModule],
 })
 export class AppModule {}

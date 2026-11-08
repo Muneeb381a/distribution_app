@@ -3,14 +3,12 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { BusyButton, Empty, SkeletonRows, useConfirm, useToast } from '@/components/Feedback';
 import { Affix, Choice, Field, FormActions, FormCard, FormSection } from '@/components/Form';
+import { CategoryManager, CategoryPicker, colorOf, type Category } from '@/components/ExpenseCategories';
 import { Icon } from '@/components/Icon';
 import { StatTiles } from '@/components/StatTiles';
 import { downloadCsv, LoadMore, SortTh, usePaged, useSort } from '@/components/Table';
 import { api } from '@/lib/api';
 import { formatDate, localDay, monthStart, rupees } from '@dist/shared';
-
-/** A steady colour per category name, so the same category looks the same everywhere. */
-const catColor = (name: string) => `hsl(${[...name.toLowerCase()].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 11)} 62% 48%)`;
 
 interface Place { id: string; name: string; type: 'GODOWN' | 'SHOP' | 'VEHICLE'; isActive: boolean }
 interface Expense {
@@ -22,7 +20,8 @@ const placeOf = (r: Expense) => r.location?.name ?? 'General';
 
 export default function ExpensesPage() {
   const [rows, setRows] = useState<Expense[] | null>(null);
-  const [categories, setCategories] = useState<string[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [managing, setManaging] = useState(false);
   const [range, setRange] = useState({ from: localDay(monthStart()), to: localDay() });
   const [places, setPlaces] = useState<Place[]>([]);
   // 'ALL', 'none' (general) or a location id
@@ -41,10 +40,11 @@ export default function ExpensesPage() {
   useEffect(() => {
     load();
   }, [load]);
+  const loadCategories = useCallback(() => api<Category[]>('/expense-categories').then(setCategories).catch(() => {}), []);
   useEffect(() => {
-    api<string[]>('/expenses/categories').then(setCategories).catch(() => {});
+    loadCategories();
     api<Place[]>('/locations').then((l) => setPlaces(l.filter((x) => x.isActive && x.type !== 'VEHICLE'))).catch(() => {});
-  }, []);
+  }, [loadCategories]);
 
   async function add(e: FormEvent) {
     e.preventDefault();
@@ -55,7 +55,7 @@ export default function ExpensesPage() {
         json: { date: form.date, category: form.category.trim(), locationId: form.locationId || undefined, amount: Number(form.amount), note: form.note || undefined },
       });
       toast.success(`Rs ${rupees(form.amount)} for ${form.category} added`);
-      if (!categories.includes(form.category.trim())) setCategories([...categories, form.category.trim()].sort());
+      void loadCategories();
       // keep date, category and place: the next entry is often the same kind
       setForm({ ...form, amount: '', note: '' });
       setFresh((n) => n + 1);
@@ -144,7 +144,7 @@ export default function ExpensesPage() {
               {page.map((r) => (
                 <tr key={r.id} className={r.status === 'CANCELLED' ? 'inactive' : ''}>
                   <td>{formatDate(r.date, 'short')}</td>
-                  <td><span className="cat"><i className="cat-dot" style={{ background: catColor(r.category) }} /><b>{r.category}</b></span></td>
+                  <td><span className="cat"><i className="cat-dot" style={{ background: colorOf(categories, r.category) }} /><b>{r.category}</b></span></td>
                   <td>{r.location ? <span className={`badge ${r.location.type === 'GODOWN' ? 'amber' : 'blue'}`}>{r.location.name}</span> : <span className="badge">General</span>}</td>
                   <td className="num">{r.status === 'CANCELLED' ? <s>{rupees(r.amount)}</s> : <b>{rupees(r.amount)}</b>}</td>
                   <td className="muted">{r.note}</td>
@@ -169,14 +169,8 @@ export default function ExpensesPage() {
                 <Affix prefix="Rs"><input className="big" type="number" step="any" min="1" required inputMode="decimal" placeholder="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></Affix>
               </Field>
               <Field label="Category" required span={12}>
-                <input required list="expense-categories" placeholder="Fuel, rent, electricity…" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
+                <CategoryPicker categories={categories} value={form.category} onChange={(category) => setForm((f) => ({ ...f, category }))} onChanged={loadCategories} onManage={() => setManaging(true)} />
               </Field>
-              <datalist id="expense-categories">{categories.map((c) => <option key={c} value={c} />)}</datalist>
-              {categories.length > 0 && (
-                <div className="chips span-12" role="group" aria-label="Common categories">
-                  {categories.slice(0, 6).map((c) => <button key={c} type="button" className={`chip${form.category === c ? ' on' : ''}`} onClick={() => setForm({ ...form, category: c })}>{c}</button>)}
-                </div>
-              )}
               <Field label="Where" span={12} hint="Godown and shop costs are shown separately in reports; both come off total profit.">
                 <Choice name="exp-place" value={form.locationId || 'none'} onChange={(v) => setForm({ ...form, locationId: v === 'none' ? '' : v })} columns={1}
                   options={[
@@ -203,6 +197,7 @@ export default function ExpensesPage() {
           )}
         </aside>
       </div>
+      {managing && <CategoryManager categories={categories} onClose={() => setManaging(false)} onChanged={async () => { await loadCategories(); await load(); }} />}
     </>
   );
 }

@@ -625,6 +625,18 @@ enum AttendanceStatus {
 }
 
 /// businessLine null means a shared cost (rent, bills) that belongs to both lines.
+/// The expense categories the owner manages. Expenses keep the category name as text, so history never breaks.
+model ExpenseCategory {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  /// Hex colour such as #0ea5e9; null = a colour is worked out from the name.
+  color     String?
+  /// Made by the system (payroll posts to "Salaries"): cannot be renamed or hidden.
+  isSystem  Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
 model Expense {
   id           String            @id @default(uuid())
   date         DateTime          @db.Date
