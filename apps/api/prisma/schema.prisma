@@ -163,6 +163,12 @@ model Location {
   name            String           @unique
   type            LocationType
   isActive        Boolean          @default(true)
+  /** Vehicles only: number plate, kind (pickup, loader rickshaw...), usual driver and a free note. */
+  regNo           String?
+  vehicleKind     String?
+  driverId        String?
+  driver          Employee?        @relation("VehicleDriver", fields: [driverId], references: [id], onDelete: SetNull)
+  note            String?
   movements       StockMovement[]
   purchases       Purchase[]
   purchaseReturns PurchaseReturn[]
@@ -175,6 +181,7 @@ model Location {
 
 model Employee {
   id                String          @id @default(uuid())
+  drivenVehicles    Location[]      @relation("VehicleDriver")
   name              String
   phone             String?
   type              EmployeeType

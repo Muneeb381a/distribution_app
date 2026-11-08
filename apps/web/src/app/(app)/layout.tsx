@@ -21,6 +21,7 @@ const NAV: { title: string; items: NavItem[] }[] = [
     items: [
       { href: '/sales', label: 'Sales', icon: 'sales', permission: 'SALE_CREATE' },
       { href: '/trips', label: 'Vehicle trips', icon: 'suppliers', permission: 'STOCK_TRANSFER' },
+      { href: '/vehicles', label: 'Vehicles', icon: 'suppliers', permission: null },
       { href: '/khata', label: 'Khata', icon: 'khata', permission: 'PAYMENT_RECORD' },
       { href: '/collections', label: 'Collections', icon: 'wallet', permission: 'PAYMENT_RECORD' },
       { href: '/cheques', label: 'Cheques', icon: 'wallet', permission: 'PAYMENT_RECORD' },

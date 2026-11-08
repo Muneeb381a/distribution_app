@@ -149,7 +149,8 @@ export default function TripsPage() {
                       );
                     })}
                   </div>
-                ) : <p className="fld-hint">Add a vehicle under <Link href="/locations">Locations</Link> first.</p>}
+                ) : <p className="fld-hint">No vehicle yet. <Link href="/vehicles">Add your first vehicle</Link>, then come back to start a trip.</p>}
+                {vehicles.length > 0 && <p className="fld-hint">Vehicle not here? <Link href="/vehicles">Add a vehicle</Link>.</p>}
               </div>
               <div className="fld span-12">
                 <span className="fld-label"><span>Salesman</span><span className="opt">Optional</span></span>
