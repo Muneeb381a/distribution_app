@@ -8,6 +8,7 @@ import { CurrentUser, RequirePermissions, type AuthUser } from '../common/decora
 import { dayOf } from '../common/dates.js';
 import { StockService } from './stock.service.js';
 import { lowStock } from './low-stock.js';
+import { reorderPlan } from './reorder.js';
 
 class TransferItemDto {
   @IsUUID() productId: string;
@@ -187,6 +188,13 @@ class StockController {
   @Get('low')
   low() {
     return lowStock(this.prisma);
+  }
+
+  /** What to buy and when, from how fast each product sells; also stock that has stopped selling. */
+  @Get('reorder') @RequirePermissions('REPORT_VIEW')
+  reorder(@Query('days') days?: string, @Query('cover') cover?: string) {
+    const clamp = (v: string | undefined, def: number, min: number, max: number) => Math.min(Math.max(Number(v) || def, min), max);
+    return reorderPlan(this.prisma, { days: clamp(days, 30, 7, 180), cover: clamp(cover, 14, 3, 90) });
   }
 
   @Get('transfers')

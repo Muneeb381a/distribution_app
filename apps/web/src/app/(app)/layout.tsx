@@ -75,6 +75,7 @@ const DETAIL: [RegExp, string][] = [
   [/^\/employees\/[^/]+$/, 'Employee ledger'],
   [/^\/products\/catalog$/, 'Add from catalog'],
   [/^\/stock\/history$/, 'Stock history'],
+  [/^\/stock\/reorder$/, 'Reorder plan'],
   [/^\/trips\/[^/]+$/, 'Trip'],
 ];
 const RECEIPT_PARENT = NAV[1].items.find((i) => i.href === '/khata')!;

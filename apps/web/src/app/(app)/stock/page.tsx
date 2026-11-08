@@ -134,7 +134,10 @@ export default function StockPage() {
   return (
     <>
       <div className="page-head"><div><h1>Stock</h1><p>{rows ? `${rows.length} product / location rows` : 'Loading…'}</p></div>
-        <div className="actions"><Link className="btn secondary" href="/stock/history"><Icon name="history" />Stock history</Link></div>
+        <div className="actions">
+          {can(user, 'REPORT_VIEW') && <Link className="btn secondary" href="/stock/reorder"><Icon name="trend" />Reorder plan</Link>}
+          <Link className="btn secondary" href="/stock/history"><Icon name="history" />Stock history</Link>
+        </div>
       </div>
       {(error || lookupError) && <p className="error">{error || lookupError}</p>}
       <div className="stats">

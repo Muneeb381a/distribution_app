@@ -30,14 +30,16 @@ describe('day end: the cash drawer', () => {
 
     // no earlier count yet: the opening cash has to be given
     expect((await t.owner.put('/day-end', { date: today(), counted: 2000 })).status).toBe(400);
-    const expectedCash = num(day.cashIn.total) - num(day.cashOut.total);
-    const closed = ok(await t.owner.put('/day-end', { date: today(), counted: expectedCash - 80, openingCash: 0 }));
+    // other test files add cash out on the same day, so start from a drawer big enough to stay above zero
+    const OPENING = 10_000_000;
+    const expectedCash = OPENING + num(day.cashIn.total) - num(day.cashOut.total);
+    const closed = ok(await t.owner.put('/day-end', { date: today(), counted: expectedCash - 80, openingCash: OPENING }));
     expect(num(closed.expected)).toBe(expectedCash);
     expect(num(closed.difference)).toBe(-80); // counted 80 short
 
     // closing again replaces the count; the opening figure of a closed day does not move
     const again = ok(await t.owner.put('/day-end', { date: today(), counted: expectedCash, openingCash: 999, note: 'recounted' }));
-    expect(num(again.openingCash)).toBe(0);
+    expect(num(again.openingCash)).toBe(OPENING);
     expect(num(again.difference)).toBe(0);
     expect(ok(await t.owner.get(`/day-end?date=${today()}`)).closed.note).toBe('recounted');
 
