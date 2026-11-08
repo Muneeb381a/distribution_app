@@ -7,7 +7,7 @@ import { API_URL, api } from '@/lib/api';
 
 export interface BackupStatus {
   last: { name: string; bytes: number; at: string; tables: number | null } | null;
-  ageHours: number | null; count: number; everyHours: number; auto: boolean;
+  ageHours: number | null; count: number; everyHours: number; auto: boolean; supported: boolean;
   copyDir: string | null; copyReachable: boolean | null; running: boolean;
 }
 interface BackupFile { name: string; bytes: number; at: string }
@@ -61,6 +61,17 @@ export default function BackupPanel() {
   if (error) return <p className="error">{error}</p>;
   if (!data) return <span className="skeleton" style={{ display: 'block', height: 220, maxWidth: 880 }} />;
   const { status: s, files } = data;
+  if (!s.supported) {
+    return (
+      <section className="card bk-status amber">
+        <span className="bk-icon"><Icon name="cloud" /></span>
+        <div className="bk-main">
+          <h2>Backups are kept by the database host</h2>
+          <p>This copy of the app runs on a serverless host that cannot take file backups itself. Your data is stored on Neon, which keeps a history of changes you can restore from its dashboard. For an extra copy you control, run <code>pnpm backup</code> from a computer with the database address.</p>
+        </div>
+      </section>
+    );
+  }
   const stale = s.ageHours === null || s.ageHours > 72;
   const warn = !stale && s.ageHours !== null && s.ageHours > 36;
   const tone = stale ? 'red' : warn ? 'amber' : 'green';

@@ -36,6 +36,8 @@ services:
       DATABASE_URL: postgresql://dist:${DB_PASSWORD}@db:5432/distribution
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/.env}
       WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN in deploy/.env}
+      # Dates (what counts as "today") follow shop time, not the server's.
+      TZ: ${APP_TZ:-Asia/Karachi}
       BACKUP_EVERY_HOURS: ${BACKUP_EVERY_HOURS:-24}
       BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
       BACKUP_KEEP_MONTHS: ${BACKUP_KEEP_MONTHS:-12}

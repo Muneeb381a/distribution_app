@@ -28,13 +28,15 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
 
   constructor(private audit: AuditService) {}
 
+  /** Backups need pg_dump and a folder that stays; a serverless host has neither (Neon keeps its own history there). */
+  private supported() { return !process.env.VERCEL && existsSync(this.scriptPath()); }
   private dir() { return resolve(ROOT, process.env.BACKUP_DIR ?? 'backups'); }
   private everyHours() { return Number(process.env.BACKUP_EVERY_HOURS ?? 24); }
   private scriptPath() { return join(ROOT, 'scripts', 'backup.mjs'); }
 
   onModuleInit() {
     // Tests and one-off tools must not start dumping databases in the background.
-    if (process.env.NODE_ENV === 'test' || process.env.VITEST || process.env.BACKUP_AUTO === 'off') return;
+    if (process.env.NODE_ENV === 'test' || process.env.VITEST || process.env.BACKUP_AUTO === 'off' || process.env.VERCEL) return;
     if (!existsSync(this.scriptPath())) { this.log.warn('scripts/backup.mjs was not found, automatic backups are off'); return; }
     setTimeout(() => void this.autoIfDue(), 45_000).unref();
     this.timer = setInterval(() => void this.autoIfDue(), 30 * 60_000);
@@ -62,7 +64,8 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
       ageHours,
       count: files.length,
       everyHours: this.everyHours(),
-      auto: !(process.env.BACKUP_AUTO === 'off'),
+      supported: this.supported(),
+      auto: this.supported() && process.env.BACKUP_AUTO !== 'off',
       copyDir: process.env.BACKUP_COPY_DIR ?? null,
       copyReachable: process.env.BACKUP_COPY_DIR ? existsSync(resolve(process.env.BACKUP_COPY_DIR)) : null,
       running: !!this.running,
@@ -71,6 +74,7 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
 
   /** Runs the backup script once; a second request while one is running waits for that one. */
   run(): Promise<{ ok: boolean; message: string; warning?: boolean }> {
+    if (!this.supported()) return Promise.resolve({ ok: false, message: 'Backups cannot be taken from this host. The database host keeps its own history; ask it for a restore point.' });
     if (this.running) return this.running;
     this.running = new Promise((done) => {
       execFile(process.execPath, [this.scriptPath()], { cwd: ROOT, env: process.env, timeout: 10 * 60_000, maxBuffer: 1 << 24 }, (err, stdout, stderr) => {

@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsc -p ../../packages/shared/tsconfig.json && nest build",
     "deploy": "nest deploy",
+    "vercel-build": "node scripts/vercel-build.mjs",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
