@@ -3,6 +3,7 @@
   "framework": null,
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "node scripts/vercel-build.mjs",
+  "outputDirectory": "public",
   "rewrites": [{ "source": "/(.*)", "destination": "/api" }],
   "functions": {
     "api/index.js": { "maxDuration": 30, "memory": 1024, "includeFiles": "dist/**" }
