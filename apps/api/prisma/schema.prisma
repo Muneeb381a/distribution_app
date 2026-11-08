@@ -210,6 +210,7 @@ model Customer {
   sales          Sale[]
   ledger         CustomerLedger[]
   payments       Payment[]
+  reminders      ReminderLog[]
   empties        EmptiesLedger[]
 
   @@index([name])
@@ -646,6 +647,20 @@ model Holiday {
   employeeIds String[]
   createdById String
   createdAt   DateTime @default(now())
+}
+
+/// Each time someone reminded a customer about an unpaid balance (opened the WhatsApp message or called).
+model ReminderLog {
+  id          String   @id @default(uuid())
+  customerId  String
+  channel     String
+  /// What they owed when reminded.
+  amount      Decimal  @db.Decimal(14, 2)
+  createdById String
+  at          DateTime @default(now())
+  customer    Customer @relation(fields: [customerId], references: [id])
+
+  @@index([customerId, at])
 }
 
 model Attendance {

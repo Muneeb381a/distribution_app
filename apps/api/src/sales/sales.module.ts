@@ -55,6 +55,10 @@ interface SaleQuery {
 const range = (from?: string, to?: string) =>
   from || to ? { gte: from ? dayOf(from) : undefined, lte: to ? dayOf(to) : undefined } : undefined;
 
+class ReminderDto {
+  @IsIn(['WHATSAPP', 'CALL', 'OTHER']) channel: 'WHATSAPP' | 'CALL' | 'OTHER';
+}
+
 @Controller()
 class SalesController {
   constructor(private prisma: PrismaService, private sales: SalesService, private stock: StockService, private audit: AuditService) {}
@@ -207,6 +211,63 @@ class SalesController {
   }
 
   // ---------------------------------------------------------------- khata
+
+  /**
+   * Who to chase: every customer who owes money, with how old the debt is (split by age), when they last paid,
+   * and when someone last reminded them. Ages come from the bill-wise allocation, oldest bill first.
+   */
+  @Get('khata/dues') @RequirePermissions('PAYMENT_RECORD')
+  async dues(@Query('area') area?: string) {
+    const customers = await withCustomerBalances(this.prisma, await this.prisma.customer.findMany({ where: { isActive: true, area } }));
+    const owing = customers.filter((c) => c.balance.gt(0));
+    const ids = owing.map((c) => c.id);
+    const [alloc, lastPaid, lastReminder] = await Promise.all([
+      loadAllocations(this.prisma, ids),
+      this.prisma.payment.findMany({ where: { customerId: { in: ids }, status: 'ACTIVE' }, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], distinct: ['customerId'], select: { customerId: true, date: true, amount: true } }),
+      this.prisma.reminderLog.findMany({ where: { customerId: { in: ids } }, orderBy: { at: 'desc' }, distinct: ['customerId'], select: { customerId: true, at: true, channel: true } }),
+    ]);
+    const ZERO = new Prisma.Decimal(0);
+    const rows = owing.map((c) => {
+      const a = alloc.get(c.id);
+      const b = { d30: ZERO, d60: ZERO, d90: ZERO, older: ZERO, brought: a?.openingRemaining ?? ZERO };
+      let oldest: number | null = null;
+      for (const bill of a?.bills ?? []) {
+        if (!bill.remaining.gt(0)) continue;
+        oldest = oldest === null ? bill.ageDays : Math.max(oldest, bill.ageDays);
+        if (bill.ageDays <= 30) b.d30 = b.d30.plus(bill.remaining);
+        else if (bill.ageDays <= 60) b.d60 = b.d60.plus(bill.remaining);
+        else if (bill.ageDays <= 90) b.d90 = b.d90.plus(bill.remaining);
+        else b.older = b.older.plus(bill.remaining);
+      }
+      const paid = lastPaid.find((p) => p.customerId === c.id);
+      const rem = lastReminder.find((r) => r.customerId === c.id);
+      return {
+        id: c.id, name: c.name, shopName: c.shopName, area: c.area, phone: c.phone,
+        balance: c.balance, creditLimit: c.creditLimit, overLimit: overLimit(c.balance, c.creditLimit),
+        oldestDays: oldest, buckets: b,
+        lastPaid: paid ? { date: paid.date, amount: paid.amount } : null,
+        lastReminded: rem ? { at: rem.at, channel: rem.channel } : null,
+      };
+    }).sort((x, y) => (y.oldestDays ?? 0) - (x.oldestDays ?? 0) || y.balance.comparedTo(x.balance));
+    const sum = (f: (r: (typeof rows)[number]) => Prisma.Decimal) => rows.reduce((t, r) => t.plus(f(r)), ZERO);
+    return {
+      rows,
+      totals: {
+        customers: rows.length, due: sum((r) => r.balance),
+        d30: sum((r) => r.buckets.d30), d60: sum((r) => r.buckets.d60), d90: sum((r) => r.buckets.d90), older: sum((r) => r.buckets.older), brought: sum((r) => r.buckets.brought),
+      },
+    };
+  }
+
+  /** Notes that someone reminded this customer (opened the WhatsApp message, or called), so the list can say when. */
+  @Post('khata/:customerId/reminders') @RequirePermissions('PAYMENT_RECORD')
+  async remind(@Param('customerId') customerId: string, @Body() dto: ReminderDto, @CurrentUser() u: AuthUser) {
+    const [customer] = await withCustomerBalances(this.prisma, await this.prisma.customer.findMany({ where: { id: customerId } }));
+    if (!customer) throw new NotFoundException('Unknown customer');
+    const row = await this.prisma.reminderLog.create({ data: { customerId, channel: dto.channel, amount: customer.balance, createdById: u.id } });
+    await this.audit.log(u.id, 'REMIND', 'Customer', customerId, undefined, { channel: dto.channel, amount: customer.balance.toString() });
+    return { id: row.id, at: row.at };
+  }
 
   /** Outstanding balances, highest first, flagging customers over their credit limit. */
   @Get('khata/balances') @RequirePermissions('PAYMENT_RECORD')
