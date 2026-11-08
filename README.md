@@ -58,3 +58,7 @@ pnpm test
 ```
 
 Builds the API, then runs the end-to-end tests (selling and khata, credit limit, returns and cancellation, stock races, supplier empties, payroll, offline sync, sign-in and permissions) against a throwaway database called `distribution_test`. The database is dropped and rebuilt on every run, so your dev data is never touched. The Docker database must be running.
+
+## Putting it on a server
+
+`deploy/` has everything needed to run the whole system (database, API, website, HTTPS) with Docker on one server, either a free Oracle Cloud VM or a shop PC behind a Cloudflare Tunnel. Start with `deploy/DEPLOY.md`.

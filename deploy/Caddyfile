@@ -1,0 +1,14 @@
+# Caddy gets and renews the HTTPS certificates by itself when WEB_HOST and API_HOST are real domain names
+# that point at this server. For a test on one PC, use http://web.localhost and http://api.localhost.
+{$WEB_HOST} {
+	encode zstd gzip
+	reverse_proxy web:3100
+}
+
+{$API_HOST} {
+	encode zstd gzip
+	request_body {
+		max_size 6MB
+	}
+	reverse_proxy api:3010
+}

@@ -4,3 +4,6 @@ dist
 .env
 .env.local
 backups/
+
+# server settings (secrets)
+deploy/.env
