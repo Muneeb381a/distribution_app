@@ -128,6 +128,7 @@ export default function DashboardPage() {
   const [collections, setCollections] = useState<Collections | null>(null);
   const [team, setTeam] = useState<TeamToday | null>(null);
   const [backupAge, setBackupAge] = useState<number | null | undefined>(undefined);
+  const [dayClosed, setDayClosed] = useState<boolean | undefined>(undefined);
 
   useEffect(() => {
     if (!allowed) return;
@@ -138,6 +139,7 @@ export default function DashboardPage() {
     api<Collections>(`/reports/collections?from=${localDay(t)}&to=${localDay(t)}`).then(setCollections).catch(() => setCollections({ rows: [] }));
     api<StockRow[]>('/stock').then(setStock).catch(() => setStock([]));
     if (can(user, 'SETTINGS_EDIT')) api<{ ageHours: number | null }>('/backups/status').then((b) => setBackupAge(b.ageHours)).catch(() => {});
+    if (can(user, 'PAYMENT_RECORD')) api<{ closed: unknown }>(`/day-end?date=${localDay(t)}`).then((d) => setDayClosed(!!d.closed)).catch(() => {});
     api<TeamToday>(`/reports/team?from=${localDay(t)}&to=${localDay(t)}`).then(setTeam).catch(() => setTeam({ people: [] }));
   }, [allowed, user]);
 
@@ -195,6 +197,7 @@ export default function DashboardPage() {
     if (data.chequesDue.count > 0) attention.push({ icon: 'wallet', tone: 'amber', title: `${data.chequesDue.count} cheque${data.chequesDue.count === 1 ? '' : 's'} to deposit`, sub: `Rs ${rupees(data.chequesDue.amount)}, dated today or earlier`, to: '/cheques' });
     if (data.lowStockCount > 0) attention.push({ icon: 'stock', tone: 'amber', title: `${data.lowStockCount} product${data.lowStockCount === 1 ? '' : 's'} to reorder`, sub: low.slice(0, 2).map((p) => productLabel(p)).join(', ') + (data.lowStockCount > 2 ? '…' : ''), to: '/stock?low=1' });
     if (backupAge === null || (backupAge !== undefined && backupAge > 48)) attention.push({ icon: 'cloud', tone: 'red', title: backupAge === null ? 'No backup has been taken yet' : `No backup for ${Math.round(backupAge / 24)} days`, sub: 'Your data is only on this computer. Back up now.', to: '/settings?tab=backup' });
+    if (dayClosed === false && hour >= 18) attention.push({ icon: 'wallet', tone: 'amber', title: 'Today has not been closed yet', sub: 'Count the cash and close the day', to: '/day-end' });
     if (damaged.length > 0) attention.push({ icon: 'ban', tone: 'red', title: `${damaged.length} damaged stock line${damaged.length === 1 ? '' : 's'}`, sub: damaged.slice(0, 2).map((r) => productLabel({ name: r.productName, size: r.size })).join(', '), to: '/stock' });
   }
 

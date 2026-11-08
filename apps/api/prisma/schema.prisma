@@ -663,6 +663,25 @@ model ReminderLog {
   @@index([customerId, at])
 }
 
+/// The end-of-day cash count: what the drawer should hold, what was counted, and the difference.
+model DayClose {
+  id          String   @id @default(uuid())
+  date        DateTime @unique @db.Date
+  /// Cash in the drawer when the day started (the previous day's count unless entered).
+  openingCash Decimal  @db.Decimal(14, 2)
+  cashIn      Decimal  @db.Decimal(14, 2)
+  cashOut     Decimal  @db.Decimal(14, 2)
+  expected    Decimal  @db.Decimal(14, 2)
+  counted     Decimal  @db.Decimal(14, 2)
+  /// counted - expected: negative = short, positive = over.
+  difference  Decimal  @db.Decimal(14, 2)
+  note        String?
+  /// Sales, udhaar and money by method as they stood when the day was closed.
+  summary     Json?
+  closedById  String
+  closedAt    DateTime @default(now())
+}
+
 model Attendance {
   employeeId String
   date       DateTime         @db.Date
