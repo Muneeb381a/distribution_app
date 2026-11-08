@@ -20,8 +20,9 @@ import { SettingsModule } from './settings/settings.module.js';
 import { TripsModule } from './trips/trips.module.js';
 import { BackupModule } from './backup/backup.module.js';
 import { DayEndModule } from './dayend/dayend.module.js';
+import { ProofModule } from './sales/proof.module.js';
 
 @Module({
-  imports: [PrismaModule, AuditModule, AuthModule, CatalogModule, MasterDataModule, UsersModule, ImportModule, StockCoreModule, StockModule, PurchasingModule, SalesModule, HrModule, ReportsModule, DashboardModule, SearchModule, SupplierEmptiesModule, SyncModule, SettingsModule, TripsModule, BackupModule, DayEndModule],
+  imports: [PrismaModule, AuditModule, AuthModule, CatalogModule, MasterDataModule, UsersModule, ImportModule, StockCoreModule, StockModule, PurchasingModule, SalesModule, HrModule, ReportsModule, DashboardModule, SearchModule, SupplierEmptiesModule, SyncModule, SettingsModule, TripsModule, BackupModule, DayEndModule, ProofModule],
 })
 export class AppModule {}

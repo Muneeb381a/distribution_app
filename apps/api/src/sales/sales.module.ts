@@ -86,14 +86,14 @@ class SalesController {
       },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
       take: Math.min(Number(q.limit) || 100, 500),
-      include: { customer: { select: { name: true, shopName: true } }, salesman: { select: { name: true } }, location: { select: { name: true } } },
+      include: { customer: { select: { name: true, shopName: true } }, salesman: { select: { name: true } }, location: { select: { name: true } }, _count: { select: { proofs: true } } },
     });
     // Paid / part / unpaid per bill, worked out the same way as on the khata.
     const alloc = await loadAllocations(this.prisma, sales.flatMap((x) => (x.customerId && x.status === 'ACTIVE' ? [x.customerId] : [])));
     const vehicles = new Map((await this.prisma.location.findMany({ where: { id: { in: [...new Set(sales.flatMap((x) => (x.vehicleId ? [x.vehicleId] : [])))] } }, select: { id: true, name: true } })).map((v) => [v.id, v.name]));
     return sales.map((x) => {
       const bill = x.customerId ? alloc.get(x.customerId)?.bills.find((b) => b.saleId === x.id) : undefined;
-      return { ...x, vehicleName: x.vehicleId ? vehicles.get(x.vehicleId) ?? null : null, payStatus: bill?.status ?? null, paid: bill?.paid ?? null, remaining: bill?.remaining ?? null };
+      return { ...x, proofCount: x._count.proofs, vehicleName: x.vehicleId ? vehicles.get(x.vehicleId) ?? null : null, payStatus: bill?.status ?? null, paid: bill?.paid ?? null, remaining: bill?.remaining ?? null };
     });
   }
 

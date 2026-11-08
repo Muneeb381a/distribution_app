@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { BillA4 } from '@/components/BillA4';
 import { BusyButton, useConfirm, useToast } from '@/components/Feedback';
 import { DeliveryPanel } from '@/components/DeliveryPanel';
+import { ProofPanel } from '@/components/ProofPanel';
 import { Icon } from '@/components/Icon';
 import PrintPanel, { usePrintMode } from '@/components/PrintPanel';
 import { api, can, useUser } from '@/lib/api';
@@ -240,6 +241,7 @@ export default function BillPage() {
             {bill.saleType === 'DELIVERY' && !cancelled && (
               <>
                 <DeliveryPanel sale={bill} canMark={can(user, 'SALE_CREATE')} onDone={() => { void load(); }} />
+                <ProofPanel saleId={bill.id} canAdd={can(user, 'SALE_CREATE')} canRemove={can(user, 'USER_MANAGE')} />
                 <Link className="btn secondary no-print" href={`/sales/${bill.id}/slip`}><Icon name="print" />Delivery slip{bill.vehicle ? ` · ${bill.vehicle.name}` : ''}</Link>
               </>
             )}

@@ -502,6 +502,7 @@ model Sale {
   items           SaleItem[]
   returns         SaleReturnItem[]
   payments        Payment[]
+  proofs          SaleProof[]
 
   @@index([customerId, date])
   @@index([businessLine, date])
@@ -680,6 +681,20 @@ model DayClose {
   summary     Json?
   closedById  String
   closedAt    DateTime @default(now())
+}
+
+/// A photo kept with a bill, normally of the signed delivery slip as proof the goods arrived.
+model SaleProof {
+  id          String   @id @default(uuid())
+  saleId      String
+  mime        String
+  data        Bytes
+  bytes       Int
+  createdById String
+  createdAt   DateTime @default(now())
+  sale        Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  @@index([saleId])
 }
 
 model Attendance {

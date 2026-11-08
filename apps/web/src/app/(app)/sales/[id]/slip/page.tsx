@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { DeliveryPanel, type DeliveryState } from '@/components/DeliveryPanel';
+import { ProofPanel } from '@/components/ProofPanel';
 import { Icon } from '@/components/Icon';
 import { api, can, useUser } from '@/lib/api';
 import { usePageTitle } from '@/lib/pageTitle';
@@ -89,6 +90,7 @@ export default function DeliverySlipPage() {
         </article>
         <aside className="doc-side no-print">
           <DeliveryPanel sale={s} canMark={can(user, 'SALE_CREATE')} onDone={load} />
+          {s.status !== 'CANCELLED' && <ProofPanel saleId={s.id} canAdd={can(user, 'SALE_CREATE')} canRemove={can(user, 'USER_MANAGE')} />}
           {!s.deliveryStatus && <section className="card"><p className="muted" style={{ margin: 0 }}>This bill came from a loaded vehicle, so it is not tracked as a pending delivery. You can still print and sign the slip.</p></section>}
         </aside>
       </div>

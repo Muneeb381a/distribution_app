@@ -15,7 +15,7 @@ import { formatDate, money, saleTypeLabel } from '@dist/shared';
 interface SaleRow {
   id: string; billNo: string; date: string; businessLine: string; saleType: string; net: string; paidNow: string; status: string;
   /** From the khata allocation: paid so far and still owed, null for cash sales and cancelled bills. */
-  deliveryStatus: string | null; vehicleName: string | null;
+  deliveryStatus: string | null; vehicleName: string | null; proofCount: number;
   payStatus: 'PAID' | 'PART' | 'UNPAID' | null; paid: string | null; remaining: string | null;
   customer: { name: string; shopName: string | null } | null; salesman: { name: string } | null;
 }
@@ -112,6 +112,7 @@ export default function SalesPage() {
                 <td className="num">{r.status !== 'CANCELLED' && Number(r.remaining ?? 0) > 0 ? <strong className="left-amt">{money(r.remaining ?? 0)}</strong> : <span className="muted">—</span>}</td>
                 <td>
                   {r.deliveryStatus === 'PENDING' && <span className="badge blue" style={{ marginRight: 6 }}>{r.vehicleName ? `On ${r.vehicleName}` : 'Not delivered'}</span>}
+                  {r.saleType === 'DELIVERY' && r.status !== 'CANCELLED' && (r.proofCount > 0 ? <span className="badge teal" style={{ marginRight: 6 }} title="Photo of the signed slip is saved"><Icon name="camera" />{r.proofCount}</span> : r.deliveryStatus === 'DELIVERED' ? <span className="badge amber" style={{ marginRight: 6 }} title="Delivered, but no photo of the signed slip">no photo</span> : null)}
                   {r.payStatus === 'PART' ? <span className="badge amber">Part paid · left {money(r.remaining ?? 0)}</span>
                     : <DueBadge status={r.status} total={r.net} paid={r.paid ?? r.paidNow} />}
                 </td>

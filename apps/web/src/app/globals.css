@@ -2369,3 +2369,21 @@ a.dx-kpi:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); text
 .ro-dead-n { display: grid; justify-items: end; line-height: 1.3; font-variant-numeric: tabular-nums; }
 .ro-dead-n span { font-size: 12px; color: var(--muted); }
 .ro-fine { margin: 10px 0 8px; }
+
+/* --- Proof of delivery --- */
+.proof { display: grid; gap: 12px; margin: 0; }
+.proof .card-head { margin: 0; }
+.proof-empty { display: flex; align-items: center; gap: 10px; margin: 0; padding: 14px; border: 1.5px dashed var(--border-strong); border-radius: 12px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.proof-empty svg { width: 22px; height: 22px; flex-shrink: 0; color: var(--faint); }
+.proof-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; }
+.proof-grid li { display: grid; gap: 4px; }
+.proof-thumb, .proof-thumb:hover:not(:disabled) { position: relative; display: block; padding: 0; min-height: 0; width: 100%; aspect-ratio: 3 / 4; overflow: hidden; background: var(--surface-3); border: 1px solid var(--border); border-radius: 12px; box-shadow: none; transform: none; }
+.proof-thumb:hover:not(:disabled) { border-color: var(--accent); }
+.proof-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.proof-meta { font-size: 11.5px; color: var(--muted); }
+.proof .proof-add { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; }
+.proof .proof-add svg { width: 16px; height: 16px; }
+.proof-light { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; align-content: center; gap: 14px; padding: 24px; background: rgba(8, 12, 12, 0.88); animation: fade-in .2s ease-out both; outline: none; }
+.proof-light img { max-width: min(96vw, 900px); max-height: 78vh; object-fit: contain; border-radius: 10px; background: #fff; }
+.proof-light-bar { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.proof-light-bar .btn, .proof-light-bar button { display: inline-flex; align-items: center; gap: 7px; }

@@ -21,19 +21,22 @@ const ENTITIES: [string, string][] = [
   ['PurchaseReturn', 'Purchase returns'], ['SupplierPayment', 'Supplier payments'], ['Supplier', 'Suppliers'], ['SupplierEmpties', 'Supplier empties'],
   ['StockTransfer', 'Stock transfers'], ['StockAdjustment', 'Stock adjustments'], ['Expense', 'Expenses'], ['PayrollRun', 'Payroll'],
   ['SalaryAdvance', 'Advances'], ['Attendance', 'Attendance'], ['Employee', 'Employees'], ['Location', 'Locations'], ['Category', 'Categories'],
-  ['AppUser', 'Users'], ['Role', 'Roles'], ['Holiday', 'Holidays'], ['Device', 'Devices'],
+  ['AppUser', 'Users'], ['Role', 'Roles'], ['Holiday', 'Holidays'], ['Device', 'Devices'], ['DayClose', 'Day end'], ['Backup', 'Backups'],
 ];
 const ONE: Record<string, string> = {
   Sale: 'Bill', Payment: 'Receipt', Customer: 'Customer', Product: 'Product', Purchase: 'Purchase', PurchaseReturn: 'Purchase return',
   SupplierPayment: 'Supplier payment', Supplier: 'Supplier', SupplierEmpties: 'Supplier empties', StockTransfer: 'Stock transfer',
   StockAdjustment: 'Stock adjustment', Expense: 'Expense', PayrollRun: 'Payroll', SalaryAdvance: 'Advance', Attendance: 'Attendance',
-  Employee: 'Employee', Location: 'Location', Category: 'Category', AppUser: 'User', Role: 'Role', Holiday: 'Holiday', Device: 'Device',
+  Employee: 'Employee', Location: 'Location', Category: 'Category', AppUser: 'User', Role: 'Role', Holiday: 'Holiday', Device: 'Device', DayClose: 'Day end', Backup: 'Backup',
 };
 const ACTIONS: Record<string, [string, string, IconName]> = {
   CREATE: ['Created', 'green', 'plus'], UPDATE: ['Changed', 'blue', 'edit'], CANCEL: ['Cancelled', 'red', 'ban'], RUN: ['Finalised', 'teal', 'check'],
   SET_PRICES: ['Prices set', 'blue', 'trend'], SET_RATES: ['Rates set', 'blue', 'trend'], credit_override: ['Credit override', 'amber', 'alert'], CREDIT_OVERRIDE: ['Credit override', 'amber', 'alert'],
   LOGIN: ['Signed in', '', 'user'], ATTENDANCE: ['Attendance', '', 'employees'], IMPORT: ['Imported', 'amber', 'import'], DELIVER: ['Delivered', 'green', 'check'],
   HOLIDAY_ADD: ['Holiday added', 'green', 'history'], HOLIDAY_REMOVE: ['Holiday removed', 'red', 'history'], WEEKLY_OFF: ['Weekly off set', 'blue', 'history'],
+  PROOF_ADD: ['Photo added', 'green', 'camera'], PROOF_REMOVE: ['Photo removed', 'red', 'camera'],
+  BACKUP: ['Backed up', 'green', 'cloud'], BACKUP_AUTO: ['Backed up (automatic)', 'green', 'cloud'], BACKUP_DOWNLOAD: ['Backup downloaded', 'amber', 'download'],
+  DAY_CLOSE: ['Day closed', 'green', 'check'], DAY_REOPEN_RECLOSE: ['Day count changed', 'amber', 'edit'], REMIND: ['Reminded', 'blue', 'message'],
   UPDATE_PASSWORD: ['Password changed', 'amber', 'lock'], STOCK_MARK_DAMAGED: ['Marked damaged', 'red', 'ban'],
 };
 const HREF: Record<string, (id: string) => string> = {

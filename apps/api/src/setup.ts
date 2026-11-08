@@ -1,5 +1,6 @@
 import { ArgumentsHost, Catch, ExceptionFilter, INestApplication, Logger, ValidationPipe } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { Response } from 'express';
 
 /** Maps common Prisma errors to proper HTTP statuses instead of a generic 500. */
@@ -20,6 +21,8 @@ export class PrismaExceptionFilter implements ExceptionFilter {
 
 /** Everything that makes the app behave like production; shared by main.ts and the tests. */
 export function configureApp(app: INestApplication) {
+  // Photos of signed slips travel as base64 inside JSON, so the default 100 kb is too small (they are shrunk to ~300 kb first).
+  (app as unknown as NestExpressApplication).useBodyParser('json', { limit: '4mb' });
   app.enableCors({ origin: process.env.WEB_ORIGIN ?? 'http://localhost:3100' });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
   app.useGlobalFilters(new PrismaExceptionFilter());
