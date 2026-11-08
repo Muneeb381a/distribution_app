@@ -40,7 +40,8 @@ services:
       BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
       BACKUP_KEEP_MONTHS: ${BACKUP_KEEP_MONTHS:-12}
     volumes:
-      - ${BACKUP_HOST_DIR:-../backups}:/app/backups
+      # ":z" lets the container use this folder on servers that run SELinux (Oracle Linux, Fedora, RHEL); other systems ignore it.
+      - ${BACKUP_HOST_DIR:-../backups}:/app/backups:z
 
   web:
     build:
@@ -67,7 +68,7 @@ services:
       WEB_HOST: ${WEB_HOST:-}
       API_HOST: ${API_HOST:-}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro,z
       - caddy_data:/data
       - caddy_config:/config
 

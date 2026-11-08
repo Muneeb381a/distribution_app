@@ -33,6 +33,10 @@ Do raaste hain, dono ke liye files wahi hain:
    ```
 5. Domain ke DNS mein do **A record** banayen: `app` aur `api`, dono VM ke public IP par.
 
+> **Oracle VM par bhi Cloudflare Tunnel chal sakta hai** (aur yahi zyada mehfooz hai). Is surat mein port 80/443 kholne ki
+> zaroorat nahi, qadam 4 (firewall) chhor dein, aur `--profile tunnel` se chalayein. Tunnel ke liye **Cloudflare par ek domain
+> hona zaroori hai** (neeche "Cloudflare Tunnel ke qadam").
+
 ### Raasta 2: Apna PC / laptop
 
 1. Ubuntu server ya Windows par Docker Desktop chalayein. PC hamesha on aur internet se judaa rahe.
@@ -41,7 +45,63 @@ Do raaste hain, dono ke liye files wahi hain:
    - `app.dukaan.pk` → `http://web:3100`
    - `api.dukaan.pk` → `http://api:3010`
 
-## 2. Docker aur code lagana
+### Agar aap ki VM **Oracle Linux 9** hai (Ubuntu nahi)
+
+Oracle ka default image Oracle Linux hota hai. Is mein `ssh` ka user **`opc`** hota hai (`ssh -i key.key opc@PUBLIC-IP`),
+`apt` ki jagah `dnf`, aur `iptables` ki jagah `firewalld` chalta hai. Upar ke qadam 4 ki jagah ye karein:
+
+```bash
+sudo firewall-cmd --permanent --add-service=http --add-service=https
+sudo firewall-cmd --reload
+```
+
+Docker (qadam 2 ki jagah, ARM par bhi chalta hai):
+
+```bash
+sudo dnf install -y dnf-plugins-core git
+sudo dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
+sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER      # phir logout / login
+```
+
+Oracle Linux mein SELinux chalu hota hai. Is liye compose mein bind mounts par `:z` laga hai, use hatayein mat.
+Backup ki dusri copy ke liye rclone: `curl https://rclone.org/install.sh | sudo bash` (qadam 6 mein `apt` ki jagah).
+Cron mein path `/home/opc/distribution_app/...` likhein.
+
+### Cloudflare Tunnel ke qadam (Oracle VM ya apna PC, dono ke liye)
+
+Tunnel server se **bahar ki taraf** ek mehfooz rasta kholta hai, to router ya Oracle ke firewall mein koi port kholna nahi padta,
+aur server ka asli IP chhupa rehta hai. HTTPS Cloudflare khud deta hai.
+
+1. **Domain chahiye** jo Cloudflare ke zariye chalay. Aap ke paas domain ho to dash.cloudflare.com par muft account bana kar
+   **Add a site** karein aur apne registrar mein Cloudflare ke nameservers laga dein (active hone mein kuch ghante lag sakte hain).
+   Domain na ho to Cloudflare par seedha khareed lein (**Domain Registration**, qeemat bina nafe ke, `.com` kareeb 10 dollar saal).
+2. **Zero Trust → Networks → Tunnels → Create a tunnel → Cloudflared**, naam `distribution`. Environment mein **Docker** chunein.
+   Jo lamba command dikhega usmein `--token ...` ke baad wala lamba lafz (sirf wahi) copy karein. Wo `TUNNEL_TOKEN` hai.
+   (Zero Trust ka muft plan shuru karte waqt Cloudflare card maang sakta hai, paise nahi katte.)
+3. Usi tunnel ke **Public hostname** tab mein do entries banayein:
+
+   | Subdomain | Domain | Service |
+   |---|---|---|
+   | `app` | `aap-ka-domain.com` | `HTTP` · `web:3100` |
+   | `api` | `aap-ka-domain.com` | `HTTP` · `api:3010` |
+
+   (`web` aur `api` wahi naam hain jo docker compose ke andar hain, kyunke tunnel ka container usi network mein chalta hai.)
+4. `deploy/.env` mein:
+   ```
+   WEB_ORIGIN=https://app.aap-ka-domain.com
+   PUBLIC_API_URL=https://api.aap-ka-domain.com
+   TUNNEL_TOKEN=<wo lamba token>
+   ```
+   `WEB_HOST` aur `API_HOST` khali chhor dein (sirf Caddy ke liye hain).
+5. Chalayein (qadam 4 mein `--profile tunnel`). Tunnel ke page par status **Healthy** hona chahiye.
+6. Phir `https://app.aap-ka-domain.com` kholein.
+
+Extra hifazat (zaroori nahi): Zero Trust mein **Access → Applications** se website ke aage Cloudflare ka login laga sakte hain,
+muft plan 50 logon tak.
+
+## 2. Docker aur code lagana (Ubuntu)
 
 ```bash
 curl -fsSL https://get.docker.com | sudo sh
