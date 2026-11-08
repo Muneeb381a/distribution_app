@@ -18,8 +18,9 @@ import { SearchModule } from './search/search.module.js';
 import { SyncModule } from './sync/sync.module.js';
 import { SettingsModule } from './settings/settings.module.js';
 import { TripsModule } from './trips/trips.module.js';
+import { BackupModule } from './backup/backup.module.js';
 
 @Module({
-  imports: [PrismaModule, AuditModule, AuthModule, CatalogModule, MasterDataModule, UsersModule, ImportModule, StockCoreModule, StockModule, PurchasingModule, SalesModule, HrModule, ReportsModule, DashboardModule, SearchModule, SupplierEmptiesModule, SyncModule, SettingsModule, TripsModule],
+  imports: [PrismaModule, AuditModule, AuthModule, CatalogModule, MasterDataModule, UsersModule, ImportModule, StockCoreModule, StockModule, PurchasingModule, SalesModule, HrModule, ReportsModule, DashboardModule, SearchModule, SupplierEmptiesModule, SyncModule, SettingsModule, TripsModule, BackupModule],
 })
 export class AppModule {}

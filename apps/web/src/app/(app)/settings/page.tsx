@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import AppearancePanel from '@/components/AppearancePanel';
+import BackupPanel from '@/components/BackupPanel';
 import { BusyButton, useToast } from '@/components/Feedback';
 import { Choice, Field, FormActions, FormCard, FormSection } from '@/components/Form';
 import { Icon } from '@/components/Icon';
@@ -32,7 +33,7 @@ export default function SettingsPage() {
   const saved = useSettings();
   const [f, setF] = useState<BusinessSettings>(saved);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<'business' | 'look'>('business');
+  const [tab, setTab] = useState<'business' | 'look' | 'backup'>(() => (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('tab') === 'backup' ? 'backup' : 'business'));
   const [preview, setPreview] = useState('');
   const editable = can(user, 'SETTINGS_EDIT');
   const dirty = JSON.stringify(f) !== JSON.stringify(saved);
@@ -82,9 +83,11 @@ export default function SettingsPage() {
       <div className="tabs" role="tablist" aria-label="Settings sections">
         <button type="button" role="tab" aria-selected={tab === 'business'} onClick={() => setTab('business')}>Business &amp; bills</button>
         <button type="button" role="tab" aria-selected={tab === 'look'} onClick={() => setTab('look')}>Appearance</button>
+        {editable && <button type="button" role="tab" aria-selected={tab === 'backup'} onClick={() => setTab('backup')}>Backup</button>}
       </div>
 
       {tab === 'look' && <AppearancePanel />}
+      {tab === 'backup' && editable && <BackupPanel />}
       {tab === 'business' && <div className="settings-grid">
         <FormCard onSubmit={submit}
           actions={editable ? (
