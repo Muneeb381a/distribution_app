@@ -1,3 +1,4 @@
+import { currentTenant } from '../tenancy/tenant-context.js';
 import { BadRequestException, Body, Controller, Get, Module, Param, Patch, Post } from '@nestjs/common';
 import { IsArray, IsBoolean, IsIn, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
 import bcrypt from 'bcryptjs';
@@ -79,8 +80,17 @@ class UsersController {
     return this.prisma.appUser.findMany({ select: publicUser, orderBy: { username: 'asc' } });
   }
 
+  /** The plan of this business may cap how many staff accounts can be active. */
+  private async checkSeat() {
+    const max = currentTenant()?.maxUsers;
+    if (max && (await this.prisma.appUser.count({ where: { isActive: true } })) >= max) {
+      throw new BadRequestException(`This account allows ${max} active user${max === 1 ? '' : 's'}. Turn one off first, or ask the software provider for a bigger plan.`);
+    }
+  }
+
   @Post('users') @RequirePermissions('USER_MANAGE')
   async createUser(@Body() dto: CreateUserDto, @CurrentUser() u: AuthUser) {
+    await this.checkSeat();
     const { password, ...rest } = dto;
     const user = await this.prisma.appUser.create({
       data: { ...rest, passwordHash: await bcrypt.hash(password, 10) },
@@ -94,6 +104,7 @@ class UsersController {
   async updateUser(@Param('id') id: string, @Body() dto: UpdateUserDto, @CurrentUser() u: AuthUser) {
     if (id === u.id && dto.isActive === false) throw new BadRequestException('You cannot deactivate yourself');
     const before = await this.prisma.appUser.findUniqueOrThrow({ where: { id }, select: publicUser });
+    if (dto.isActive === true && !before.isActive) await this.checkSeat();
     const { password, ...rest } = dto;
     const after = await this.prisma.appUser.update({
       where: { id },

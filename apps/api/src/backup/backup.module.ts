@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Injectable, Logger, Module, NotFoundException, OnModuleDestroy, OnModuleInit, Param, Post, Res, StreamableFile } from '@nestjs/common';
+import { BadRequestException, Controller, ForbiddenException, Get, Injectable, Logger, Module, NotFoundException, OnModuleDestroy, OnModuleInit, Param, Post, Res, StreamableFile } from '@nestjs/common';
 import { execFile } from 'node:child_process';
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -6,6 +6,10 @@ import { fileURLToPath } from 'node:url';
 import type { Response } from 'express';
 import { AuditService } from '../audit/audit.module.js';
 import { CurrentUser, RequirePermissions, type AuthUser } from '../common/decorators.js';
+import { currentTenant, MAIN_TENANT } from '../tenancy/tenant-context.js';
+
+/** A backup is a dump of the whole database, every business included, so only the original business may use it. */
+const isMain = () => (currentTenant()?.code ?? MAIN_TENANT) === MAIN_TENANT;
 
 // apps/api/dist/backup/backup.module.js -> the repository root, where scripts/backup.mjs and backups/ live.
 const ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -29,7 +33,7 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
   constructor(private audit: AuditService) {}
 
   /** Backups need pg_dump and a folder that stays; a serverless host has neither (Neon keeps its own history there). */
-  private supported() { return !process.env.VERCEL && existsSync(this.scriptPath()); }
+  private supported() { return isMain() && !process.env.VERCEL && existsSync(this.scriptPath()); }
   private dir() { return resolve(ROOT, process.env.BACKUP_DIR ?? 'backups'); }
   private everyHours() { return Number(process.env.BACKUP_EVERY_HOURS ?? 24); }
   private scriptPath() { return join(ROOT, 'scripts', 'backup.mjs'); }
@@ -45,6 +49,7 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
   onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
 
   list(): BackupFile[] {
+    if (!isMain()) return [];
     const d = this.dir();
     if (!existsSync(d)) return [];
     return readdirSync(d).filter((f) => FILE.test(f)).map((name) => {
@@ -74,7 +79,7 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
 
   /** Runs the backup script once; a second request while one is running waits for that one. */
   run(): Promise<{ ok: boolean; message: string; warning?: boolean }> {
-    if (!this.supported()) return Promise.resolve({ ok: false, message: 'Backups cannot be taken from this host. The database host keeps its own history; ask it for a restore point.' });
+    if (!this.supported()) return Promise.resolve({ ok: false, message: !isMain() ? 'Your data is backed up by the software provider.' : 'Backups cannot be taken from this host. The database host keeps its own history; ask it for a restore point.' });
     if (this.running) return this.running;
     this.running = new Promise((done) => {
       execFile(process.execPath, [this.scriptPath()], { cwd: ROOT, env: process.env, timeout: 10 * 60_000, maxBuffer: 1 << 24 }, (err, stdout, stderr) => {
@@ -102,6 +107,7 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
   }
 
   filePath(name: string) {
+    if (!isMain()) throw new ForbiddenException('Backups are kept by the software provider');
     if (!FILE.test(name)) throw new BadRequestException('That is not a backup file name');
     const p = join(this.dir(), name);
     if (!existsSync(p)) throw new NotFoundException('That backup no longer exists');

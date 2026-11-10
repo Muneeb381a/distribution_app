@@ -56,6 +56,15 @@ async function request(path: string, init: RequestInit = {}): Promise<Response> 
   if (token) headers.set('Authorization', `Bearer ${token}`);
   if (init.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json');
   const res = await fetch(`${API_URL}${path}`, { ...init, headers });
+  // The software provider switched this account off (unpaid, ended, suspended): sign out and say why.
+  if (res.status === 403 && !path.startsWith('/auth/login')) {
+    const body = await res.clone().json().catch(() => null) as { code?: string; message?: string } | null;
+    if (body?.code === 'TENANT_BLOCKED') {
+      clearSession();
+      try { sessionStorage.setItem('dist.blocked', body.message ?? 'This account is not available.'); } catch { /* the sign-in page just will not show the reason */ }
+      window.location.href = '/login';
+    }
+  }
   if (res.status === 401 && !path.startsWith('/auth/login')) {
     clearSession();
     // Full reload on purpose: drops all in-memory state of the expired session.

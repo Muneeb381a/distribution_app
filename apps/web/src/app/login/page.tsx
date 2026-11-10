@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 
 import { Avatar } from '@/components/Avatar';
 import { BusyButton } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
-import { forgetAccount, knownAccounts, type KnownAccount } from '@/lib/accounts';
+import { forgetAccount, getBusiness, knownAccounts, setBusiness, type KnownAccount } from '@/lib/accounts';
 import { api, saveSession, type SessionUser } from '@/lib/api';
 import { getSettings } from '@/lib/settings';
 import { setTheme, useTheme, type ThemePref } from '@/lib/theme';
@@ -24,11 +24,31 @@ export default function LoginPage() {
   const theme = useTheme();
   // The business name: last known on this PC first, then the server's (works before sign-in).
   const [brand, setBrand] = useState(DEFAULT_SETTINGS.businessName);
+  const [error, setError] = useState('');
+  // The business code: from the link (?business=ali-traders), else what was used last on this device. Empty = the original business.
+  const [business, setBusinessCode] = useState('');
+  const [ready, setReady] = useState(false);
   useEffect(() => {
+    const fromLink = new URLSearchParams(window.location.search).get('business');
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setBrand(getSettings().businessName);
-    api<{ businessName: string }>('/settings/public').then((s) => setBrand(s.businessName)).catch(() => {});
+    setBusinessCode((fromLink ?? getBusiness()).trim().toLowerCase());
+    setReady(true);
+    try {
+      const why = sessionStorage.getItem('dist.blocked');
+      if (why) { sessionStorage.removeItem('dist.blocked'); setError(why); }
+    } catch { /* ignore */ }
   }, []);
+  useEffect(() => {
+    if (!ready) return;
+    const code = business.trim().toLowerCase();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (!code) setBrand(getSettings().businessName);
+    // A typed code is looked up after a short pause, so the name changes to that business own name.
+    const t = setTimeout(() => {
+      api<{ businessName: string }>(`/settings/public${code ? `?business=${encodeURIComponent(code)}` : ''}`).then((s) => setBrand(s.businessName)).catch(() => {});
+    }, code ? 350 : 0);
+    return () => clearTimeout(t);
+  }, [business, ready]);
 
   const [accounts, setAccounts] = useState<KnownAccount[]>([]);
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -38,7 +58,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
   const [caps, setCaps] = useState(false);
-  const [error, setError] = useState('');
   const [shake, setShake] = useState(0);
   const [busy, setBusy] = useState(false);
   const [welcome, setWelcome] = useState(false);
@@ -46,11 +65,12 @@ export default function LoginPage() {
   const pw = useRef<HTMLInputElement>(null);
   const user = useRef<HTMLInputElement>(null);
 
-  const who = username.trim() ? accounts.find((a) => a.username === username.trim()) ?? null : null;
+  const who = username.trim() ? accounts.find((a) => a.username === username.trim() && a.business === business.trim().toLowerCase()) ?? null : null;
   const name = picked ?? who;
 
   function pick(a: KnownAccount) {
     setPicked(a);
+    setBusinessCode(a.business);
     setUsername(a.username);
     setError('');
     setTimeout(() => pw.current?.focus(), 0);
@@ -69,7 +89,9 @@ export default function LoginPage() {
     setBusy(true);
     setError('');
     try {
-      const res = await api<{ accessToken: string; user: SessionUser }>('/auth/login', { method: 'POST', json: { username: username.trim(), password } });
+      const code = business.trim().toLowerCase();
+      const res = await api<{ accessToken: string; user: SessionUser }>('/auth/login', { method: 'POST', json: { username: username.trim(), password, business: code || undefined } });
+      setBusiness(code);
       saveSession(res.accessToken, res.user);
       setWelcome(true);
       router.replace('/dashboard');
@@ -136,13 +158,13 @@ export default function LoginPage() {
             <div className="auth-accts rise" style={delay(100)} role="group" aria-label="Accounts used on this computer">
               <span className="auth-eyebrow">Continue as</span>
               {accounts.map((a) => (
-                <span key={a.username} className="auth-acct-wrap">
+                <span key={`${a.business}/${a.username}`} className="auth-acct-wrap">
                   <button type="button" className="auth-acct" onClick={() => pick(a)}>
                     <Avatar user={a} size={40} />
-                    <span className="auth-acct-text"><b>{a.displayName || a.username}</b><span>{a.roleName}</span></span>
+                    <span className="auth-acct-text"><b>{a.displayName || a.username}</b><span>{a.roleName}{a.business ? ` · ${a.business}` : ''}</span></span>
                     <Icon name="chevronRight" />
                   </button>
-                  <button type="button" className="auth-acct-x" aria-label={`Remove ${a.username} from this list`} title="Remove from this list" onClick={() => { forgetAccount(a.username); setAccounts(knownAccounts()); }}><Icon name="x" /></button>
+                  <button type="button" className="auth-acct-x" aria-label={`Remove ${a.username} from this list`} title="Remove from this list" onClick={() => { forgetAccount(a.username, a.business); setAccounts(knownAccounts()); }}><Icon name="x" /></button>
                 </span>
               ))}
               <span className="auth-or"><span>or use another account</span></span>
@@ -153,10 +175,18 @@ export default function LoginPage() {
             {picked ? (
               <div className="auth-picked rise pop" style={delay(60)}>
                 <Avatar user={picked} size={48} className="auth-picked-pic" />
-                <span className="auth-acct-text"><b>{picked.displayName || picked.username}</b><span>{picked.roleName} · @{picked.username}</span></span>
+                <span className="auth-acct-text"><b>{picked.displayName || picked.username}</b><span>{picked.roleName} · @{picked.username}{picked.business ? ` · ${picked.business}` : ''}</span></span>
                 <button type="button" className="auth-link" onClick={switchAccount}>Switch</button>
               </div>
             ) : (
+              <>
+              <div className="auth-field rise" style={delay(100)}>
+                <div className="auth-label-row"><label htmlFor="auth-biz">Business code</label><span className="auth-opt">Leave empty if you were not given one</span></div>
+                <span className="auth-input">
+                  <Icon name="locations" />
+                  <input id="auth-biz" value={business} onChange={(e) => setBusinessCode(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))} maxLength={30} autoCapitalize="none" autoComplete="organization" spellCheck={false} placeholder="e.g. ali-traders" />
+                </span>
+              </div>
               <div className="auth-field rise" style={delay(140)}>
                 <label htmlFor="auth-user">Username</label>
                 <span className="auth-input">
@@ -164,6 +194,7 @@ export default function LoginPage() {
                   <input id="auth-user" ref={user} value={username} onChange={(e) => setUsername(e.target.value)} autoFocus={!accounts.length} required autoComplete="username" autoCapitalize="none" spellCheck={false} placeholder="Your username" />
                 </span>
               </div>
+              </>
             )}
 
             <div className="auth-field rise" style={delay(200)}>

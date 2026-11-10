@@ -1,15 +1,21 @@
-import { BadRequestException, Body, Controller, Get, Global, Injectable, Module, Patch, Post, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Global, Injectable, Module, Patch, Post, Req, UnauthorizedException } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { IsOptional, IsString, Matches, MaxLength, MinLength, ValidateIf } from 'class-validator';
 import bcrypt from 'bcryptjs';
+import type { Request } from 'express';
 import { PrismaService } from '../prisma.service.js';
 import { CurrentUser, Public, type AuthUser } from '../common/decorators.js';
 import { AuthGuard } from './auth.guard.js';
+import { ActivityService } from '../tenancy/tenancy.module.js';
+import { clientInfo } from '../tenancy/request-info.js';
+import { currentTenant, MAIN_TENANT } from '../tenancy/tenant-context.js';
 
 class LoginDto {
   @IsString() username: string;
   @IsString() password: string;
+  /** The business code; left out for the original business. */
+  @IsOptional() @IsString() @MaxLength(40) business?: string;
 }
 
 class ProfileDto {
@@ -26,14 +32,20 @@ class PasswordDto {
 
 @Injectable()
 export class AuthService {
-  constructor(private prisma: PrismaService, private jwt: JwtService) {}
+  constructor(private prisma: PrismaService, private jwt: JwtService, private activity: ActivityService) {}
 
-  async login(username: string, password: string) {
+  async login(username: string, password: string, req: Request) {
+    const tenant = currentTenant();
+    const info = clientInfo(req);
+    const event = { scope: 'TENANT' as const, tenantId: tenant?.id, tenantCode: tenant?.code ?? MAIN_TENANT, username, info };
+    await this.activity.checkAttempts('TENANT', username, event.tenantCode, info.ip);
     const user = await this.prisma.appUser.findUnique({
       where: { username },
       include: { role: { include: { permissions: true } } },
     });
-    if (!user || !user.isActive || !(await bcrypt.compare(password, user.passwordHash))) {
+    const reason = !user ? 'Unknown username' : !user.isActive ? 'Account turned off' : !(await bcrypt.compare(password, user.passwordHash)) ? 'Wrong password' : null;
+    if (!user || reason) {
+      await this.activity.loginEvent({ ...event, success: false, reason: reason ?? 'Unknown username' });
       throw new UnauthorizedException('Invalid username or password');
     }
     const payload: AuthUser = {
@@ -42,7 +54,8 @@ export class AuthService {
       roleName: user.role.name,
       permissions: user.role.permissions.map((p) => p.permissionCode),
     };
-    return { accessToken: await this.jwt.signAsync(payload), user: { ...payload, displayName: user.displayName, avatar: user.avatar } };
+    await this.activity.loginEvent({ ...event, success: true });
+    return { accessToken: await this.jwt.signAsync({ ...payload, tid: tenant?.code ?? MAIN_TENANT }), user: { ...payload, displayName: user.displayName, avatar: user.avatar } };
   }
 
   /** The signed-in user with their picture; the picture is kept out of the token so it stays small. */
@@ -72,8 +85,8 @@ class AuthController {
   constructor(private auth: AuthService) {}
 
   @Public() @Post('login')
-  login(@Body() dto: LoginDto) {
-    return this.auth.login(dto.username, dto.password);
+  login(@Body() dto: LoginDto, @Req() req: Request) {
+    return this.auth.login(dto.username, dto.password, req);
   }
 
   @Get('me')

@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma.service.js';
 import { IS_PUBLIC, PERMISSIONS_KEY, type AuthUser } from '../common/decorators.js';
+import { currentTenant, MAIN_TENANT } from '../tenancy/tenant-context.js';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -18,7 +19,10 @@ export class AuthGuard implements CanActivate {
 
     let user: AuthUser;
     try {
-      user = await this.jwt.verifyAsync<AuthUser>(token);
+      const payload = await this.jwt.verifyAsync<AuthUser & { tid?: string }>(token);
+      // A token only works inside the business it was issued for.
+      if ((payload.tid ?? MAIN_TENANT) !== currentTenant()?.code) throw new UnauthorizedException();
+      user = payload;
     } catch {
       throw new UnauthorizedException();
     }

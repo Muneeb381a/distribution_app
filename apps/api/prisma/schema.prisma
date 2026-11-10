@@ -119,19 +119,19 @@ model Category {
 }
 
 model Product {
-  id                  String               @id @default(uuid())
+  id                  String                  @id @default(uuid())
   categoryId          String
   name                String
   brand               String?
   size                String?
   baseUnit            BaseUnit
-  isPacked            Boolean              @default(false)
-  returnableEmpty     Boolean              @default(false)
-  isActive            Boolean              @default(true)
+  isPacked            Boolean                 @default(false)
+  returnableEmpty     Boolean                 @default(false)
+  isActive            Boolean                 @default(true)
   /// Order more when saleable stock in all locations together falls to this (base units). Null = not watched.
-  reorderLevel        Decimal?             @db.Decimal(14, 3)
-  createdAt           DateTime             @default(now())
-  category            Category             @relation(fields: [categoryId], references: [id])
+  reorderLevel        Decimal?                @db.Decimal(14, 3)
+  createdAt           DateTime                @default(now())
+  category            Category                @relation(fields: [categoryId], references: [id])
   units               ProductUnit[]
   customerRates       CustomerRate[]
   stockMovements      StockMovement[]
@@ -163,7 +163,9 @@ model Location {
   name            String           @unique
   type            LocationType
   isActive        Boolean          @default(true)
-  /** Vehicles only: number plate, kind (pickup, loader rickshaw...), usual driver and a free note. */
+  /**
+   * Vehicles only: number plate, kind (pickup, loader rickshaw...), usual driver and a free note.
+   */
   regNo           String?
   vehicleKind     String?
   driverId        String?
@@ -238,12 +240,12 @@ model CustomerRate {
 }
 
 model Supplier {
-  id               String            @id @default(uuid())
+  id               String                  @id @default(uuid())
   name             String
   phone            String?
-  type             SupplierType      @default(OTHER)
-  openingBalance   Decimal           @default(0) @db.Decimal(14, 2)
-  isActive         Boolean           @default(true)
+  type             SupplierType            @default(OTHER)
+  openingBalance   Decimal                 @default(0) @db.Decimal(14, 2)
+  isActive         Boolean                 @default(true)
   purchases        Purchase[]
   purchaseReturns  PurchaseReturn[]
   supplierPayments SupplierPayment[]
@@ -382,19 +384,19 @@ model PurchaseReturnItem {
 }
 
 model SupplierPayment {
-  id          String   @id @default(uuid())
-  paymentNo   String   @unique
+  id          String    @id @default(uuid())
+  paymentNo   String    @unique
   supplierId  String
-  amount      Decimal  @db.Decimal(14, 2)
-  method      String   @default("CASH")
-  date        DateTime @db.Date
+  amount      Decimal   @db.Decimal(14, 2)
+  method      String    @default("CASH")
+  date        DateTime  @db.Date
   note        String?
   createdById String
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
   chequeNo    String?
   chequeBank  String?
   chequeDate  DateTime? @db.Date
-  supplier    Supplier @relation(fields: [supplierId], references: [id])
+  supplier    Supplier  @relation(fields: [supplierId], references: [id])
 }
 
 /// amount > 0 means we owe the supplier more (purchase); amount < 0 means we owe less (payment, return).
@@ -730,18 +732,18 @@ model Attendance {
 /// Money given to an employee ahead of salary. It is recovered from salary (all at once, or a fixed
 /// instalment each month) and/or repaid in cash; what is left is amount − active recoveries.
 model SalaryAdvance {
-  id           String            @id @default(uuid())
-  employeeId   String
-  date         DateTime          @db.Date
-  amount       Decimal           @db.Decimal(14, 2)
+  id          String            @id @default(uuid())
+  employeeId  String
+  date        DateTime          @db.Date
+  amount      Decimal           @db.Decimal(14, 2)
   /// Cut from each salary until recovered. Null = recover the whole remainder from the next salary.
-  installment  Decimal?          @db.Decimal(14, 2)
-  note         String?
-  status       DocStatus         @default(ACTIVE)
-  createdById  String
-  createdAt    DateTime          @default(now())
-  employee     Employee          @relation(fields: [employeeId], references: [id])
-  recoveries   AdvanceRecovery[]
+  installment Decimal?          @db.Decimal(14, 2)
+  note        String?
+  status      DocStatus         @default(ACTIVE)
+  createdById String
+  createdAt   DateTime          @default(now())
+  employee    Employee          @relation(fields: [employeeId], references: [id])
+  recoveries  AdvanceRecovery[]
 
   @@index([employeeId, date])
 }
@@ -767,28 +769,28 @@ model AdvanceRecovery {
 
 /// One finalised salary calculation for an employee and month ("2026-11").
 model PayrollRun {
-  id               String          @id @default(uuid())
+  id               String            @id @default(uuid())
   employeeId       String
   month            String
-  base             Decimal         @db.Decimal(14, 2)
-  commission       Decimal         @default(0) @db.Decimal(14, 2)
-  absenceDeduction Decimal         @default(0) @db.Decimal(14, 2)
-  gross            Decimal         @db.Decimal(14, 2)
-  advances         Decimal         @default(0) @db.Decimal(14, 2)
-  carryIn          Decimal         @default(0) @db.Decimal(14, 2)
+  base             Decimal           @db.Decimal(14, 2)
+  commission       Decimal           @default(0) @db.Decimal(14, 2)
+  absenceDeduction Decimal           @default(0) @db.Decimal(14, 2)
+  gross            Decimal           @db.Decimal(14, 2)
+  advances         Decimal           @default(0) @db.Decimal(14, 2)
+  carryIn          Decimal           @default(0) @db.Decimal(14, 2)
   /// Cash paid to the employee (never negative).
-  netPaid          Decimal         @db.Decimal(14, 2)
+  netPaid          Decimal           @db.Decimal(14, 2)
   /// Advances beyond what was earned; deducted from next month.
-  carryOut         Decimal         @default(0) @db.Decimal(14, 2)
+  carryOut         Decimal           @default(0) @db.Decimal(14, 2)
   details          Json?
-  paidOn           DateTime        @db.Date
+  paidOn           DateTime          @db.Date
   createdById      String
-  createdAt        DateTime        @default(now())
-  status           DocStatus       @default(ACTIVE)
+  createdAt        DateTime          @default(now())
+  status           DocStatus         @default(ACTIVE)
   cancelledById    String?
   cancelledAt      DateTime?
   cancelReason     String?
-  employee         Employee        @relation(fields: [employeeId], references: [id])
+  employee         Employee          @relation(fields: [employeeId], references: [id])
   recoveries       AdvanceRecovery[]
 
   /// One ACTIVE run per employee and month is enforced by a partial unique index (see the cancel_payroll migration).
@@ -830,26 +832,26 @@ model Setting {
  * settled in the evening (stock counted, cash handed over, the rest unloaded).
  */
 model VehicleTrip {
-  id            String            @id @default(uuid())
-  tripNo        String            @unique
-  vehicleId     String
-  salesmanId    String?
-  date          DateTime          @db.Date
+  id           String            @id @default(uuid())
+  tripNo       String            @unique
+  vehicleId    String
+  salesmanId   String?
+  date         DateTime          @db.Date
   /// OPEN while on the road; SETTLED once counted and cash is in.
-  status        String            @default("OPEN")
-  openedAt      DateTime          @default(now())
-  openedById    String
-  settledAt     DateTime?
-  settledById   String?
+  status       String            @default("OPEN")
+  openedAt     DateTime          @default(now())
+  openedById   String
+  settledAt    DateTime?
+  settledById  String?
   /// Cash taken with bills on this trip (from the bills), and what the salesman handed over.
-  cashExpected  Decimal?          @db.Decimal(14, 2)
-  cashReceived  Decimal?          @db.Decimal(14, 2)
-  note          String?
+  cashExpected Decimal?          @db.Decimal(14, 2)
+  cashReceived Decimal?          @db.Decimal(14, 2)
+  note         String?
   /// Advance created for a cash shortage, recovered from the salesman's salary.
-  advanceId     String?
-  vehicle       Location          @relation(fields: [vehicleId], references: [id])
-  salesman      Employee?         @relation(fields: [salesmanId], references: [id])
-  lines         VehicleTripLine[]
+  advanceId    String?
+  vehicle      Location          @relation(fields: [vehicleId], references: [id])
+  salesman     Employee?         @relation(fields: [salesmanId], references: [id])
+  lines        VehicleTripLine[]
 
   @@index([vehicleId, status])
   @@index([date])
@@ -871,4 +873,133 @@ model VehicleTripLine {
   product   Product     @relation(fields: [productId], references: [id])
 
   @@unique([tripId, productId])
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Platform side: the businesses (tenants) that use the software, the people who run the platform, and what they do.
+// These live in the main ("public") schema; every business keeps its own copy of everything above in its own schema.
+// ---------------------------------------------------------------------------------------------------------------
+
+enum TenantStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+}
+
+model Tenant {
+  id              String       @id @default(uuid())
+  /// What staff type next to their username to sign in, e.g. "ali-traders".
+  code            String       @unique
+  name            String
+  /// The database schema holding this business's data; "public" for the original business.
+  schemaName      String       @unique
+  isMain          Boolean      @default(false)
+  contactName     String?
+  phone           String?
+  email           String?
+  city            String?
+  status          TenantStatus @default(TRIAL)
+  /// After this day sign-in stops (null = never).
+  expiresAt       DateTime?
+  /// Most active staff accounts allowed (null = no limit).
+  maxUsers        Int?
+  notes           String?
+  suspendedReason String?
+  createdAt       DateTime     @default(now())
+  lastActiveAt    DateTime?
+
+  logins LoginEvent[]
+  seen   TenantUserSeen[]
+  usage  UsageDaily[]
+}
+
+model PlatformAdmin {
+  id           String    @id @default(uuid())
+  username     String    @unique
+  passwordHash String
+  displayName  String?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  lastLoginAt  DateTime?
+}
+
+/// Every sign-in attempt, to a business or to the platform console, with where it came from.
+model LoginEvent {
+  id         String   @id @default(uuid())
+  /// TENANT or PLATFORM
+  scope      String
+  tenantId   String?
+  tenant     Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  /// What was typed, kept even when it matched no business.
+  tenantCode String?
+  username   String
+  success    Boolean
+  reason     String?
+  ip         String?
+  userAgent  String?
+  browser    String?
+  os         String?
+  device     String?
+  country    String?
+  region     String?
+  city       String?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([createdAt])
+  @@index([ip, createdAt])
+  @@index([scope, username, createdAt])
+}
+
+/// One row per person + device + address seen working in a business, so the console can list who uses it from where.
+model TenantUserSeen {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  username    String
+  /// Hash of address + browser, so the same device is one row.
+  fingerprint String
+  ip          String?
+  userAgent   String?
+  browser     String?
+  os          String?
+  device      String?
+  country     String?
+  region      String?
+  city        String?
+  firstSeen   DateTime @default(now())
+  lastSeen    DateTime @default(now())
+  hits        Int      @default(0)
+
+  @@unique([tenantId, username, fingerprint])
+  @@index([tenantId, lastSeen])
+}
+
+/// Requests per business per day, and which part of the app they went to.
+model UsageDaily {
+  tenantId String
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  day      DateTime @db.Date
+  requests Int      @default(0)
+  writes   Int      @default(0)
+  errors   Int      @default(0)
+  /// { "sales": 40, "stock": 12 }: requests by first part of the path.
+  modules  Json     @default("{}")
+
+  @@id([tenantId, day])
+}
+
+/// What platform admins did in the console: who suspended whom, who reset which password.
+model PlatformAudit {
+  id         String   @id @default(uuid())
+  adminId    String?
+  adminName  String
+  action     String
+  tenantId   String?
+  tenantName String?
+  detail     Json?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([tenantId, createdAt])
 }
