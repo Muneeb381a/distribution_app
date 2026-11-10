@@ -1,6 +1,5 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { Avatar } from '@/components/Avatar';
 import { BusyButton } from '@/components/Feedback';
@@ -20,7 +19,6 @@ const delay = (ms: number) => ({ '--d': `${ms}ms` }) as CSSProperties;
  * on this computer offered as one-tap "Continue as" so a returning person only types a password.
  */
 export default function LoginPage() {
-  const router = useRouter();
   const theme = useTheme();
   // The business name: last known on this PC first, then the server's (works before sign-in).
   const [brand, setBrand] = useState(DEFAULT_SETTINGS.businessName);
@@ -94,7 +92,9 @@ export default function LoginPage() {
       setBusiness(code);
       saveSession(res.accessToken, res.user);
       setWelcome(true);
-      router.replace('/dashboard');
+      // A full page load, so nothing in memory from a previous business (receipt details, sync state) is carried over.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+      window.location.assign('/dashboard');
     } catch (err) {
       setError((err as Error).message);
       setShake((n) => n + 1);

@@ -119,14 +119,18 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
 class BackupController {
   constructor(private svc: BackupService, private audit: AuditService) {}
 
+  /** A backup holds every business's data, so it is the platform owner's alone. */
+  private ownerOnly(u: AuthUser) { return u.roleName === 'Owner'; }
+
   @Get('status') @RequirePermissions('SETTINGS_EDIT')
-  status() { return this.svc.status(); }
+  status(@CurrentUser() u: AuthUser) { return this.ownerOnly(u) ? this.svc.status() : { ...this.svc.status(), supported: false, auto: false, last: null, count: 0 }; }
 
   @Get() @RequirePermissions('SETTINGS_EDIT')
-  list() { return { status: this.svc.status(), files: this.svc.list() }; }
+  list(@CurrentUser() u: AuthUser) { return this.ownerOnly(u) ? { status: this.svc.status(), files: this.svc.list() } : { status: { ...this.svc.status(), supported: false, auto: false, last: null, count: 0 }, files: [] }; }
 
   @Post() @RequirePermissions('SETTINGS_EDIT')
   async backupNow(@CurrentUser() u: AuthUser) {
+    if (!this.ownerOnly(u)) throw new ForbiddenException('Only the owner can take a backup');
     const r = await this.svc.run();
     await this.audit.log(u.id, 'BACKUP', 'Backup', undefined, undefined, { ok: r.ok, message: r.message });
     if (!r.ok) throw new BadRequestException(`The backup failed: ${r.message}`);
@@ -135,6 +139,7 @@ class BackupController {
 
   @Get(':name/download') @RequirePermissions('SETTINGS_EDIT')
   async download(@Param('name') name: string, @Res({ passthrough: true }) res: Response, @CurrentUser() u: AuthUser) {
+    if (!this.ownerOnly(u)) throw new ForbiddenException('Only the owner can download a backup');
     const p = this.svc.filePath(name);
     await this.audit.log(u.id, 'BACKUP_DOWNLOAD', 'Backup', undefined, undefined, { name });
     res.set({ 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${name}"` });

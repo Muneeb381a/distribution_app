@@ -3,12 +3,13 @@
 import { useSyncExternalStore } from 'react';
 import { DEFAULT_SETTINGS, withDefaults, type BusinessSettings } from '@dist/shared';
 import { api } from '@/lib/api';
+import { scoped } from '@/lib/tenantScope';
 
 /**
  * Business details and print preferences, kept in memory and in localStorage so bills printed
  * offline still carry the right name, address and roll width. Loaded once after sign-in.
  */
-const KEY = 'dist.settings';
+const key = () => scoped('dist.settings');
 const listeners = new Set<() => void>();
 let current: BusinessSettings | null = null;
 let loading: Promise<void> | null = null;
@@ -16,7 +17,7 @@ let loading: Promise<void> | null = null;
 function cached(): BusinessSettings {
   if (current) return current;
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(key());
     current = withDefaults(raw ? JSON.parse(raw) : null);
   } catch {
     current = { ...DEFAULT_SETTINGS };
@@ -26,7 +27,7 @@ function cached(): BusinessSettings {
 
 function publish(s: BusinessSettings) {
   current = s;
-  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* storage blocked: memory only */ }
+  try { localStorage.setItem(key(), JSON.stringify(s)); } catch { /* storage blocked: memory only */ }
   listeners.forEach((l) => l());
 }
 

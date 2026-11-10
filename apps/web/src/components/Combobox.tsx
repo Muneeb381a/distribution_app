@@ -2,6 +2,7 @@
 
 import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@/components/Icon';
+import { scoped } from '@/lib/tenantScope';
 
 export interface ComboOption {
   value: string;
@@ -40,7 +41,7 @@ type Recent = Record<string, { n: number; t: number }>;
 
 function readRecent(key?: string): Recent {
   if (!key) return {};
-  try { return JSON.parse(localStorage.getItem(`dist.recent.${key}`) ?? '{}') as Recent; } catch { return {}; }
+  try { return JSON.parse(localStorage.getItem(scoped(`dist.recent.${key}`)) ?? '{}') as Recent; } catch { return {}; }
 }
 function bumpRecent(key: string | undefined, value: string) {
   if (!key || !value) return;
@@ -49,7 +50,7 @@ function bumpRecent(key: string | undefined, value: string) {
     r[value] = { n: (r[value]?.n ?? 0) + 1, t: Date.now() };
     // keep the 40 best
     const best = Object.entries(r).sort((a, b) => score(b[1]) - score(a[1])).slice(0, 40);
-    localStorage.setItem(`dist.recent.${key}`, JSON.stringify(Object.fromEntries(best)));
+    localStorage.setItem(scoped(`dist.recent.${key}`), JSON.stringify(Object.fromEntries(best)));
   } catch { /* storage blocked: recents are a convenience only */ }
 }
 /** Frequency, with recent use counting more (half-life ~2 weeks). */

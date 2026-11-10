@@ -55,8 +55,10 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
         c = new PrismaClient({ datasourceUrl: schemaUrl(schema) });
         if (this.clients.size >= KEEP_CLIENTS) {
           const oldest = this.clients.keys().next().value!;
-          void this.clients.get(oldest)!.$disconnect();
+          const old = this.clients.get(oldest)!;
           this.clients.delete(oldest);
+          // closed a little later so a request that is still using it is not cut off
+          setTimeout(() => void old.$disconnect(), 60_000).unref();
         }
       }
       this.clients.set(schema, c);

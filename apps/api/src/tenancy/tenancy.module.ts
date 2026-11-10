@@ -198,6 +198,10 @@ class TenantMiddleware implements NestMiddleware {
   constructor(private tenancy: TenancyService, private activity: ActivityService, private jwt: JwtService) {}
 
   async use(req: Request, res: Response, next: NextFunction) {
+    // Nothing this API says is ever stored by a browser, a proxy or a CDN: the same address answers differently for each business.
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Vary', 'Authorization, X-Business');
+
     // The platform console works on all businesses; it has its own sign-in.
     if (req.path.startsWith('/platform')) return next();
 
@@ -219,6 +223,8 @@ class TenantMiddleware implements NestMiddleware {
       const tenant = await this.tenancy.byCode(code);
       if (!tenant) {
         if (isLogin) {
+          // Guessing business codes is slowed down the same way guessing passwords is.
+          await this.activity.checkAttempts('TENANT', String((req.body as { username?: string })?.username ?? ''), code.slice(0, 40), clientInfo(req).ip);
           await this.activity.loginEvent({ scope: 'TENANT', tenantCode: code.slice(0, 40), username: String((req.body as { username?: string })?.username ?? ''), success: false, reason: 'Unknown business code', info: clientInfo(req) });
           return void res.status(401).json({ statusCode: 401, message: 'That business code was not found. Check it and try again.' });
         }

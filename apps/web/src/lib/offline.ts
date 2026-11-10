@@ -8,6 +8,7 @@ import {
   billPrefix, checkHasLines, checkOneLine, checkPayment, checkSaleHead, chooseRate, creditBlock, DOC_PREFIX, defaultPaid, listRate,
   emptiesGiven, localDay, offlineNumber, round2, shortageText, type DocPrefix,
 } from '@dist/shared';
+import { scoped } from './tenantScope';
 import { api, ApiError, getUser } from './api';
 import type { BillData, ReceiptData } from './saleImage';
 
@@ -76,17 +77,22 @@ export interface Preview {
 /* --------------------------------------------------------------- indexeddb */
 
 const DB = 'dist-offline-v2';
-let dbp: Promise<IDBDatabase> | null = null;
+// One database per business, so a computer shared by two businesses keeps their data (and unsent bills) apart.
+const dbs = new Map<string, Promise<IDBDatabase>>();
 function db(): Promise<IDBDatabase> {
-  dbp ??= new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB, 1);
+  const name = scoped(DB);
+  let dbp = dbs.get(name);
+  if (dbp) return dbp;
+  dbp = new Promise((resolve, reject) => {
+    const req = indexedDB.open(name, 1);
     req.onupgradeneeded = () => {
       req.result.createObjectStore('kv');
       req.result.createObjectStore('outbox', { keyPath: 'clientId' });
     };
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => { dbp = null; reject(req.error); };
+    req.onerror = () => { dbs.delete(name); reject(req.error); };
   });
+  dbs.set(name, dbp);
   return dbp;
 }
 async function run<T>(store: string, mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> {
@@ -141,16 +147,16 @@ export const isNetworkError = (e: unknown) => !(e instanceof ApiError);
 
 /* ------------------------------------------------------------ device number */
 
-const PREFIX_KEY = 'dist.device.prefix';
-const counterKey = (kind: string) => `dist.device.counter.${kind}`;
+const prefixKey = () => scoped('dist.device.prefix');
+const counterKey = (kind: string) => scoped(`dist.device.counter.${kind}`);
 
 /** Asks the server once for this PC's prefix (D1, D2…). Needs to be online the first time. */
 export async function ensureDevice(): Promise<string | null> {
   try {
-    const have = localStorage.getItem(PREFIX_KEY);
+    const have = localStorage.getItem(prefixKey());
     if (have) { if (state.prefix !== have) set({ prefix: have }); return have; }
     const { prefix } = await api<{ prefix: string }>('/sync/device', { method: 'POST', json: {} });
-    localStorage.setItem(PREFIX_KEY, prefix);
+    localStorage.setItem(prefixKey(), prefix);
     set({ prefix });
     return prefix;
   } catch {
@@ -282,7 +288,7 @@ export function startSync() {
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') kick(); });
   setInterval(kick, 30_000);
   setInterval(() => { if (state.reachable) void refreshSnapshot(); }, 5 * 60_000);
-  try { set({ prefix: localStorage.getItem(PREFIX_KEY) }); } catch { /* storage blocked */ }
+  try { set({ prefix: localStorage.getItem(prefixKey()) }); } catch { /* storage blocked */ }
   void (async () => {
     await getSnapshot();
     await recount();
@@ -390,7 +396,7 @@ export async function previewOffline(s: Snapshot, b: SaleBody, perms: string[]):
 
 /** Saves a bill on this PC. The returned bill is what gets printed and later synced. */
 export async function saveSaleOffline(s: Snapshot, b: SaleBody, p: Preview, clientId: string, salesmanName: string | null): Promise<OutboxOp> {
-  const prefix = localStorage.getItem(PREFIX_KEY);
+  const prefix = localStorage.getItem(prefixKey());
   if (!prefix) throw new Error('This PC has no device number yet. Connect once to set it up, then bills can be made offline.');
   const number = nextNumber(billPrefix(p.businessLine), prefix);
   const now = new Date();
@@ -422,7 +428,7 @@ export async function saveSaleOffline(s: Snapshot, b: SaleBody, p: Preview, clie
 }
 
 export async function savePaymentOffline(s: Snapshot, body: PaymentBody, clientId: string): Promise<OutboxOp> {
-  const prefix = localStorage.getItem(PREFIX_KEY);
+  const prefix = localStorage.getItem(prefixKey());
   if (!prefix) throw new Error('This PC has no device number yet. Connect once to set it up.');
   const customer = s.customers.find((c) => c.id === body.customerId);
   if (!customer) throw new Error('Unknown or inactive customer');

@@ -145,7 +145,8 @@ export default function TopBar({ user, onMenu, crumbs, status }: { user: Session
               <Link href="/profile" role="menuitem" className="user-pop-item" onClick={() => setMenuOpen(false)}><Icon name="user" />My profile</Link>
               <button
                 type="button" role="menuitem" className="user-pop-item"
-                onClick={() => { clearSession(); router.replace('/login'); }}
+                // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+                onClick={() => { clearSession(); window.location.assign('/login'); }}
               >
                 <Icon name="logout" />Sign out
               </button>
