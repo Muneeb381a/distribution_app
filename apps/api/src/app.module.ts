@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from './prisma.service.js';
 import { TenancyModule } from './tenancy/tenancy.module.js';
 import { PlatformModule } from './platform/platform.module.js';
+import { PlatformBusinessModule } from './platform/platform-business.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { AuditModule } from './audit/audit.module.js';
 import { CatalogModule } from './catalog/catalog.module.js';
@@ -27,6 +28,6 @@ import { DayEndModule } from './dayend/dayend.module.js';
 import { ProofModule } from './sales/proof.module.js';
 
 @Module({
-  imports: [PrismaModule, TenancyModule, AuditModule, AuthModule, CatalogModule, MasterDataModule, UsersModule, ImportModule, StockCoreModule, StockModule, PurchasingModule, SalesModule, HrModule, ReportsModule, DashboardModule, SearchModule, SupplierEmptiesModule, SyncModule, SettingsModule, TripsModule, VehiclesModule, ExpenseCategoriesModule, BackupModule, DayEndModule, ProofModule, PlatformModule],
+  imports: [PrismaModule, TenancyModule, AuditModule, AuthModule, CatalogModule, MasterDataModule, UsersModule, ImportModule, StockCoreModule, StockModule, PurchasingModule, SalesModule, HrModule, ReportsModule, DashboardModule, SearchModule, SupplierEmptiesModule, SyncModule, SettingsModule, TripsModule, VehiclesModule, ExpenseCategoriesModule, BackupModule, DayEndModule, ProofModule, PlatformModule, PlatformBusinessModule],
 })
 export class AppModule {}

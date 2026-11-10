@@ -1,9 +1,9 @@
 import {
-  BadRequestException, Body, CanActivate, ConflictException, Controller, Delete, ExecutionContext, ForbiddenException, Get, Injectable, Module,
-  NotFoundException, Param, Patch, Post, Query, Req, UnauthorizedException, UseGuards, createParamDecorator,
+  BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Injectable, Module,
+  NotFoundException, Param, Patch, Post, Query, Req, UnauthorizedException, UseGuards,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { IsBoolean, IsEmail, IsIn, IsInt, IsISO8601, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsInt, IsISO8601, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
 import { Prisma, type Tenant } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import type { Request } from 'express';
@@ -11,17 +11,14 @@ import { PrismaService } from '../prisma.service.js';
 import { Public } from '../common/decorators.js';
 import { ActivityService, TenancyService, blockReason } from '../tenancy/tenancy.module.js';
 import { clientInfo } from '../tenancy/request-info.js';
+import { CurrentAdmin, PLATFORM_SECRET, PlatformGuard, type Admin } from './platform-auth.js';
 import { createSchema, dropSchema, schemaFor, schemaExists, SCHEMA } from './provision.js';
 import { newPassword, seedTenant } from './seed-tenant.js';
 import { withDefaults } from '@dist/shared';
 
-const PLATFORM_SECRET = () => `${process.env.JWT_SECRET ?? 'dev-only-secret'}:platform`;
 const RESERVED = new Set(['main', 'admin', 'platform', 'api', 'www', 'public', 'login', 'app', 'static', 'auth']);
 const DAY = 86_400_000;
 const ACTIVE_NOW_MS = 15 * 60_000;
-
-interface Admin { id: string; username: string; displayName: string | null }
-const CurrentAdmin = createParamDecorator((_: unknown, ctx: ExecutionContext): Admin => ctx.switchToHttp().getRequest().admin);
 
 // ---------------------------------------------------------------------------------------------- input
 
@@ -46,6 +43,8 @@ class TenantDto {
   @IsOptional() @IsIn(['TRIAL', 'ACTIVE']) status?: 'TRIAL' | 'ACTIVE';
   @IsOptional() @IsISO8601() expiresAt?: string;
   @IsOptional() @IsInt() @Min(1) @Max(500) maxUsers?: number;
+  /** What the business pays each month. */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) monthlyFee?: number;
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
   /** The owner's first password; one is made when left out. */
   @IsOptional() @IsString() @MinLength(8) @MaxLength(60) ownerPassword?: string;
@@ -62,6 +61,8 @@ class UpdateTenantDto {
   @IsOptional() @ValidateIf((_, v) => v !== '') @IsISO8601() expiresAt?: string;
   /** 0 removes the limit. */
   @IsOptional() @IsInt() @Min(0) @Max(500) maxUsers?: number;
+  /** 0 removes the fee. */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) monthlyFee?: number;
   @IsOptional() @IsString() @MaxLength(1000) notes?: string;
 }
 
@@ -92,35 +93,15 @@ class UpdateAdminDto {
 
 // ---------------------------------------------------------------------------------------------- sign-in
 
-@Injectable()
-class PlatformGuard implements CanActivate {
-  constructor(private jwt: JwtService, private prisma: PrismaService) {}
-
-  async canActivate(ctx: ExecutionContext): Promise<boolean> {
-    const req = ctx.switchToHttp().getRequest();
-    const [scheme, token] = (req.headers.authorization ?? '').split(' ');
-    if (scheme !== 'Bearer' || !token) throw new UnauthorizedException();
-    try {
-      const p = await this.jwt.verifyAsync<{ sub: string; kind?: string }>(token, { secret: PLATFORM_SECRET() });
-      if (p.kind !== 'platform') throw new Error('not a platform token');
-      const admin = await this.prisma.control.platformAdmin.findUnique({ where: { id: p.sub } });
-      if (!admin?.isActive) throw new Error('inactive');
-      req.admin = { id: admin.id, username: admin.username, displayName: admin.displayName } satisfies Admin;
-      return true;
-    } catch {
-      throw new UnauthorizedException();
-    }
-  }
-}
-
 @Public()
 @Controller('platform/auth')
 class PlatformAuthController {
-  constructor(private prisma: PrismaService, private jwt: JwtService, private activity: ActivityService) {}
+  constructor(private prisma: PrismaService, private jwt: JwtService, private activity: ActivityService, private tenancy: TenancyService) {}
 
   @Post('login')
   async login(@Body() dto: PlatformLoginDto, @Req() req: Request) {
     const info = clientInfo(req);
+    if (await this.tenancy.isBlocked(info.ip)) throw new ForbiddenException('Access from your address has been blocked.');
     const event = { scope: 'PLATFORM' as const, tenantCode: null, username: dto.username, info };
     await this.activity.checkAttempts('PLATFORM', dto.username, null, info.ip);
     const admin = await this.prisma.control.platformAdmin.findUnique({ where: { username: dto.username.trim().toLowerCase() } });
@@ -234,20 +215,21 @@ class PlatformController {
     const now = Date.now();
     const today = new Date();
     const dayStart = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
-    const [tenants, usage, seen, lastLogins] = await Promise.all([
+    const [tenants, usage, seen, lastLogins, lastPaid] = await Promise.all([
       this.db.tenant.findMany({ orderBy: [{ isMain: 'desc' }, { createdAt: 'desc' }] }),
       this.db.usageDaily.findMany({ where: { day: { gte: new Date(dayStart.getTime() - 6 * DAY) } }, select: { tenantId: true, day: true, requests: true } }),
       this.db.tenantUserSeen.findMany({ where: { lastSeen: { gte: new Date(now - ACTIVE_NOW_MS) } }, select: { tenantId: true, username: true } }),
       this.db.loginEvent.groupBy({ by: ['tenantId'], where: { success: true, tenantId: { not: null } }, _max: { createdAt: true } }),
+      this.db.tenantPayment.groupBy({ by: ['tenantId'], _max: { paidOn: true } }),
     ]);
     const users = await this.userCounts(tenants);
-    return tenants.map((t) => this.row(t, {
+    return tenants.map((t) => ({ lastPaymentOn: lastPaid.find((p) => p.tenantId === t.id)?._max.paidOn ?? null, ...this.row(t, {
       users: users.get(t.schemaName),
       requests7d: usage.filter((u) => u.tenantId === t.id).reduce((s, u) => s + u.requests, 0),
       requestsToday: usage.filter((u) => u.tenantId === t.id && u.day.getTime() === dayStart.getTime()).reduce((s, u) => s + u.requests, 0),
       activeNow: new Set(seen.filter((s) => s.tenantId === t.id).map((s) => s.username)).size,
       lastLoginAt: lastLogins.find((l) => l.tenantId === t.id)?._max.createdAt ?? null,
-    }));
+    }) }));
   }
 
   @Post('tenants')
@@ -276,7 +258,7 @@ class PlatformController {
     const tenant = await this.db.tenant.create({
       data: {
         code, name: dto.name.trim(), schemaName: schema, contactName: dto.contactName, phone: dto.phone, email: dto.email || undefined, city: dto.city,
-        status: dto.status ?? 'TRIAL', expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null, maxUsers: dto.maxUsers, notes: dto.notes,
+        status: dto.status ?? 'TRIAL', expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null, maxUsers: dto.maxUsers, monthlyFee: dto.monthlyFee || null, notes: dto.notes,
       },
     });
     await this.audit(a, 'CREATE_TENANT', tenant, { code });
@@ -291,7 +273,7 @@ class PlatformController {
     if (!t) throw new NotFoundException();
     const db = this.prisma.forSchema(t.schemaName);
     const since30 = new Date(Date.now() - 30 * DAY);
-    const [counts, users, usage, seen, logins, lastSale, loginByUser] = await Promise.all([
+    const [counts, users, usage, seen, logins, lastSale, loginByUser, history] = await Promise.all([
       Promise.all([db.appUser.count(), db.customer.count(), db.supplier.count(), db.product.count(), db.sale.count(), db.purchase.count(), db.employee.count(), db.expense.count(), db.stockMovement.count()])
         .then(([users, customers, suppliers, products, sales, purchases, employees, expenses, stockMoves]) => ({ users, customers, suppliers, products, sales, purchases, employees, expenses, stockMoves })),
       db.appUser.findMany({ select: { id: true, username: true, displayName: true, isActive: true, role: { select: { name: true } } }, orderBy: { username: 'asc' } }),
@@ -300,6 +282,7 @@ class PlatformController {
       this.db.loginEvent.findMany({ where: { tenantId: id }, orderBy: { createdAt: 'desc' }, take: 40 }),
       db.sale.findFirst({ orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
       this.db.loginEvent.groupBy({ by: ['username'], where: { tenantId: id, success: true }, _max: { createdAt: true }, _count: true }),
+      this.db.platformAudit.findMany({ where: { tenantId: id }, orderBy: { createdAt: 'desc' }, take: 40 }),
     ]);
     const modules: Record<string, number> = {};
     for (const u of usage) for (const [k, v] of Object.entries((u.modules ?? {}) as Record<string, number>)) modules[k] = (modules[k] ?? 0) + v;
@@ -313,7 +296,8 @@ class PlatformController {
       }),
       usage: usage.map((u) => ({ day: u.day.toISOString().slice(0, 10), requests: u.requests, writes: u.writes, errors: u.errors })),
       modules: Object.entries(modules).sort((x, y) => y[1] - x[1]).map(([module, requests]) => ({ module, requests })),
-      sessions: seen, logins,
+      sessions: seen, logins, history,
+      countries: [...new Set(seen.map((s) => s.country).filter((c): c is string => !!c))],
     };
   }
 
@@ -329,6 +313,7 @@ class PlatformController {
         status: before.status === 'SUSPENDED' ? undefined : dto.status,
         expiresAt: dto.expiresAt === undefined ? undefined : dto.expiresAt === '' ? null : new Date(dto.expiresAt),
         maxUsers: dto.maxUsers === undefined ? undefined : dto.maxUsers === 0 ? null : dto.maxUsers,
+        monthlyFee: dto.monthlyFee === undefined ? undefined : dto.monthlyFee === 0 ? null : dto.monthlyFee,
       },
     });
     await this.audit(a, 'UPDATE_TENANT', row, JSON.parse(JSON.stringify(dto)));
@@ -449,6 +434,6 @@ class PlatformController {
   }
 }
 
-@Module({ controllers: [PlatformAuthController, PlatformController], providers: [PlatformGuard] })
+@Module({ controllers: [PlatformAuthController, PlatformController], providers: [PlatformGuard], exports: [PlatformGuard] })
 export class PlatformModule {}
 

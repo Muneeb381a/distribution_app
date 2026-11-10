@@ -1,5 +1,6 @@
 'use client';
 
+import { AnnouncementBanner } from '@/components/AnnouncementBanner';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -270,6 +271,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               <TitledTopBar user={user} onMenu={() => setOpen(true)} detail={detail} />
             </Suspense>
             <OfflineBanner />
+            <AnnouncementBanner />
             <main className="content" id="main" tabIndex={-1}>{children}</main>
           </div>
         </div>

@@ -63,6 +63,7 @@ export interface Tenant {
   createdAt: string; lastActiveAt: string | null;
   users: number; activeUsers: number; requests7d: number; requestsToday: number; activeNow: number;
   lastLoginAt: string | null; blocked: string | null; daysLeft: number | null;
+  monthlyFee: string | null; lastPaymentOn?: string | null;
 }
 
 export interface LoginEvent {
@@ -105,4 +106,41 @@ export function stateOf(t: Pick<Tenant, 'status' | 'blocked' | 'daysLeft' | 'exp
   if (t.expiresAt && (t.daysLeft ?? 99) <= 7) return { label: `Ends in ${t.daysLeft} d`, tone: 'amber' };
   if (t.status === 'TRIAL') return { label: 'Trial', tone: 'blue' };
   return { label: 'Active', tone: 'green' };
+}
+
+// ---------------------------------------------------------------------------------------------- money, size, messages
+
+export const rs = (n: number | string | null | undefined) => (n == null || n === '' ? '—' : `Rs ${Math.round(Number(n)).toLocaleString('en-PK')}`);
+
+export function bytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  if (n < 1024 ** 3) return `${(n / 1024 / 1024).toFixed(n < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+  return `${(n / 1024 ** 3).toFixed(2)} GB`;
+}
+
+/** A WhatsApp link for a Pakistani number written the usual ways (0300-1234567, +92 300 1234567). */
+export function whatsapp(phone: string, text: string): string {
+  let d = phone.replace(/\D/g, '');
+  if (d.startsWith('00')) d = d.slice(2);
+  if (d.startsWith('0')) d = `92${d.slice(1)}`;
+  return `https://wa.me/${d}?text=${encodeURIComponent(text)}`;
+}
+
+export function renewalMessage(t: { name: string; contactName: string | null; expiresAt: string | null; daysLeft: number | null }): string {
+  const who = t.contactName ? ` ${t.contactName}` : '';
+  const when = t.expiresAt ? new Date(t.expiresAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+  if (t.expiresAt && (t.daysLeft ?? 0) < 0) return `Assalam o Alaikum${who}, ${t.name} ka software account ${when} ko khatam ho gaya hai. Dobara chalane ke liye barae meharbani renew kar dein. Shukriya.`;
+  if (t.expiresAt) return `Assalam o Alaikum${who}, ${t.name} ka software account ${when} ko khatam ho raha hai. Barae meharbani time par renew kar dein taa ke kaam na rukay. Shukriya.`;
+  return `Assalam o Alaikum${who}, ${t.name} ke software account ke baare mein baat karni thi. Shukriya.`;
+}
+
+export const METHODS: { value: string; label: string }[] = [
+  { value: 'CASH', label: 'Cash' }, { value: 'BANK', label: 'Bank transfer' }, { value: 'JAZZCASH', label: 'JazzCash' }, { value: 'EASYPAISA', label: 'Easypaisa' }, { value: 'OTHER', label: 'Other' },
+];
+export const methodLabel = (m: string) => METHODS.find((x) => x.value === m)?.label ?? m;
+
+export interface Payment {
+  id: string; tenantId: string; amount: string; method: string; paidOn: string; months: number; note: string | null; createdByName: string; createdAt: string;
+  tenantName?: string; tenantCode?: string;
 }

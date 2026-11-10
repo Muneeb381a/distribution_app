@@ -25,6 +25,7 @@ export function blockReason(t: Pick<Tenant, 'status' | 'expiresAt' | 'suspendedR
 @Injectable()
 export class TenancyService {
   private cache = new Map<string, { at: number; tenant: Tenant | null }>();
+  private blocked: { at: number; ips: Set<string> } | null = null;
 
   constructor(private prisma: PrismaService) {}
 
@@ -50,7 +51,20 @@ export class TenancyService {
   }
 
   context(t: Tenant): TenantCtx {
-    return { id: t.id, code: t.code, schema: t.schemaName, maxUsers: t.maxUsers };
+    return { id: t.id, code: t.code, schema: t.schemaName, maxUsers: t.maxUsers, sessionsValidFrom: t.sessionsValidFrom?.getTime() ?? null };
+  }
+
+  /** Whether an address has been blocked from the whole platform. */
+  async isBlocked(ip: string | null): Promise<boolean> {
+    if (!ip) return false;
+    if (!this.blocked || Date.now() - this.blocked.at > TENANT_CACHE_MS) {
+      this.blocked = { at: Date.now(), ips: new Set((await this.prisma.control.blockedIp.findMany({ select: { ip: true } })).map((b) => b.ip)) };
+    }
+    return this.blocked.ips.has(ip);
+  }
+
+  forgetBlocked() {
+    this.blocked = null;
   }
 }
 
@@ -171,7 +185,7 @@ export class ActivityService {
   }
 }
 
-interface TokenPayload { tid?: string; username?: string }
+interface TokenPayload { tid?: string; username?: string; iat?: number }
 
 /**
  * Decides which business a request belongs to, before anything else runs:
@@ -186,6 +200,11 @@ class TenantMiddleware implements NestMiddleware {
   async use(req: Request, res: Response, next: NextFunction) {
     // The platform console works on all businesses; it has its own sign-in.
     if (req.path.startsWith('/platform')) return next();
+
+    // An address the platform admin has blocked reaches nothing at all.
+    if (req.method !== 'OPTIONS' && (await this.tenancy.isBlocked(clientInfo(req).ip))) {
+      return void res.status(403).json({ statusCode: 403, code: 'IP_BLOCKED', message: 'Access from your address has been blocked. Please contact the software provider.' });
+    }
 
     let payload: TokenPayload | null = null;
     const [scheme, token] = (req.headers.authorization ?? '').split(' ');
@@ -211,6 +230,10 @@ class TenantMiddleware implements NestMiddleware {
         return void res.status(403).json({ statusCode: 403, code: 'TENANT_BLOCKED', message: blocked });
       }
       const ctx = this.tenancy.context(tenant);
+      // "Sign everyone out": tokens older than the cut-off are refused.
+      if (payload && ctx.sessionsValidFrom && (payload.iat ?? 0) * 1000 < ctx.sessionsValidFrom) {
+        return void res.status(401).json({ statusCode: 401, message: 'You were signed out. Please sign in again.' });
+      }
       if (payload?.username) {
         await this.activity.beforeRequest(ctx, payload.username, clientInfo(req));
         res.on('finish', () => this.activity.count(ctx, req.method, req.path, res.statusCode));

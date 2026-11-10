@@ -887,30 +887,36 @@ enum TenantStatus {
 }
 
 model Tenant {
-  id              String       @id @default(uuid())
+  id                String       @id @default(uuid())
   /// What staff type next to their username to sign in, e.g. "ali-traders".
-  code            String       @unique
-  name            String
+  code              String       @unique
+  name              String
   /// The database schema holding this business's data; "public" for the original business.
-  schemaName      String       @unique
-  isMain          Boolean      @default(false)
-  contactName     String?
-  phone           String?
-  email           String?
-  city            String?
-  status          TenantStatus @default(TRIAL)
+  schemaName        String       @unique
+  isMain            Boolean      @default(false)
+  contactName       String?
+  phone             String?
+  email             String?
+  city              String?
+  status            TenantStatus @default(TRIAL)
   /// After this day sign-in stops (null = never).
-  expiresAt       DateTime?
+  expiresAt         DateTime?
   /// Most active staff accounts allowed (null = no limit).
-  maxUsers        Int?
-  notes           String?
-  suspendedReason String?
-  createdAt       DateTime     @default(now())
-  lastActiveAt    DateTime?
+  maxUsers          Int?
+  notes             String?
+  suspendedReason   String?
+  createdAt         DateTime     @default(now())
+  lastActiveAt      DateTime?
+  /// What this business pays each month (null = not set; the original business pays nothing).
+  monthlyFee        Decimal?     @db.Decimal(12, 2)
+  /// Sign-in tokens issued before this moment no longer work ("sign everyone out").
+  sessionsValidFrom DateTime?
 
-  logins LoginEvent[]
-  seen   TenantUserSeen[]
-  usage  UsageDaily[]
+  logins        LoginEvent[]
+  seen          TenantUserSeen[]
+  usage         UsageDaily[]
+  payments      TenantPayment[]
+  announcements Announcement[]
 }
 
 model PlatformAdmin {
@@ -1002,4 +1008,52 @@ model PlatformAudit {
 
   @@index([createdAt])
   @@index([tenantId, createdAt])
+}
+
+/// Money received from a business. Recording one moves the end date forward by the months it covers.
+model TenantPayment {
+  id             String    @id @default(uuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  amount         Decimal   @db.Decimal(12, 2)
+  /// CASH, BANK, JAZZCASH, EASYPAISA or OTHER
+  method         String
+  paidOn         DateTime  @db.Date
+  months         Int       @default(1)
+  /// The end date before this payment, so the latest payment can be undone.
+  previousExpiry DateTime?
+  note           String?
+  createdByName  String
+  createdAt      DateTime  @default(now())
+
+  @@index([tenantId, paidOn])
+  @@index([paidOn])
+}
+
+/// A message shown as a banner inside the app, to every business or to one.
+model Announcement {
+  id            String    @id @default(uuid())
+  title         String
+  body          String?
+  /// INFO, WARNING or CRITICAL
+  level         String    @default("INFO")
+  /// null = every business
+  tenantId      String?
+  tenant        Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  startsAt      DateTime  @default(now())
+  endsAt        DateTime?
+  isActive      Boolean   @default(true)
+  createdByName String
+  createdAt     DateTime  @default(now())
+
+  @@index([isActive, startsAt])
+}
+
+/// Addresses that may not reach the software at all.
+model BlockedIp {
+  id            String   @id @default(uuid())
+  ip            String   @unique
+  reason        String?
+  createdByName String
+  createdAt     DateTime @default(now())
 }

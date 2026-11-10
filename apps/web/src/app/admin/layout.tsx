@@ -7,19 +7,28 @@ import { Avatar } from '@/components/Avatar';
 import { FeedbackProvider } from '@/components/Feedback';
 import { Icon, type IconName } from '@/components/Icon';
 import { clearPlatformSession, usePlatformAdmin } from '@/lib/platform';
+import { setTheme, useTheme, type ThemePref } from '@/lib/theme';
 
 const NAV: { href: string; label: string; icon: IconName; exact?: boolean }[] = [
   { href: '/admin', label: 'Overview', icon: 'dashboard', exact: true },
   { href: '/admin/tenants', label: 'Businesses', icon: 'customers' },
+  { href: '/admin/billing', label: 'Billing', icon: 'wallet' },
+  { href: '/admin/announcements', label: 'Announcements', icon: 'message' },
+  { href: '/admin/security', label: 'Security', icon: 'lock' },
   { href: '/admin/activity', label: 'Activity', icon: 'history' },
-  { href: '/admin/team', label: 'Team & security', icon: 'users' },
+  { href: '/admin/team', label: 'Team', icon: 'users' },
 ];
+
+const NEXT_THEME: Record<ThemePref, ThemePref> = { system: 'light', light: 'dark', dark: 'system' };
 
 const TITLES: [RegExp, string][] = [
   [/^\/admin\/tenants\/[^/]+$/, 'Business'],
   [/^\/admin\/tenants$/, 'Businesses'],
+  [/^\/admin\/billing$/, 'Billing'],
+  [/^\/admin\/announcements$/, 'Announcements'],
+  [/^\/admin\/security$/, 'Security'],
   [/^\/admin\/activity$/, 'Activity'],
-  [/^\/admin\/team$/, 'Team & security'],
+  [/^\/admin\/team$/, 'Team'],
   [/^\/admin$/, 'Overview'],
 ];
 
@@ -28,6 +37,7 @@ function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const admin = usePlatformAdmin();
+  const theme = useTheme();
   const [ready, setReady] = useState(false);
   const [open, setOpen] = useState(false);
   const isLogin = pathname === '/admin/login';
@@ -74,6 +84,7 @@ function AdminShell({ children }: { children: ReactNode }) {
             <nav className="crumbs" aria-label="Breadcrumb"><ol><li>Platform</li><li aria-current="page">{TITLES.find(([re]) => re.test(pathname))?.[1] ?? 'Console'}</li></ol></nav>
             <span className="topbar-fill" />
             <div className="top-right">
+              <button type="button" className="top-icon" onClick={() => setTheme(NEXT_THEME[theme])} title={`Theme: ${theme}`} aria-label={`Theme: ${theme}. Switch to ${NEXT_THEME[theme]}.`}><Icon name={theme === 'dark' ? 'moon' : theme === 'light' ? 'sun' : 'monitor'} /></button>
               <span className="admin-who"><Avatar user={{ username: admin.displayName || admin.username }} size={30} /><span><b>{admin.displayName || admin.username}</b><small>Platform admin</small></span></span>
               <button type="button" className="secondary btn-icon" onClick={() => { clearPlatformSession(); router.replace('/admin/login'); }}><Icon name="logout" />Sign out</button>
             </div>

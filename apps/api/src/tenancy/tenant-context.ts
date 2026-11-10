@@ -7,6 +7,8 @@ export interface TenantCtx {
   /** Database schema holding the business's data ("public" for the original business). */
   schema: string;
   maxUsers: number | null;
+  /** Tokens issued before this time (ms) are no longer accepted; null = no cut-off. */
+  sessionsValidFrom: number | null;
 }
 
 export const tenantStore = new AsyncLocalStorage<TenantCtx>();

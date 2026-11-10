@@ -8,8 +8,9 @@ import { Avatar } from '@/components/Avatar';
 import { BusyButton, Empty, useConfirm, usePrompt, useToast } from '@/components/Feedback';
 import { Affix, Field, FormSection } from '@/components/Form';
 import { Icon } from '@/components/Icon';
+import { PaymentDrawer } from '@/components/PaymentDrawer';
 import { StatTiles } from '@/components/StatTiles';
-import { ago, deviceLine, place, platformApi, stateOf, type LoginEvent, type SeenRow, type Tenant } from '@/lib/platform';
+import { ago, deviceLine, methodLabel, place, platformApi, renewalMessage, rs, stateOf, whatsapp, type LoginEvent, type Payment, type SeenRow, type Tenant } from '@/lib/platform';
 
 interface Detail {
   tenant: Tenant;
@@ -20,10 +21,17 @@ interface Detail {
   modules: { module: string; requests: number }[];
   sessions: SeenRow[];
   logins: LoginEvent[];
+  history: { id: string; adminName: string; action: string; detail: Record<string, unknown> | null; createdAt: string }[];
+  countries: string[];
 }
 
-type Tab = 'overview' | 'people' | 'logins' | 'settings';
-const TABS: [Tab, string][] = [['overview', 'Overview'], ['people', 'People & devices'], ['logins', 'Sign-ins'], ['settings', 'Settings']];
+type Tab = 'overview' | 'people' | 'logins' | 'billing' | 'history' | 'settings';
+const TABS: [Tab, string][] = [['overview', 'Overview'], ['people', 'People & devices'], ['logins', 'Sign-ins'], ['billing', 'Billing'], ['history', 'History'], ['settings', 'Settings']];
+
+const ACTIONS: Record<string, string> = {
+  CREATE_TENANT: 'Business created', UPDATE_TENANT: 'Details changed', SUSPEND_TENANT: 'Suspended', ACTIVATE_TENANT: 'Let back in', RESET_PASSWORD: 'New password made',
+  PAYMENT: 'Payment recorded', UNDO_PAYMENT: 'Payment undone', SIGN_OUT_ALL: 'Everyone signed out', ANNOUNCE: 'Announcement sent',
+};
 
 /** What a path name means to the owner. */
 const MODULE_NAMES: Record<string, string> = {
@@ -46,6 +54,8 @@ export default function TenantPage() {
   const [busy, setBusy] = useState(false);
   const [edit, setEdit] = useState<Record<string, string>>({});
   const [now] = useState(() => Date.now());
+  const [payments, setPayments] = useState<Payment[] | null>(null);
+  const [paying, setPaying] = useState(false);
   const [creds, setCreds] = useState<{ username: string; password: string } | null>(null);
 
   const load = useCallback(() => platformApi<Detail>(`/tenants/${id}`).then((r) => {
@@ -53,7 +63,7 @@ export default function TenantPage() {
     setError('');
     setEdit((e) => (Object.keys(e).length ? e : {
       name: r.tenant.name, contactName: r.tenant.contactName ?? '', phone: r.tenant.phone ?? '', email: r.tenant.email ?? '', city: r.tenant.city ?? '',
-      status: r.tenant.status === 'SUSPENDED' ? 'ACTIVE' : r.tenant.status, expiresAt: r.tenant.expiresAt?.slice(0, 10) ?? '', maxUsers: r.tenant.maxUsers ? String(r.tenant.maxUsers) : '', notes: r.tenant.notes ?? '',
+      status: r.tenant.status === 'SUSPENDED' ? 'ACTIVE' : r.tenant.status, expiresAt: r.tenant.expiresAt?.slice(0, 10) ?? '', maxUsers: r.tenant.maxUsers ? String(r.tenant.maxUsers) : '', monthlyFee: r.tenant.monthlyFee ? String(Math.round(Number(r.tenant.monthlyFee))) : '', notes: r.tenant.notes ?? '',
     }));
   }).catch((e) => setError(e.message)), [id]);
 
@@ -62,6 +72,8 @@ export default function TenantPage() {
     const t = setInterval(load, 30_000);
     return () => clearInterval(t);
   }, [load]);
+  const loadPayments = useCallback(() => platformApi<Payment[]>(`/tenants/${id}/payments`).then(setPayments).catch(() => {}), [id]);
+  useEffect(() => { loadPayments(); }, [loadPayments]);
 
   async function run(label: string, fn: () => Promise<unknown>) {
     setBusy(true);
@@ -77,6 +89,7 @@ export default function TenantPage() {
         status: d?.tenant.status === 'SUSPENDED' ? undefined : edit.status,
         expiresAt: edit.expiresAt ? new Date(`${edit.expiresAt}T23:59:59`).toISOString() : '',
         maxUsers: edit.maxUsers ? Number(edit.maxUsers) : 0,
+        monthlyFee: edit.monthlyFee ? Number(edit.monthlyFee) : 0,
       },
     }));
   }
@@ -93,6 +106,17 @@ export default function TenantPage() {
     if (!(await confirm({ title: 'Make a new owner password?', body: <p>The old password stops working at once. You will see the new one here to pass on.</p>, confirmLabel: 'Make new password', danger: true }))) return;
     setBusy(true);
     try { setCreds(await platformApi<{ username: string; password: string }>(`/tenants/${id}/reset-owner`, { method: 'POST', json: {} })); await load(); } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+  }
+
+  async function signOutAll() {
+    if (!d) return;
+    if (!(await confirm({ title: `Sign everyone out of ${d.tenant.name}?`, body: <p>Every phone and computer is signed out on its next click. People sign in again with their own password. Use it after a lost phone or when someone leaves.</p>, confirmLabel: 'Sign everyone out', danger: true }))) return;
+    await run('Everyone was signed out', () => platformApi(`/tenants/${id}/sign-out-all`, { method: 'POST', json: {} }));
+  }
+
+  async function undoPayment(p: Payment) {
+    if (!(await confirm({ title: 'Undo this payment?', body: <p>{rs(p.amount)} is removed and the end date goes back to what it was.</p>, confirmLabel: 'Undo payment', danger: true }))) return;
+    await run('Payment removed', async () => { await platformApi(`/payments/${p.id}`, { method: 'DELETE' }); await loadPayments(); });
   }
 
   async function remove() {
@@ -124,7 +148,9 @@ export default function TenantPage() {
         </div>
         <div className="head-actions">
           {t.phone && <a className="button secondary btn-icon" href={`tel:${t.phone}`}><Icon name="phone" />Call</a>}
+          {t.phone && !t.isMain && <a className="button secondary btn-icon" href={whatsapp(t.phone, renewalMessage(t))} target="_blank" rel="noreferrer"><Icon name="message" />WhatsApp</a>}
           <CopyButton text={loginLink(t.code)} label="Copy sign-in link" />
+          {!t.isMain && <button type="button" className="btn-icon" onClick={() => setPaying(true)}><Icon name="wallet" />Record payment</button>}
         </div>
       </div>
       {t.blocked && <p className="alert-bar"><Icon name="alert" />{t.blocked}</p>}
@@ -189,7 +215,7 @@ export default function TenantPage() {
             </tbody>
           </table>
 
-          <div className="section-head"><h2>Devices and places</h2><span className="count-pill">{d.sessions.length}</span></div>
+          <div className="section-head"><h2>Devices and places</h2><span className="count-pill">{d.sessions.length}</span>{d.countries.length > 1 && <span className="badge amber" title="Seen from more than one country">{d.countries.join(' · ')}</span>}</div>
           <p className="muted" style={{ marginTop: -4 }}>Each row is one person on one device from one address. The place is the host&apos;s best guess from the address.</p>
           <table>
             <thead><tr><th>Person</th><th>Device</th><th>Place</th><th>Address</th><th>First seen</th><th>Last seen</th><th className="num">Requests</th></tr></thead>
@@ -221,6 +247,58 @@ export default function TenantPage() {
         </>
       )}
 
+      {tab === 'billing' && (
+        <>
+          <StatTiles items={[
+            { label: 'Monthly fee', value: t.monthlyFee ? rs(t.monthlyFee) : 'Not set', sub: t.monthlyFee ? undefined : 'set it under Settings', icon: 'wallet' },
+            { label: 'Access ends', value: t.expiresAt ? new Date(t.expiresAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : 'Never', sub: t.expiresAt ? (t.daysLeft ?? 0) < 0 ? `ended ${Math.abs(t.daysLeft ?? 0)} d ago` : `${t.daysLeft} day${t.daysLeft === 1 ? '' : 's'} left` : 'no end date', icon: 'history', tone: t.expiresAt && (t.daysLeft ?? 99) <= 7 ? ((t.daysLeft ?? 0) < 0 ? 'red' : 'amber') : 'green' },
+            { label: 'Paid so far', value: rs((payments ?? []).reduce((x, p) => x + Number(p.amount), 0)), sub: `${payments?.length ?? 0} payment${payments?.length === 1 ? '' : 's'}`, icon: 'check', tone: 'green' },
+            { label: 'Last payment', value: payments?.[0] ? new Date(payments[0].paidOn).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—', sub: payments?.[0] ? rs(payments[0].amount) : 'none yet', icon: 'trend' },
+          ]} />
+          <div className="section-head"><h2>Payments</h2>{!t.isMain && <button type="button" className="btn-icon" onClick={() => setPaying(true)}><Icon name="plus" />Record payment</button>}</div>
+          <table>
+            <thead><tr><th>Received</th><th className="num">Amount</th><th>Method</th><th>Covers</th><th>Note</th><th>By</th><th><span className="sr-only">Actions</span></th></tr></thead>
+            <tbody>
+              {payments?.map((p, i) => (
+                <tr key={p.id}>
+                  <td className="nowrap">{new Date(p.paidOn).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                  <td className="num"><b>{rs(p.amount)}</b></td>
+                  <td><span className="badge blue">{methodLabel(p.method)}</span></td>
+                  <td className="muted">{p.months} month{p.months === 1 ? '' : 's'}</td>
+                  <td className="muted">{p.note}</td>
+                  <td className="muted">{p.createdByName}</td>
+                  <td>{i === 0 && <button type="button" className="secondary icon-only danger-hover" title="Undo this payment" aria-label="Undo this payment" onClick={() => void undoPayment(p)}><Icon name="ban" /></button>}</td>
+                </tr>
+              ))}
+              {payments && !payments.length && <tr><td colSpan={7}><Empty icon="wallet" title={t.isMain ? 'Your own business does not pay' : 'No payments yet'} text={t.isMain ? undefined : 'Record one when they pay; the access end date moves forward by itself.'} /></td></tr>}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {tab === 'history' && (
+        <>
+          <div className="section-head"><h2>What was done to this business</h2><span className="count-pill">{d.history.length}</span></div>
+          <ul className="timeline">
+            {d.history.map((h) => (
+              <li key={h.id}>
+                <span className="timeline-dot" aria-hidden="true" />
+                <span className="timeline-main">
+                  <b>{ACTIONS[h.action] ?? h.action}</b>
+                  <small>
+                    by {h.adminName} · {ago(h.createdAt)}
+                    {h.detail && typeof h.detail.reason === 'string' && h.detail.reason ? ` · “${h.detail.reason}”` : ''}
+                    {h.detail && typeof h.detail.amount !== 'undefined' ? ` · ${rs(h.detail.amount as number)}` : ''}
+                    {h.detail && typeof h.detail.until === 'string' ? ` · until ${h.detail.until}` : ''}
+                  </small>
+                </span>
+              </li>
+            ))}
+          </ul>
+          {!d.history.length && <Empty icon="history" title="Nothing yet" text="Changes made in this console show up here." />}
+        </>
+      )}
+
       {tab === 'settings' && (
         <div className="admin-settings">
           <form className="card" onSubmit={save}>
@@ -239,6 +317,7 @@ export default function TenantPage() {
                 )}
                 <Field label="Access ends on" optional span={6} hint="Empty = never."><input type="date" value={edit.expiresAt ?? ''} onChange={(e) => setEdit({ ...edit, expiresAt: e.target.value })} /></Field>
                 <Field label="Most active users" optional span={6} hint="Empty = no limit."><Affix suffix="users"><input type="number" min={1} max={500} value={edit.maxUsers ?? ''} onChange={(e) => setEdit({ ...edit, maxUsers: e.target.value })} /></Affix></Field>
+                <Field label="Monthly fee" optional span={6} hint="Used for your income figures. Empty = not set."><Affix prefix="Rs"><input type="number" min={0} step="any" inputMode="decimal" value={edit.monthlyFee ?? ''} onChange={(e) => setEdit({ ...edit, monthlyFee: e.target.value })} /></Affix></Field>
                 <Field label="Notes" optional span={12}><textarea rows={3} maxLength={1000} value={edit.notes ?? ''} onChange={(e) => setEdit({ ...edit, notes: e.target.value })} /></Field>
               </FormSection>
             </div>
@@ -262,6 +341,15 @@ export default function TenantPage() {
               )}
             </section>
 
+            <section className="card">
+              <div className="card-head"><h3>Security</h3></div>
+              <p className="muted">Lost phone, or someone left? End every sign-in of this business at once.</p>
+              <div className="btn-row">
+                <button type="button" className="secondary btn-icon" disabled={busy} onClick={signOutAll}><Icon name="logout" />Sign everyone out</button>
+                <Link className="button secondary btn-icon" href={`/admin/announcements?tenantId=${t.id}`}><Icon name="message" />Send a message</Link>
+              </div>
+            </section>
+
             {!t.isMain && (
               <section className="card danger-zone">
                 <div className="card-head"><h3>Access</h3></div>
@@ -276,6 +364,7 @@ export default function TenantPage() {
           </div>
         </div>
       )}
+      {paying && <PaymentDrawer tenant={{ id: t.id, name: t.name, monthlyFee: t.monthlyFee, expiresAt: t.expiresAt }} onClose={() => setPaying(false)} onDone={() => { setPaying(false); void load(); void loadPayments(); }} />}
     </>
   );
 }

@@ -6,7 +6,7 @@ import { Spark } from '@/components/AdminBits';
 import { Empty } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
 import { StatTiles } from '@/components/StatTiles';
-import { ago, deviceLine, place, platformApi, stateOf, type LoginEvent, type Tenant } from '@/lib/platform';
+import { ago, bytes, deviceLine, place, platformApi, rs, stateOf, type LoginEvent, type Tenant } from '@/lib/platform';
 
 interface Overview {
   tenants: { total: number; active: number; trial: number; suspended: number; expired: number; expiringSoon: number; active24h: number; idle14d: number };
@@ -16,7 +16,12 @@ interface Overview {
   recentLogins: LoginEvent[];
 }
 
+interface Money { mrr: string; collectedThisMonth: string; overdue: unknown[]; dueSoon: unknown[] }
+interface Storage { usedBytes: number; limitBytes: number; perTenant: { tenantId: string; bytes: number }[] }
+
 export default function AdminOverviewPage() {
+  const [money, setMoney] = useState<Money | null>(null);
+  const [storage, setStorage] = useState<Storage | null>(null);
   const [o, setO] = useState<Overview | null>(null);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [error, setError] = useState('');
@@ -26,6 +31,8 @@ export default function AdminOverviewPage() {
     const load = () => {
       platformApi<Overview>('/overview').then((r) => { setO(r); setError(''); }).catch((e) => setError(e.message));
       platformApi<Tenant[]>('/tenants').then(setTenants).catch(() => {});
+      platformApi<Money>('/billing/summary').then(setMoney).catch(() => {});
+      platformApi<Storage>('/storage').then(setStorage).catch(() => {});
     };
     load();
     const t = setInterval(load, 30_000);
@@ -57,6 +64,16 @@ export default function AdminOverviewPage() {
         { label: 'Sign-ins (24 h)', value: o?.logins24h ?? '—', sub: o ? `${o.failedLogins24h} failed` : undefined, icon: 'lock', tone: o && o.failedLogins24h > 10 ? 'amber' : undefined },
         { label: 'Requests today', value: o?.requestsToday ?? '—', sub: o ? `${o.tenants.active24h} business${o.tenants.active24h === 1 ? '' : 'es'} active today` : undefined, icon: 'trend' },
       ]} />
+
+      <StatTiles items={[
+        { label: 'Monthly income', value: money ? rs(money.mrr) : '—', sub: 'from businesses with a fee', icon: 'trend', tone: 'green' },
+        { label: 'Received this month', value: money ? rs(money.collectedThisMonth) : '—', icon: 'wallet' },
+        { label: 'Have run out', value: money?.overdue.length ?? '—', sub: money?.overdue.length ? 'access ended, not renewed' : 'all renewed', icon: 'alert', tone: money?.overdue.length ? 'red' : 'green' },
+        { label: 'Database used', value: storage ? `${Math.round((storage.usedBytes / storage.limitBytes) * 100)}%` : '—', sub: storage ? `${bytes(storage.usedBytes)} of ${bytes(storage.limitBytes)}` : undefined, icon: 'cloud', tone: storage && storage.usedBytes / storage.limitBytes > 0.8 ? 'red' : storage && storage.usedBytes / storage.limitBytes > 0.6 ? 'amber' : undefined },
+      ]} />
+      {storage && storage.usedBytes / storage.limitBytes > 0.6 && (
+        <p className="alert-bar"><Icon name="alert" />The database is {Math.round((storage.usedBytes / storage.limitBytes) * 100)}% full ({bytes(storage.usedBytes)} of {bytes(storage.limitBytes)}). Upgrade the database plan before it fills up, or new data will stop saving.</p>
+      )}
 
       <div className="admin-grid">
         <section className="card">
