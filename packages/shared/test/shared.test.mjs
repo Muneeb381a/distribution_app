@@ -86,7 +86,7 @@ test('labels', () => {
   assert.deepEqual(dueStatus('CANCELLED', 1000, 0), { label: 'Cancelled', tone: 'red' });
 });
 
-import { DRINK_CATALOG, DRINK_SIZE_PRESETS, defaultPack, drinkSpecs, riceSpecs, productKey, unitLabel, RICE_TREE } from '../dist/index.js';
+import { DRINK_CATALOG, DRINK_SIZE_PRESETS, defaultPack, sizeMl, drinkSpecs, riceSpecs, productKey, unitLabel, RICE_TREE } from '../dist/index.js';
 
 test('catalog: every drink has sizes, large PET is 6 a peti, glass 250 ml is a returnable crate of 24', () => {
   for (const b of DRINK_CATALOG) {
@@ -97,12 +97,22 @@ test('catalog: every drink has sizes, large PET is 6 a peti, glass 250 ml is a r
     }
   }
   assert.ok(DRINK_SIZE_PRESETS.some((s) => s.size === '2.25 L'));
+  assert.ok(DRINK_SIZE_PRESETS.some((s) => s.size === '2 L' && s.pack === 6));
+  // every cola-type brand offers 2 L
+  for (const name of ['Coca-Cola', 'Sprite', 'Pepsi', '7Up']) assert.ok(DRINK_CATALOG.find((b) => b.products[0] === name).sizes.some((s) => s.size === '2 L'), name);
 });
 test('catalog: default pack for typed sizes', () => {
   assert.deepEqual(defaultPack('1.5 L'), { pack: 6, returnable: false });
   assert.deepEqual(defaultPack('500ml'), { pack: 12, returnable: false });
   assert.deepEqual(defaultPack('250 ml glass'), { pack: 24, returnable: true });
   assert.equal(defaultPack('family pack'), null);
+  assert.deepEqual(defaultPack('2 L'), { pack: 6, returnable: false });
+  assert.deepEqual(defaultPack('2 litre'), { pack: 6, returnable: false });
+  assert.equal(defaultPack('5 L').pack, 4);
+  assert.equal(sizeMl('2 L'), 2000);
+  assert.equal(sizeMl('1.5 litre'), 1500);
+  assert.equal(sizeMl('500ml'), 500);
+  assert.equal(sizeMl('family pack'), null);
 });
 test('catalog: specs', () => {
   const coke = DRINK_CATALOG.find((b) => b.products[0] === 'Coca-Cola');
@@ -111,6 +121,9 @@ test('catalog: specs', () => {
   assert.ok(specs.find((s) => s.size === '250 ml glass').returnableEmpty);
   const rice = riceSpecs('Basmati', 'Super Kernel', 'Sella', ['loose', 'bag25']);
   assert.deepEqual(rice.map((r) => [r.size, r.bagKg, r.isPacked]), [[null, 50, false], ['25 kg bag', 25, true]]);
+  // a bag weight that is not on the list
+  const odd = riceSpecs('Basmati', '1121', 'Sella', ['bag20', 12]);
+  assert.deepEqual(odd.map((r) => [r.size, r.bagKg, r.isPacked]), [['20 kg bag', 20, true], ['12 kg bag', 12, true]]);
   assert.deepEqual(rice[0].path, ['Basmati', 'Super Kernel', 'Sella']);
   assert.ok(RICE_TREE.Basmati['Super Kernel'].includes('Sella'));
   assert.equal(productKey(' Coke ', '1.5  L'), productKey('coke', '1.5 l'));

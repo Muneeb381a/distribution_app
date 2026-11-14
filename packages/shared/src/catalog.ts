@@ -26,9 +26,10 @@ const S = (size: string, ml: number, pack: number, kind: DrinkSize['kind'] = 'PE
 
 const COLA_SIZES = [
   S('250 ml glass', 250, 24, 'glass', true), S('250 ml can', 250, 12, 'can'), S('345 ml', 345, 12), S('500 ml', 500, 12),
-  S('1 L', 1000, 6), S('1.5 L', 1500, 6), S('1.75 L', 1750, 6), S('2.25 L', 2250, 6),
+  S('1 L', 1000, 6), S('1.5 L', 1500, 6), S('1.75 L', 1750, 6), S('2 L', 2000, 6), S('2.25 L', 2250, 6),
 ];
-const LOCAL_SIZES = [S('250 ml glass', 250, 24, 'glass', true), S('345 ml', 345, 12), S('500 ml', 500, 12), S('1.5 L', 1500, 6), S('2.25 L', 2250, 6)];
+const LOCAL_SIZES = [S('250 ml glass', 250, 24, 'glass', true), S('345 ml', 345, 12), S('500 ml', 500, 12), S('1.5 L', 1500, 6), S('2 L', 2000, 6), S('2.25 L', 2250, 6)];
+const WATER_SIZES = [S('500 ml', 500, 12), S('600 ml', 600, 12), S('1.5 L', 1500, 6)];
 const JUICE_SMALL = S('200 ml', 200, 24, 'tetra');
 const JUICE_LITRE = S('1 L', 1000, 12, 'tetra');
 
@@ -58,16 +59,23 @@ export const DRINK_CATALOG: DrinkBrand[] = [
   { group: 'Juices', category: ['Juices', 'Shezan'], company: 'Shezan', products: ['Shezan Mango', 'Shezan Apple', 'Shezan Orange'], sizes: [S('250 ml', 250, 24, 'tetra'), JUICE_LITRE] },
   { group: 'Juices', category: ['Juices', 'Slice'], company: 'PepsiCo', products: ['Slice Mango'], sizes: [JUICE_SMALL, S('355 ml', 355, 12), S('1 L', 1000, 6, 'tetra')] },
   { group: 'Juices', category: ['Juices', 'Fresher'], company: 'Fresher', products: ['Fresher Mango', 'Fresher Guava'], sizes: [JUICE_SMALL, JUICE_LITRE] },
-  { group: 'Water', category: ['Water', 'Aquafina'], company: 'PepsiCo', products: ['Aquafina'], sizes: [S('500 ml', 500, 12), S('1.5 L', 1500, 6)] },
-  { group: 'Water', category: ['Water', 'Nestlé Pure Life'], company: 'Nestlé', products: ['Nestlé Pure Life'], sizes: [S('500 ml', 500, 12), S('1.5 L', 1500, 6)] },
-  { group: 'Water', category: ['Water', 'Kinley'], company: 'Coca-Cola', products: ['Kinley'], sizes: [S('500 ml', 500, 12), S('1.5 L', 1500, 6)] },
+  { group: 'Water', category: ['Water', 'Aquafina'], company: 'PepsiCo', products: ['Aquafina'], sizes: WATER_SIZES },
+  { group: 'Water', category: ['Water', 'Nestlé Pure Life'], company: 'Nestlé', products: ['Nestlé Pure Life'], sizes: WATER_SIZES },
+  { group: 'Water', category: ['Water', 'Kinley'], company: 'Coca-Cola', products: ['Kinley'], sizes: WATER_SIZES },
 ];
 
 /** Sizes offered when adding a drink by hand, with their usual pack. */
 export const DRINK_SIZE_PRESETS: DrinkSize[] = [
   S('200 ml', 200, 24, 'tetra'), S('250 ml glass', 250, 24, 'glass', true), S('250 ml can', 250, 12, 'can'), S('345 ml', 345, 12),
-  S('500 ml', 500, 12), S('1 L', 1000, 6), S('1.5 L', 1500, 6), S('1.75 L', 1750, 6), S('2.25 L', 2250, 6),
+  S('500 ml', 500, 12), S('600 ml', 600, 12), S('1 L', 1000, 6), S('1.5 L', 1500, 6), S('1.75 L', 1750, 6), S('2 L', 2000, 6), S('2.25 L', 2250, 6),
 ];
+
+/** Volume in millilitres of a size typed by hand ("2 L", "500ml", "1.5 litre"); null if it cannot tell. Used to keep sizes in order. */
+export function sizeMl(size: string): number | null {
+  const m = size.toLowerCase().replace(/\s+/g, '').match(/^(\d+(?:\.\d+)?)(ml|l|ltr|litre|liter)/);
+  if (!m) return null;
+  return Math.round(m[2] === 'ml' ? Number(m[1]) : Number(m[1]) * 1000);
+}
 
 /** Usual bottles per peti for a size typed by hand ("1.5 L", "500ml"); null if it can't tell. */
 export function defaultPack(size: string): { pack: number; returnable: boolean } | null {
@@ -77,7 +85,8 @@ export function defaultPack(size: string): { pack: number; returnable: boolean }
   if (!m) return null;
   const ml = m[2] === 'ml' ? Number(m[1]) : Number(m[1]) * 1000;
   const glass = /glass/i.test(size);
-  return { pack: glass ? 24 : ml >= 1000 ? 6 : ml <= 250 && /tetra|juice/i.test(size) ? 24 : 12, returnable: glass };
+  // Big water bottles (5 L, 6 L) come 4 or fewer to a carton; check the pack of yours.
+  return { pack: glass ? 24 : ml >= 4000 ? 4 : ml >= 1000 ? 6 : ml <= 250 && /tetra|juice/i.test(size) ? 24 : 12, returnable: glass };
 }
 
 /* ------------------------------------------------------------------ rice */
@@ -104,7 +113,9 @@ export const RICE_PACKINGS = [
   { key: 'loose', label: 'Loose (kg / maund)', bagKg: null, packed: false, hint: 'Sold by weight; a 50 kg bori unit is added' },
   { key: 'bag5', label: '5 kg bag', bagKg: 5, packed: true },
   { key: 'bag10', label: '10 kg bag', bagKg: 10, packed: true },
+  { key: 'bag20', label: '20 kg bag', bagKg: 20, packed: true },
   { key: 'bag25', label: '25 kg bag', bagKg: 25, packed: true },
+  { key: 'bag40', label: '40 kg bag', bagKg: 40, packed: true },
   { key: 'bag50', label: '50 kg bag', bagKg: 50, packed: true },
 ] as const;
 export type RicePacking = (typeof RICE_PACKINGS)[number]['key'];
@@ -136,10 +147,11 @@ export function drinkSpecs(brand: DrinkBrand, productName: string, sizes: DrinkS
   }));
 }
 
-export function riceSpecs(type: string, variety: string, form: string, packings: RicePacking[]): ProductSpec[] {
+/** `packings` are keys from RICE_PACKINGS, or a bag weight in kg for a size that is not listed. */
+export function riceSpecs(type: string, variety: string, form: string, packings: (RicePacking | number)[]): ProductSpec[] {
   const name = `${variety} ${form}`;
   return packings.map((k) => {
-    const p = RICE_PACKINGS.find((x) => x.key === k)!;
+    const p = typeof k === 'number' ? { bagKg: k, packed: true } : RICE_PACKINGS.find((x) => x.key === k)!;
     return {
       line: 'RICE', path: [type, variety, form], name, brand: null,
       size: p.packed ? `${p.bagKg} kg bag` : null,
