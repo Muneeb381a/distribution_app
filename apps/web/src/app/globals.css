@@ -2613,3 +2613,31 @@ tr.row-link:hover td { background: var(--surface-hover); }
 .review-table input.mini.wide { width: 110px; }
 .rate-in { display: inline-flex; align-items: center; gap: 6px; }
 .rate-in small { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+/* Opening stock */
+.open-intro { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 22px; align-items: center; margin-bottom: 16px; }
+@media (max-width: 900px) { .open-intro { grid-template-columns: minmax(0, 1fr); } }
+.open-places { display: flex; flex-wrap: wrap; gap: 10px; }
+.open-place { display: inline-flex; align-items: center; gap: 12px; padding: 12px 18px; min-height: 0; text-align: left; background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: 14px; }
+.open-place > svg { width: 22px; height: 22px; color: var(--muted); }
+.open-place span { display: grid; line-height: 1.2; }
+.open-place small { font-size: 12px; color: var(--muted); font-weight: 500; }
+.open-place:hover:not(.on) { background: var(--surface-hover); }
+.open-place.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.open-place.on > svg { color: var(--accent); }
+.open-steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--text-2); font-size: 13.5px; }
+.open-section { margin-bottom: 8px; }
+.open-section h2 { display: flex; align-items: center; gap: 10px; }
+.open-table th, .open-table td { padding-top: 9px; padding-bottom: 9px; }
+.open-sub { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 3px; font-size: 12px; }
+input.open-in { width: 88px; min-height: 36px; padding: 5px 9px; text-align: right; }
+.open-cost { display: inline-flex; align-items: center; gap: 6px; }
+.open-cost small { color: var(--muted); }
+.open-cost input.open-in { width: 104px; }
+.open-total { white-space: nowrap; font-variant-numeric: tabular-nums; }
+tr.open-done td { background: color-mix(in srgb, #22c55e 5%, transparent); }
+tr.open-changed td { background: color-mix(in srgb, #f59e0b 9%, transparent); }
+.open-meta { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 14px; margin-top: 18px; }
+@media (max-width: 700px) { .open-meta { grid-template-columns: minmax(0, 1fr); } }
+.open-meta label { display: grid; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+.open-meta small { font-weight: 500; }

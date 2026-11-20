@@ -77,6 +77,7 @@ const DETAIL: [RegExp, string][] = [
   [/^\/employees\/[^/]+$/, 'Employee ledger'],
   [/^\/products\/catalog$/, 'Add from catalog'],
   [/^\/stock\/history$/, 'Stock history'],
+  [/^\/stock\/opening$/, 'Opening stock'],
   [/^\/stock\/reorder$/, 'Reorder plan'],
   [/^\/trips\/[^/]+$/, 'Trip'],
 ];

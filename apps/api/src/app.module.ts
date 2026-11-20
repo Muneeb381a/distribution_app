@@ -11,6 +11,7 @@ import { UsersModule } from './users/users.module.js';
 import { ImportModule } from './import/import.module.js';
 import { StockCoreModule } from './stock/stock.service.js';
 import { StockModule } from './stock/stock.module.js';
+import { OpeningModule } from './stock/opening.module.js';
 import { PurchasingModule } from './purchasing/purchasing.module.js';
 import { SalesModule } from './sales/sales.module.js';
 import { HrModule } from './hr/hr.module.js';
@@ -28,6 +29,6 @@ import { DayEndModule } from './dayend/dayend.module.js';
 import { ProofModule } from './sales/proof.module.js';
 
 @Module({
-  imports: [PrismaModule, TenancyModule, AuditModule, AuthModule, CatalogModule, MasterDataModule, UsersModule, ImportModule, StockCoreModule, StockModule, PurchasingModule, SalesModule, HrModule, ReportsModule, DashboardModule, SearchModule, SupplierEmptiesModule, SyncModule, SettingsModule, TripsModule, VehiclesModule, ExpenseCategoriesModule, BackupModule, DayEndModule, ProofModule, PlatformModule, PlatformBusinessModule],
+  imports: [PrismaModule, TenancyModule, AuditModule, AuthModule, CatalogModule, MasterDataModule, UsersModule, ImportModule, StockCoreModule, StockModule, OpeningModule, PurchasingModule, SalesModule, HrModule, ReportsModule, DashboardModule, SearchModule, SupplierEmptiesModule, SyncModule, SettingsModule, TripsModule, VehiclesModule, ExpenseCategoriesModule, BackupModule, DayEndModule, ProofModule, PlatformModule, PlatformBusinessModule],
 })
 export class AppModule {}

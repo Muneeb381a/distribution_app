@@ -145,6 +145,7 @@ model Product {
   emptiesLedger       EmptiesLedger[]
   tripLines           VehicleTripLine[]
   supplierEmpties     SupplierEmptiesLedger[]
+  openingLines        StockOpeningLine[]
 
   @@index([categoryId])
 }
@@ -179,6 +180,7 @@ model Location {
   sales           Sale[]
   expenses        Expense[]
   trips           VehicleTrip[]
+  openings        StockOpening[]
 }
 
 model Employee {
@@ -1056,4 +1058,46 @@ model BlockedIp {
   reason        String?
   createdByName String
   createdAt     DateTime @default(now())
+}
+
+/// Stock the shop already had when it started using the software: counted, entered by hand, with no supplier.
+/// One document per save. Entering the same product again is a recount: only the difference is posted.
+model StockOpening {
+  id           String             @id @default(uuid())
+  openingNo    String             @unique
+  locationId   String
+  location     Location           @relation(fields: [locationId], references: [id])
+  /// The day the stock is counted as of (the day the shop started using the software, or today).
+  asOf         DateTime           @db.Date
+  note         String?
+  /// Value of what this save added or took off, at cost.
+  totalValue   Decimal            @db.Decimal(14, 2)
+  status       DocStatus          @default(ACTIVE)
+  createdById  String
+  createdAt    DateTime           @default(now())
+  reversedAt   DateTime?
+  reversedById String?
+  lines        StockOpeningLine[]
+
+  @@index([locationId, createdAt])
+}
+
+model StockOpeningLine {
+  id           String       @id @default(uuid())
+  openingId    String
+  opening      StockOpening @relation(fields: [openingId], references: [id], onDelete: Cascade)
+  productId    String
+  product      Product      @relation(fields: [productId], references: [id])
+  /// What this save added (negative when a recount lowers it), in base units (bottles or kg).
+  qtyBase      Decimal      @db.Decimal(14, 3)
+  /// The opening quantity of the product at this location after the save.
+  openingAfter Decimal      @db.Decimal(14, 3)
+  /// Cost per base unit typed for this save; null when none was typed.
+  unitCostBase Decimal?     @db.Decimal(14, 4)
+  /// The product cost before this save, so a reversal can put it back (null = it had none).
+  previousCost Decimal?     @db.Decimal(14, 4)
+  costChanged  Boolean      @default(false)
+
+  @@index([openingId])
+  @@index([productId])
 }

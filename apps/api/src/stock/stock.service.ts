@@ -17,6 +17,8 @@ export interface MoveInput {
   refId?: string;
   note?: string;
   userId: string;
+  /** When it happened; now when left out (a count dated earlier is entered as of that day). */
+  at?: Date;
 }
 
 @Injectable()
@@ -99,6 +101,7 @@ export class StockService {
         refId: m.refId,
         note: m.note,
         createdById: m.userId,
+        createdAt: m.at,
       },
     });
   }

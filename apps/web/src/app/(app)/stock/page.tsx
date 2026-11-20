@@ -137,6 +137,7 @@ export default function StockPage() {
         <div className="actions">
           {can(user, 'REPORT_VIEW') && <Link className="btn secondary" href="/stock/reorder"><Icon name="trend" />Reorder plan</Link>}
           <Link className="btn secondary" href="/stock/history"><Icon name="history" />Stock history</Link>
+          {canAdjust && <Link className="btn" href="/stock/opening"><Icon name="plus" />Opening stock</Link>}
         </div>
       </div>
       {(error || lookupError) && <p className="error">{error || lookupError}</p>}
