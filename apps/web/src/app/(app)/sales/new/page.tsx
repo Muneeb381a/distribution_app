@@ -9,7 +9,8 @@ import { BusyButton, useConfirm, useToast } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
 import { readBillDefaults, rememberBillDefaults } from '@/lib/billDefaults';
 import { api, can, useUser } from '@/lib/api';
-import { customerOptions, productOptions, useLookups, type ProductOpt } from '@/lib/lookups';
+import { customerOptions, formatQty, productOptions, useLookups, type ProductOpt } from '@/lib/lookups';
+import { scoped } from '@/lib/tenantScope';
 import { getSnapshot, isNetworkError, previewOffline, saveSaleOffline, useSyncState, type OutboxOp, type Preview, type Snapshot } from '@/lib/offline';
 import type { PrintMode } from '@/components/PrintPanel';
 import { money, BILL_PAYMENT_METHODS, RETURN_REASONS, unitLabel } from '@dist/shared';
@@ -22,6 +23,44 @@ interface Collected { productId: string; qty: string }
 type Priced = { rate: string; amount: string } | undefined;
 
 const blank = (): Line => ({ productId: '', unitName: '', qty: '', rate: '', reason: 'DAMAGED' });
+
+/** Units in the order a shop thinks of them: bottle, carton; kg, maund, bag. */
+const UNIT_RANK: Record<string, number> = { BOTTLE: 0, CARTON: 1, KG: 2, MAUND: 3, BAG: 4 };
+const orderedUnits = <U extends { unitName: string }>(units: U[]) => [...units].sort((a, b) => (UNIT_RANK[a.unitName] ?? 9) - (UNIT_RANK[b.unitName] ?? 9));
+
+/** The unit each product was last sold in on this computer, so a bill starts with the one that is usually wanted. */
+const UNIT_KEY = () => scoped('dist.units');
+function lastUnit(productId: string): string | undefined {
+  try { return (JSON.parse(localStorage.getItem(UNIT_KEY()) ?? '{}') as Record<string, string>)[productId]; } catch { return undefined; }
+}
+function rememberUnit(productId: string, unitName: string) {
+  try { localStorage.setItem(UNIT_KEY(), JSON.stringify({ ...(JSON.parse(localStorage.getItem(UNIT_KEY()) ?? '{}') as Record<string, string>), [productId]: unitName })); } catch { /* a convenience only */ }
+}
+
+/** Quantities rice is usually sold in, per unit: a quarter kg, half a kg, a kg, a bag… */
+const QUICK_QTY: Record<string, number[]> = { KG: [0.25, 0.5, 1, 2, 5, 10], MAUND: [0.25, 0.5, 1, 2], BAG: [1, 2, 5] };
+const fraction = (n: number) => (n === 0.25 ? '¼' : n === 0.5 ? '½' : String(n));
+
+/** Under a bill line: one-tap quantities for rice, what the quantity comes to in kg or bottles, and what is in stock. */
+function LineHelp({ p, unitName, qty, held, onQty }: { p: ProductOpt; unitName: string; qty: string; held?: string; onQty: (q: string) => void }) {
+  const unit = p.units.find((u) => u.unitName === unitName);
+  const factor = Number(unit?.factorToBase ?? 1);
+  const n = Number(qty) || 0;
+  const base = p.baseUnit === 'KG' ? 'kg' : 'bottles';
+  const chips = p.baseUnit === 'KG' ? QUICK_QTY[unitName] : undefined;
+  const conv = unit && factor !== 1 ? (n > 0 ? `${n} ${unitLabel(unitName).toLowerCase()} = ${(n * factor).toLocaleString('en-PK', { maximumFractionDigits: 3 })} ${base}` : `1 ${unitLabel(unitName).toLowerCase()} = ${factor} ${base}`) : null;
+  if (!chips && !conv && held === undefined) return null;
+  return (
+    <span className="line-help">
+      {chips && (
+        <span className="qty-chips" role="group" aria-label="Quick quantity">
+          {chips.map((c) => <button key={c} type="button" className={`qty-chip${n === c ? ' on' : ''}`} onClick={() => onQty(String(c))}>{fraction(c)}</button>)}
+        </span>
+      )}
+      <span className="line-hint">{conv}{conv && held !== undefined ? ' · ' : ''}{held !== undefined ? `In stock ${formatQty(held, p.units, p.baseUnit)}` : ''}</span>
+    </span>
+  );
+}
 // Cheques are taken on the khata page, where they can later be cleared or bounced.
 const METHODS = BILL_PAYMENT_METHODS.map((m) => [m.value, m.label] as const);
 
@@ -50,6 +89,8 @@ export default function NewSalePage() {
     salesmanId: search.get('salesman') ?? '', vehicleId: '', paidNow: '', method: 'CASH', note: '',
   });
   const [lastBill, setLastBill] = useState<LastBill | null>(null);
+  // What is in stock where the bill is made from, shown under each line.
+  const [held, setHeld] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState<Saved | null>(null);
   const [focusTarget, setFocusTarget] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -172,8 +213,21 @@ export default function NewSalePage() {
     return () => clearTimeout(t);
   }, [body, hasLines, head.locationId, fromSnap, snap, user]);
 
+  useEffect(() => {
+    if (fromSnap || !head.locationId) return;
+    let stale = false;
+    api<{ productId: string; ok: string }[]>(`/stock?locationId=${head.locationId}`)
+      .then((r) => { if (!stale) setHeld(Object.fromEntries(r.map((x) => [x.productId, x.ok]))); })
+      .catch(() => {});
+    return () => { stale = true; };
+  }, [head.locationId, fromSnap, saved]);
+
   const setLine = (set: typeof setItems, list: Line[], i: number, patch: Partial<Line>) => set(list.map((l, j) => (j === i ? { ...l, ...patch } : l)));
-  const pick = (id: string): Partial<Line> => ({ productId: id, unitName: prod(id)?.units[0]?.unitName ?? '', rate: '' });
+  const pick = (id: string): Partial<Line> => {
+    const units = orderedUnits(prod(id)?.units ?? []);
+    const remembered = lastUnit(id);
+    return { productId: id, unitName: (units.find((u) => u.unitName === remembered) ?? units[0])?.unitName ?? '', rate: '' };
+  };
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -265,9 +319,10 @@ export default function NewSalePage() {
             onPicked={() => setFocusTarget(lineSel(kind, i, 'qty'))}
           />
           {last && <span className="line-hint">Last bill: {money(last)} / {unitLabel(l.unitName)}</span>}
+          {p && <LineHelp p={p} unitName={l.unitName} qty={l.qty} held={isReturn ? undefined : held[p.id] ?? (head.locationId && !fromSnap && Object.keys(held).length ? '0' : undefined)} onQty={(q) => setLine(set, list, i, { qty: q })} />}
         </div>
-        <select aria-label="Unit" value={l.unitName} onChange={(e) => setLine(set, list, i, { unitName: e.target.value, rate: '' })} disabled={!p}>
-          {p?.units.map((u) => <option key={u.unitName} value={u.unitName}>{unitLabel(u.unitName)}</option>)}
+        <select aria-label="Unit" value={l.unitName} onChange={(e) => { rememberUnit(l.productId, e.target.value); setLine(set, list, i, { unitName: e.target.value, rate: '' }); }} disabled={!p}>
+          {orderedUnits(p?.units ?? []).map((u) => <option key={u.unitName} value={u.unitName}>{unitLabel(u.unitName)}</option>)}
         </select>
         <input aria-label="Quantity" type="number" step="any" min="0" placeholder="0" inputMode="decimal" value={l.qty} onChange={(e) => setLine(set, list, i, { qty: e.target.value })} onKeyDown={(e) => nextLine(e, list, set, kind, i)} />
         <input

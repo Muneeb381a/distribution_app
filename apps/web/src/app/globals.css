@@ -2666,3 +2666,10 @@ tr.open-changed td { background: color-mix(in srgb, #f59e0b 9%, transparent); }
 .cat-new input { flex: 1; min-width: 0; }
 
 .rice-units { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+
+/* Bill lines: one-tap rice quantities and conversions */
+.line-help { display: grid; gap: 5px; margin-top: 4px; }
+.qty-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.qty-chip { min-height: 26px; padding: 0 10px; border-radius: 999px; background: var(--surface); color: var(--text-2); border: 1px solid var(--border-strong); font-size: 12.5px; font-weight: 650; }
+.qty-chip:hover { background: var(--surface-hover); color: var(--text); }
+.qty-chip.on { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); border-color: var(--accent); color: var(--text); }
