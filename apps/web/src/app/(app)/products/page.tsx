@@ -46,7 +46,7 @@ export default function ProductsPage() {
   const prompt = usePrompt();
   const [line, setLine] = useState<Line>('BOTTLES');
   const [products, setProducts] = useState<Product[] | null>(null);
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [allCategories, setAllCategories] = useState<Category[]>([]);
   const [prices, setPrices] = useState<Price[]>([]);
   // Saleable stock of each product, all places together.
   const [onHand, setOnHand] = useState<Record<string, number>>({});
@@ -67,7 +67,7 @@ export default function ProductsPage() {
     try {
       const [p, c, pr, st] = await Promise.all([
         api<Product[]>(`/products?line=${line}&includeInactive=true`),
-        api<Category[]>(`/categories?line=${line}`),
+        api<Category[]>('/categories'),
         api<Price[]>('/product-prices'),
         api<{ productId: string; ok: string }[]>('/stock').catch(() => []),
       ]);
@@ -75,7 +75,7 @@ export default function ProductsPage() {
       for (const r of st) held[r.productId] = (held[r.productId] ?? 0) + Number(r.ok);
       setOnHand(held);
       setProducts(p);
-      setCategories(c);
+      setAllCategories(c);
       setPrices(pr);
     } catch (e) {
       toast.error((e as Error).message);
@@ -90,16 +90,17 @@ export default function ProductsPage() {
 
   // "Basmati › Super Kernel › Sella"
   const paths = useMemo(() => {
-    const byId = new Map(categories.map((c) => [c.id, c]));
+    const byId = new Map(allCategories.map((c) => [c.id, c]));
     const walk = (id: string, seen = 0): string => {
       const c = byId.get(id);
       if (!c || seen > 10) return '';
       return c.parentId ? `${walk(c.parentId, seen + 1)} › ${c.name}` : c.name;
     };
-    return new Map(categories.map((c) => [c.id, walk(c.id)]));
-  }, [categories]);
+    return new Map(allCategories.map((c) => [c.id, walk(c.id)]));
+  }, [allCategories]);
   const pathOf = useCallback((id: string) => paths.get(id) ?? '', [paths]);
-  const catOptions = useMemo(() => categories.map((c) => ({ id: c.id, text: pathOf(c.id) })).sort((a, b) => a.text.localeCompare(b.text)), [categories, pathOf]);
+  /** The categories of one kind of product, as "Basmati › Super Kernel", for the product form. */
+  const categoriesFor = useCallback((l: Line) => allCategories.filter((c) => c.businessLine.code === l).map((c) => ({ id: c.id, text: pathOf(c.id) })).sort((a, b) => a.text.localeCompare(b.text)), [allCategories, pathOf]);
   const priceOf = (p: Product) => prices.filter((x) => x.productId === p.id);
 
   const inactiveCount = products?.filter((p) => !p.isActive).length ?? 0;
@@ -285,12 +286,13 @@ export default function ProductsPage() {
           key={editing === 'new' ? 'new' : editing.id}
           line={line}
           product={editing === 'new' ? null : editing}
-          categories={catOptions}
+          categoriesFor={categoriesFor}
+          onNewCategory={async (l, name) => { const c = await api<{ id: string }>('/categories', { method: 'POST', json: { businessLine: l, name } }); await load(); return c; }}
           prices={editing === 'new' ? [] : priceOf(editing)}
           canEdit={canEdit}
           canRate={canRate}
           onClose={() => setEditing(null)}
-          onSaved={(name) => { setEditing(null); toast.success(`${name} saved`); load(); }}
+          onSaved={(name, saved) => { setEditing(null); toast.success(`${name} saved`); if (saved !== line) setLine(saved); else load(); }}
           onError={(m) => toast.error(m)}
         />
       )}
@@ -339,10 +341,14 @@ function Rates({ rows, left }: { rows: Price[]; left?: boolean }) {
   );
 }
 
-function ProductDialog({ line, product, categories, prices, canEdit, canRate, onClose, onSaved, onError }: {
-  line: Line; product: Product | null; categories: { id: string; text: string }[]; prices: Price[];
-  canEdit: boolean; canRate: boolean; onClose: () => void; onSaved: (name: string) => void; onError: (m: string) => void;
+function ProductDialog({ line: startLine, product, categoriesFor, onNewCategory, prices, canEdit, canRate, onClose, onSaved, onError }: {
+  line: Line; product: Product | null; categoriesFor: (l: Line) => { id: string; text: string }[]; onNewCategory: (l: Line, name: string) => Promise<{ id: string }>; prices: Price[];
+  canEdit: boolean; canRate: boolean; onClose: () => void; onSaved: (name: string, line: Line) => void; onError: (m: string) => void;
 }) {
+  // A new product is for drinks or for rice, chosen here; an existing one keeps what it is.
+  const [line, setLine] = useState<Line>(startLine);
+  const [newCat, setNewCat] = useState<string | null>(null);
+  const categories = categoriesFor(line);
   const factor = (u: string) => product?.units.find((x) => x.unitName === u)?.factorToBase;
   const [form, setForm] = useState<Form>(() => (product ? {
     name: product.name, brand: product.brand ?? '', size: product.size ?? '', categoryId: product.categoryId,
@@ -355,6 +361,25 @@ function ProductDialog({ line, product, categories, prices, canEdit, canRate, on
   const [rates, setRates] = useState<Record<string, string>>(() => Object.fromEntries(prices.map((p) => [rateKey(p.unitName, p.tier ?? 'RETAIL'), String(Number(p.rate))])));
   const [busy, setBusy] = useState(false);
   const set = (patch: Partial<Form>) => setForm({ ...form, ...patch });
+  /** Switching between drinks and rice starts the form over: the units, the size and the categories all differ. */
+  const switchKind = (k: Line) => {
+    if (k === line) return;
+    setLine(k);
+    setForm({ ...EMPTY, name: form.name, brand: form.brand, returnableEmpty: k === 'BOTTLES' });
+    setRates({});
+    setNewCat(null);
+  };
+  async function addCategory() {
+    const name = (newCat ?? '').trim();
+    if (name.length < 2) return;
+    try {
+      const c = await onNewCategory(line, name);
+      set({ categoryId: c.id });
+      setNewCat(null);
+    } catch (err) {
+      onError((err as Error).message);
+    }
+  }
   /** Typing or picking a size fills bottles per peti and returnable from the usual pack. */
   const setSize = (size: string) => {
     const d = product ? null : defaultPack(size); // never change an existing product's peti by accident
@@ -385,7 +410,7 @@ function ProductDialog({ line, product, categories, prices, canEdit, canRate, on
           await api(`/product-prices/${saved.id}`, { method: 'PUT', json: { prices: list } });
         }
       }
-      onSaved(form.name.trim());
+      onSaved(form.name.trim(), line);
     } catch (err) {
       onError((err as Error).message);
       setBusy(false);
@@ -398,15 +423,33 @@ function ProductDialog({ line, product, categories, prices, canEdit, canRate, on
         <form onSubmit={submit}>
           <div className="modal-head">
             <span className="modal-icon info"><Icon name="products" /></span>
-            <h2 id="product-title">{product ? `Edit ${product.name}` : `New ${line === 'BOTTLES' ? 'bottle' : 'rice'} product`}</h2>
+            <h2 id="product-title">{product ? `Edit ${product.name}` : `New ${line === 'BOTTLES' ? 'drink' : 'rice'} product`}</h2>
           </div>
           <fieldset disabled={!canEdit} className="plain-fieldset">
             <div className="fgrid">
-              <Field label="Category" required span={12}>
+              {!product && (
+                <div className="fld span-12">
+                  <span className="fld-label"><span>What are you adding?</span></span>
+                  <div className="kind-switch" role="radiogroup" aria-label="What are you adding?">
+                    <button type="button" role="radio" aria-checked={line === 'BOTTLES'} className={`kind-opt${line === 'BOTTLES' ? ' on' : ''}`} onClick={() => switchKind('BOTTLES')}><Icon name="products" /><span><b>Drinks</b><small>Bottles, sold by the peti</small></span></button>
+                    <button type="button" role="radio" aria-checked={line === 'RICE'} className={`kind-opt${line === 'RICE' ? ' on' : ''}`} onClick={() => switchKind('RICE')}><Icon name="stock" /><span><b>Rice</b><small>Sold by kg, maund or bag</small></span></button>
+                  </div>
+                </div>
+              )}
+              <Field label="Category" required span={12} hint={!categories.length ? `There is no ${line === 'BOTTLES' ? 'drinks' : 'rice'} category yet. Add one below.` : undefined}>
                 <select required value={form.categoryId} onChange={(e) => set({ categoryId: e.target.value })}>
                   <option value="">Select category…</option>
                   {categories.map((o) => <option key={o.id} value={o.id}>{o.text}</option>)}
                 </select>
+                {!product && (newCat === null
+                  ? <button type="button" className="cat-link" style={{ marginTop: 6 }} onClick={() => setNewCat('')}><Icon name="plus" />New {line === 'BOTTLES' ? 'drinks' : 'rice'} category</button>
+                  : (
+                    <span className="cat-new">
+                      <input autoFocus value={newCat} maxLength={60} placeholder={line === 'BOTTLES' ? 'e.g. Coca-Cola' : 'e.g. Basmati'} onChange={(e) => setNewCat(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void addCategory(); } if (e.key === 'Escape') setNewCat(null); }} />
+                      <button type="button" disabled={newCat.trim().length < 2} onClick={() => void addCategory()}>Add</button>
+                      <button type="button" className="secondary" onClick={() => setNewCat(null)}>Cancel</button>
+                    </span>
+                  ))}
               </Field>
               <Field label="Name" required span={6} hint={line === 'BOTTLES' ? 'Brand and flavour, e.g. "Pepsi" or "Shezan Mango"' : 'Variety and form, e.g. "Super Kernel Sella"'}>
                 <input required autoFocus value={form.name} onChange={(e) => set({ name: e.target.value })} />

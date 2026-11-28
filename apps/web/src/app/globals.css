@@ -2644,3 +2644,23 @@ tr.open-changed td { background: color-mix(in srgb, #f59e0b 9%, transparent); }
 
 .line-hint { display: block; margin-top: 3px; font-size: 12px; font-weight: 600; color: var(--accent-text, var(--accent)); }
 .held { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.alert-bar span { flex: 1; min-width: 0; }
+.alert-bar button, .alert-bar .button { min-height: 34px; padding: 0 14px; flex-shrink: 0; }
+.how-profit { margin: 0 0 14px; color: var(--text-2); font-size: 13.5px; }
+.how-profit summary { cursor: pointer; font-weight: 650; color: var(--muted); width: fit-content; }
+.how-profit p { margin: 8px 0 0; max-width: 78ch; line-height: 1.55; }
+
+.dx-refresh { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin: -4px 0 10px; font-size: 12.5px; color: var(--muted); }
+.dx-refresh button { min-height: 30px; padding: 0 12px; font-size: 12.5px; }
+
+.kind-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.kind-opt { display: flex; align-items: center; gap: 12px; padding: 12px 14px; min-height: 0; text-align: left; background: var(--surface); color: var(--text); border: 1px solid var(--border-strong); border-radius: 12px; }
+.kind-opt > svg { width: 22px; height: 22px; color: var(--muted); flex-shrink: 0; }
+.kind-opt span { display: grid; line-height: 1.25; }
+.kind-opt small { font-size: 12px; font-weight: 500; color: var(--muted); }
+.kind-opt:hover:not(.on) { background: var(--surface-hover); }
+.kind-opt.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.kind-opt.on > svg { color: var(--accent); }
+.cat-new { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.cat-new input { flex: 1; min-width: 0; }

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Avatar } from '@/components/Avatar';
 import StackedColumns, { LINE_SERIES, type Point } from '@/components/Chart';
 import { LineBadge } from '@/components/Badge';
@@ -22,8 +22,10 @@ interface Summary {
   today: { bills: number; netSales: string; cashWithBills: string; receipts: string; udhaar: string; expenses: string; grossProfit: string; netProfit: string; bottles: string; rice: string; bottlesProfit: string; riceProfit: string };
   month: { bills: number; netSales: string; expenses: string; grossProfit: string; netProfit: string; bottles: string; rice: string; bottlesProfit: string; riceProfit: string };
   trend: { date: string; sales: string; bills: number }[];
-  khata: { receivable: string; customersOwing: number; overLimit: number; topDebtors: { id: string; name: string; shopName: string | null; area: string | null; balance: string; overLimit: boolean }[] };
+  khata: { receivable: string; customersOwing: number; customersTotal: number; overLimit: number; topDebtors: { id: string; name: string; shopName: string | null; area: string | null; balance: string; overLimit: boolean }[] };
   payable: string;
+  /** Sold lines with no cost this month: they count as pure profit, so the profit shown is too high. */
+  uncosted: { monthLines: number; monthSales: string; todayLines: number };
   damagedProducts: number;
   /** Products at or below their own reorder level (all locations together). */
   lowStock: { productId: string; name: string; size: string | null; baseUnit: string; units: { unitName: string; factorToBase: string }[]; reorderLevel: string; onHand: string; where: { name: string; qtyBase: string }[] }[];
@@ -130,18 +132,38 @@ export default function DashboardPage() {
   const [backupAge, setBackupAge] = useState<number | null | undefined>(undefined);
   const [dayClosed, setDayClosed] = useState<boolean | undefined>(undefined);
 
-  useEffect(() => {
-    if (!allowed) return;
-    api<Summary>('/dashboard/summary').then(setData).catch((e) => setError(e.message));
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  /** Reads every figure again. Used on opening, on a timer, when the tab is looked at again, and by the Refresh button. */
+  const load = useCallback(() => {
+    if (!allowed) return Promise.resolve();
     const t = new Date();
     const first = localDay(new Date(t.getFullYear(), t.getMonth(), 1));
-    api<{ rows: ProfitRow[] }>(`/reports/profit?from=${first}&to=${localDay(t)}&groupBy=day`).then((r) => setMonth(r.rows)).catch(() => setMonth([]));
-    api<Collections>(`/reports/collections?from=${localDay(t)}&to=${localDay(t)}`).then(setCollections).catch(() => setCollections({ rows: [] }));
-    api<StockRow[]>('/stock').then(setStock).catch(() => setStock([]));
-    if (can(user, 'SETTINGS_EDIT')) api<{ ageHours: number | null }>('/backups/status').then((b) => setBackupAge(b.ageHours)).catch(() => {});
-    if (can(user, 'PAYMENT_RECORD')) api<{ closed: unknown }>(`/day-end?date=${localDay(t)}`).then((d) => setDayClosed(!!d.closed)).catch(() => {});
-    api<TeamToday>(`/reports/team?from=${localDay(t)}&to=${localDay(t)}`).then(setTeam).catch(() => setTeam({ people: [] }));
+    const jobs: Promise<unknown>[] = [
+      api<Summary>('/dashboard/summary').then((d) => { setData(d); setError(''); }).catch((e) => setError(e.message)),
+      api<{ rows: ProfitRow[] }>(`/reports/profit?from=${first}&to=${localDay(t)}&groupBy=day`).then((r) => setMonth(r.rows)).catch(() => setMonth([])),
+      api<Collections>(`/reports/collections?from=${localDay(t)}&to=${localDay(t)}`).then(setCollections).catch(() => setCollections({ rows: [] })),
+      api<StockRow[]>('/stock').then(setStock).catch(() => setStock([])),
+      api<TeamToday>(`/reports/team?from=${localDay(t)}&to=${localDay(t)}`).then(setTeam).catch(() => setTeam({ people: [] })),
+    ];
+    if (can(user, 'SETTINGS_EDIT')) jobs.push(api<{ ageHours: number | null }>('/backups/status').then((b) => setBackupAge(b.ageHours)).catch(() => {}));
+    if (can(user, 'PAYMENT_RECORD')) jobs.push(api<{ closed: unknown }>(`/day-end?date=${localDay(t)}`).then((d) => setDayClosed(!!d.closed)).catch(() => {}));
+    return Promise.all(jobs).then(() => setUpdatedAt(new Date()));
   }, [allowed, user]);
+
+  useEffect(() => {
+    void load();
+    // Figures change from other tabs, other computers and other people: read them again every minute, and whenever
+    // this tab is looked at again, so a new customer or bill shows up without reloading the page.
+    const every = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 60_000);
+    const back = () => { if (document.visibilityState === 'visible') void load(); };
+    document.addEventListener('visibilitychange', back);
+    window.addEventListener('focus', back);
+    return () => { clearInterval(every); document.removeEventListener('visibilitychange', back); window.removeEventListener('focus', back); };
+  }, [load]);
+
+  const refresh = async () => { setRefreshing(true); await load(); setRefreshing(false); };
 
   const monthChart = useMemo<Point[]>(() => {
     if (!month) return [];
@@ -204,6 +226,10 @@ export default function DashboardPage() {
   return (
     <div className="dx">
       {error && <p className="error">{error}</p>}
+      <div className="dx-refresh">
+        <span>{updatedAt ? `Updated ${updatedAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : 'Loading…'}</span>
+        <button type="button" className="secondary btn-icon" onClick={() => void refresh()} disabled={refreshing} aria-label="Refresh the figures"><Icon name="refresh" />{refreshing ? 'Refreshing…' : 'Refresh'}</button>
+      </div>
 
       <section className="dx-hero">
         <div className="dx-hero-main">
@@ -233,13 +259,21 @@ export default function DashboardPage() {
         </div>
       </section>
 
+      {data && data.uncosted.monthLines > 0 && (
+        <p className="alert-bar">
+          <Icon name="alert" />
+          <span><b>The profit shown is too high.</b> {data.uncosted.monthLines} sold line{data.uncosted.monthLines === 1 ? '' : 's'} this month (Rs {rupees(data.uncosted.monthSales)} of sales) {data.uncosted.monthLines === 1 ? 'has' : 'have'} no cost, so the whole sale counts as profit.</span>
+          <Link className="button" href="/reports?fix=1">Fix costs</Link>
+        </p>
+      )}
+
       {!data && !error && <div className="dx-kpis">{[0, 1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: 132 }} />)}</div>}
 
       {data && (
         <>
           <div className="dx-kpis">
             <Kpi icon="trend" tone={monthProfit < 0 ? 'red' : 'green'} label="Net profit this month" value={<><small>Rs</small>{rupees(monthProfit)}</>} bar={pct(Math.max(0, monthProfit), monthSales)} sub={monthProfit < 0 ? 'Expenses are higher than the profit so far' : `${pct(monthProfit, monthSales)}% margin on Rs ${rupees(monthSales)} sales`} to="/reports" />
-            <Kpi icon="customers" tone="amber" label="Customers owe us" value={<><small>Rs</small>{rupees(receivable)}</>} sub={`${data.khata.customersOwing} customer${data.khata.customersOwing === 1 ? '' : 's'}${data.khata.overLimit ? ` · ${data.khata.overLimit} over limit` : ''}`} to="/khata" />
+            <Kpi icon="customers" tone="amber" label="Customers owe us" value={<><small>Rs</small>{rupees(receivable)}</>} sub={`${data.khata.customersOwing} owing of ${data.khata.customersTotal} customer${data.khata.customersTotal === 1 ? '' : 's'}${data.khata.overLimit ? ` · ${data.khata.overLimit} over limit` : ''}`} to="/khata" />
             <Kpi icon="suppliers" tone="red" label="We owe suppliers" value={<><small>Rs</small>{rupees(payable)}</>} sub="open supplier balances" to="/suppliers" />
             <Kpi icon="wallet" tone="green" label="Collected today" value={<><small>Rs</small>{rupees(collectedTotal)}</>} sub={byMethod.length ? byMethod.map(([m, v]) => `${methodLabel(m)} ${rupees(v)}`).join(' · ') : 'No receipts yet today'}>
               {byMethod.length > 0 && <span className="method-bar" aria-hidden="true">{byMethod.map(([m, v], i) => <span key={m} style={{ flex: v, background: SERIES[i % 4] }} />)}</span>}

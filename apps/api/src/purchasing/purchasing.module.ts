@@ -111,13 +111,20 @@ class PurchasingController {
           productId: l.productId, locationId: dto.locationId, qtyBase: l.qtyBase, type: 'PURCHASE',
           refType: 'PURCHASE', refId: purchase.id, userId: user.id,
         });
-        // Latest-cost method: the most recent purchase price, per base unit.
+        // Latest-cost method: the most recent purchase price, per base unit. A purchase entered late for an earlier day
+        // (catching up on old bills) must not replace the price of a purchase made after it.
         const unitCost = new D(l.unitPrice).div(l.factor).toDecimalPlaces(4);
-        await tx.productCost.upsert({
-          where: { productId: l.productId },
-          update: { latestUnitCostBase: unitCost },
-          create: { productId: l.productId, latestUnitCostBase: unitCost },
-        });
+        const newer = await tx.purchaseItem.findFirst({ where: { productId: l.productId, purchase: { status: 'ACTIVE', id: { not: purchase.id }, date: { gt: date } } }, select: { id: true } });
+        if (!newer) {
+          await tx.productCost.upsert({
+            where: { productId: l.productId },
+            update: { latestUnitCostBase: unitCost },
+            create: { productId: l.productId, latestUnitCostBase: unitCost },
+          });
+        } else {
+          // still make sure there is some cost to work with
+          await tx.productCost.upsert({ where: { productId: l.productId }, update: {}, create: { productId: l.productId, latestUnitCostBase: unitCost } });
+        }
       }
       await tx.supplierLedger.create({
         data: { supplierId: dto.supplierId, date, amount: total, refType: 'PURCHASE', refId: purchase.id, createdById: user.id, note: purchaseNo },

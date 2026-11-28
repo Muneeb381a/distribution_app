@@ -1,13 +1,26 @@
-import { BadRequestException, Controller, Get, Module, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Module, Post, Query } from '@nestjs/common';
+import { Type } from 'class-transformer';
+import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsNumber, IsPositive, IsUUID, Max, ValidateNested } from 'class-validator';
 import { BusinessLineCode, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service.js';
-import { RequirePermissions } from '../common/decorators.js';
+import { CurrentUser, RequirePermissions, type AuthUser } from '../common/decorators.js';
+import { AuditService } from '../audit/audit.module.js';
 import { dayOf } from '../common/dates.js';
 
 const D = Prisma.Decimal;
 type Dec = Prisma.Decimal;
 const ZERO = () => new D(0);
 const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+class CostFixItemDto {
+  @IsUUID() productId: string;
+  /** What one base unit (bottle or kg) cost. */
+  @IsNumber({ maxDecimalPlaces: 4 }) @IsPositive() @Max(10_000_000) unitCostBase: number;
+}
+
+class CostFixDto {
+  @IsArray() @ArrayNotEmpty() @ArrayMaxSize(500) @ValidateNested({ each: true }) @Type(() => CostFixItemDto) items: CostFixItemDto[];
+}
 
 interface RangeQuery {
   from?: string;
@@ -30,7 +43,49 @@ const emptyLine = (): LineTotals => ({ qtySold: ZERO(), sales: ZERO(), returnsCr
 
 @Controller('reports')
 class ReportsController {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private audit: AuditService) {}
+
+  /**
+   * Sold lines that have no cost, grouped by product: until they have one the profit on them is counted as the whole
+   * sale. Each product shows how much was sold and the cost it has now (if any).
+   */
+  @Get('profit/uncosted') @RequirePermissions('REPORT_VIEW')
+  async uncosted() {
+    const groups = await this.prisma.saleItem.groupBy({
+      by: ['productId'], where: { unitCostBase: null, sale: { status: 'ACTIVE' } }, _count: true, _sum: { qtyBase: true, lineTotal: true },
+    });
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: groups.map((g) => g.productId) } },
+      select: { id: true, name: true, size: true, baseUnit: true, isPacked: true, units: { select: { unitName: true, factorToBase: true } }, cost: { select: { latestUnitCostBase: true } } },
+    });
+    return groups
+      .map((g) => {
+        const p = products.find((x) => x.id === g.productId)!;
+        return { productId: p.id, name: p.name, size: p.size, baseUnit: p.baseUnit, isPacked: p.isPacked, units: p.units, lines: g._count, qtyBase: g._sum.qtyBase ?? ZERO(), sales: g._sum.lineTotal ?? ZERO(), cost: p.cost?.latestUnitCostBase ?? null };
+      })
+      .sort((a, b) => b.sales.comparedTo(a.sales));
+  }
+
+  /**
+   * Gives sold lines that have no cost the cost typed here, so past profit is worked out properly. The cost is also kept
+   * on the product for new bills. Lines that already have a cost are never touched.
+   */
+  @Post('profit/uncosted/fix') @RequirePermissions('STOCK_ADJUST')
+  async fixUncosted(@Body() dto: CostFixDto, @CurrentUser() u: AuthUser) {
+    const ids = dto.items.map((i) => i.productId);
+    if (new Set(ids).size !== ids.length) throw new BadRequestException('A product is listed twice');
+    if ((await this.prisma.product.count({ where: { id: { in: ids } } })) !== ids.length) throw new BadRequestException('A product in the list is unknown');
+    let lines = 0;
+    await this.prisma.$transaction(async (tx) => {
+      for (const i of dto.items) {
+        await tx.productCost.upsert({ where: { productId: i.productId }, update: { latestUnitCostBase: i.unitCostBase }, create: { productId: i.productId, latestUnitCostBase: i.unitCostBase } });
+        const r = await tx.saleItem.updateMany({ where: { productId: i.productId, unitCostBase: null, sale: { status: 'ACTIVE' } }, data: { unitCostBase: i.unitCostBase } });
+        lines += r.count;
+      }
+    }, { timeout: 30_000 });
+    await this.audit.log(u.id, 'FIX_SALE_COSTS', 'Product', undefined, undefined, { products: dto.items.length, lines });
+    return { products: dto.items.length, lines };
+  }
 
   /**
    * End-of-day / monthly profit. Bottles and rice each show their own gross profit (net sales - cost);

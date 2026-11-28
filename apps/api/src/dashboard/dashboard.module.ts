@@ -27,7 +27,7 @@ class DashboardController {
     const [items, sales, expenses, receipts, customerRows, supplierRows, recent, damaged] = await Promise.all([
       this.prisma.saleItem.findMany({
         where: { sale: { status: 'ACTIVE', date: { gte: from, lte: today } } },
-        select: { qtyBase: true, unitCostBase: true, sale: { select: { date: true, businessLine: true } } },
+        select: { qtyBase: true, lineTotal: true, unitCostBase: true, sale: { select: { date: true, businessLine: true } } },
       }),
       this.prisma.sale.findMany({
         where: { status: 'ACTIVE', date: { gte: from, lte: today } },
@@ -71,7 +71,13 @@ class DashboardController {
         if (s.customerId && s.net.gt(s.paidNow)) t.udhaar = t.udhaar.plus(s.net.minus(s.paidNow));
       }
     }
+    // Sold lines with no cost count as pure profit, so they are counted here and the screen says so.
+    const uncosted = { monthLines: 0, monthSales: ZERO(), todayLines: 0 };
     for (const it of items) {
+      if (!it.unitCostBase) {
+        if (it.sale.date >= monthStart) { uncosted.monthLines += 1; uncosted.monthSales = uncosted.monthSales.plus(it.lineTotal); }
+        if (iso(it.sale.date) === todayKey) uncosted.todayLines += 1;
+      }
       const c = it.unitCostBase ? it.qtyBase.mul(it.unitCostBase) : ZERO();
       if (it.sale.date >= monthStart) {
         m.cost = m.cost.plus(c);
@@ -114,8 +120,9 @@ class DashboardController {
         bottlesProfit: m.bottles.minus(m.bottlesCost), riceProfit: m.rice.minus(m.riceCost),
       },
       trend: [...trend.values()],
-      khata: { receivable, customersOwing: owing.length, overLimit: topDebtors.filter((d) => d.overLimit).length, topDebtors },
+      khata: { receivable, customersOwing: owing.length, customersTotal: customers.length, overLimit: topDebtors.filter((d) => d.overLimit).length, topDebtors },
       payable: payable.gt(0) ? payable : ZERO(),
+      uncosted,
       damagedProducts: damaged.filter((d) => (d._sum.qtyBase ?? ZERO()).gt(0)).length,
       lowStock: low.slice(0, 8),
       lowStockCount: low.length,

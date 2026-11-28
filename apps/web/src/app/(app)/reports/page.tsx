@@ -5,7 +5,8 @@ import StackedColumns, { LINE_SERIES } from '@/components/Chart';
 import { Empty, SkeletonRows } from '@/components/Feedback';
 import { Icon } from '@/components/Icon';
 import { downloadCsv, SortTh, useSort } from '@/components/Table';
-import { api } from '@/lib/api';
+import { FixCostsDrawer } from '@/components/FixCostsDrawer';
+import { api, can, useUser } from '@/lib/api';
 import { addDays, lineLabel, localDay, presetRange, rupees } from '@dist/shared';
 
 type Tab = 'profit' | 'rice' | 'salesmen' | 'empties' | 'returns' | 'collections';
@@ -44,7 +45,14 @@ function DataTable({ cols, rows, empty = 'Nothing in this range.', rowKey }: { c
 const sumLine = (rows: Data[], line: 'BOTTLES' | 'RICE', f: string) => rows.reduce((s, r) => s + Number(r.lines[line][f]), 0);
 const sumTotal = (rows: Data[], f: string) => rows.reduce((s, r) => s + Number(r.total[f]), 0);
 
-function Profit({ d, from, to, groupBy }: { d: Data; from: string; to: string; groupBy: string }) {
+function Profit({ d, from, to, groupBy, onRefresh }: { d: Data; from: string; to: string; groupBy: string; onRefresh: () => void }) {
+  const user = useUser();
+  const [fixing, setFixing] = useState(false);
+  useEffect(() => {
+    // the dashboard links here with ?fix=1
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (new URLSearchParams(window.location.search).get('fix')) setFixing(true);
+  }, []);
   const rows: Data[] = d.rows;
   const net = sumTotal(rows, 'netSales'), gross = sumTotal(rows, 'grossProfit'), exp = sumTotal(rows, 'expenses'), profit = sumTotal(rows, 'netProfit');
   const lineNet = { BOTTLES: sumLine(rows, 'BOTTLES', 'netSales'), RICE: sumLine(rows, 'RICE', 'netSales') };
@@ -92,7 +100,14 @@ function Profit({ d, from, to, groupBy }: { d: Data; from: string; to: string; g
         {tile('Expenses', exp, places.length ? places.slice(0, 2).map((p) => `${p.name} ${rupees(p.amount)}`).join(' · ') : 'None in this range', 'expenses', 'amber')}
         {tile('Net profit', profit, 'Both lines, after all expenses', 'wallet', profit < 0 ? 'red' : 'green')}
       </div>
-      {uncosted > 0 && <p className="error"><Icon name="alert" /> {uncosted} sold lines have no cost yet, so profit is overstated.</p>}
+      {uncosted > 0 && (
+        <p className="alert-bar"><Icon name="alert" /><span><b>{uncosted} sold line{uncosted === 1 ? ' has' : 's have'} no cost yet</b>, so the profit shown is too high: the whole sale counts as profit.</span><button type="button" onClick={() => setFixing(true)}>Fix costs</button></p>
+      )}
+      <details className="how-profit">
+        <summary>How profit is worked out</summary>
+        <p><b>Net sales</b> (bills, less what customers returned) <b>minus cost</b> (what the goods cost when they were sold: the latest purchase price per bottle or kg, kept on each bill line so past profit never changes) gives <b>profit</b>. <b>Expenses</b> (rent, salaries, fuel…) come off the total for the net profit. Stock bought but not yet sold is not a cost yet.</p>
+      </details>
+      {fixing && <FixCostsDrawer canFix={can(user, 'STOCK_ADJUST')} onClose={() => setFixing(false)} onFixed={() => { setFixing(false); onRefresh(); }} />}
 
       {rows.length > 0 && (
         <section className="card profit-sheet">
@@ -310,6 +325,7 @@ export default function ReportsPage() {
   const [groupBy, setGroupBy] = useState('day');
   const [data, setData] = useState<{ key: string; d: Data } | null>(null);
   const [error, setError] = useState('');
+  const [reload, setReload] = useState(0);
 
   const key = `${tab}|${from}|${to}|${tab === 'profit' ? groupBy : ''}`;
   useEffect(() => {
@@ -323,7 +339,7 @@ export default function ReportsPage() {
       .then((d) => { if (!stale) { setData({ key: `${tab}|${from}|${to}|${tab === 'profit' ? groupBy : ''}`, d }); setError(''); } })
       .catch((e) => { if (!stale) setError(e.message); });
     return () => { stale = true; };
-  }, [tab, from, to, groupBy]);
+  }, [tab, from, to, groupBy, reload]);
 
   const choose = (p: Preset) => {
     setPreset(p);
@@ -389,7 +405,7 @@ export default function ReportsPage() {
           <table><tbody><SkeletonRows cols={6} rows={6} /></tbody></table>
         </div>
       )}
-      {ready && (tab === 'profit' ? <Profit d={ready} from={from} to={to} groupBy={groupBy} /> : <View tab={tab} d={ready} />)}
+      {ready && (tab === 'profit' ? <Profit d={ready} from={from} to={to} groupBy={groupBy} onRefresh={() => setReload((n) => n + 1)} /> : <View tab={tab} d={ready} />)}
     </>
   );
 }

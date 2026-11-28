@@ -50,9 +50,12 @@ describe('a supplier that has been hidden', () => {
 describe('a customer that has been hidden', () => {
   it('stops counting in what customers owe, and can still be found with the balance', async () => {
     const before = Number((await dash()).khata.receivable);
+    const totalBefore = (await dash()).khata.customersTotal;
     const c = ok(await t.owner.post('/customers', { name: uniq('Ibad'), type: 'CREDIT', creditLimit: 900000, openingBalance: 400000 }));
     expect(Number((await dash()).khata.receivable)).toBe(before + 400000);
+    expect((await dash()).khata.customersTotal).toBe(totalBefore + 1);
     ok(await t.owner.patch(`/customers/${c.id}`, { isActive: false }));
+    expect((await dash()).khata.customersTotal).toBe(totalBefore);
     expect(Number((await dash()).khata.receivable)).toBe(before);
     expect(ok(await t.owner.get('/customers')).some((x) => x.id === c.id)).toBe(false);
     const row = ok(await t.owner.get('/customers?includeInactive=true')).find((x) => x.id === c.id);
@@ -60,5 +63,14 @@ describe('a customer that has been hidden', () => {
     expect(Number(row.balance)).toBe(400000);
     ok(await t.owner.patch(`/customers/${c.id}`, { isActive: true }));
     expect(Number((await dash()).khata.receivable)).toBe(before + 400000);
+  });
+
+  it('counts a new udhaar customer at once, even with nothing owed yet', async () => {
+    const before = (await dash()).khata;
+    ok(await t.owner.post('/customers', { name: uniq('New udhaar'), type: 'CREDIT', creditLimit: 50000 }));
+    const after = (await dash()).khata;
+    expect(after.customersTotal).toBe(before.customersTotal + 1);
+    expect(Number(after.receivable)).toBe(Number(before.receivable));
+    expect(after.customersOwing).toBe(before.customersOwing);
   });
 });
