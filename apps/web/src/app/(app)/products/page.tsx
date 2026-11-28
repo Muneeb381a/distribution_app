@@ -8,7 +8,7 @@ import { api, can, useUser } from '@/lib/api';
 import Link from 'next/link';
 import ChangeRatesDialog from '@/components/ChangeRatesDialog';
 import { StatTiles } from '@/components/StatTiles';
-import { Affix, Field, Toggle } from '@/components/Form';
+import { Affix, Choice, Field, Toggle } from '@/components/Form';
 import { DRINK_SIZE_PRESETS, defaultPack, formatQty, money, PRICE_TIERS, round2, unitLabel } from '@dist/shared';
 
 type Line = 'BOTTLES' | 'RICE';
@@ -23,18 +23,20 @@ interface Product {
 interface Price { productId: string; unitName: string; tier: string; rate: string }
 const rateKey = (unitName: string, tier: string) => `${unitName}|${tier}`;
 
-const EMPTY = { name: '', brand: '', size: '', categoryId: '', packSize: '6', bagKg: '', returnableEmpty: true, reorder: '' };
+type RiceMode = 'LOOSE' | 'PACKED';
+const EMPTY = { name: '', brand: '', size: '', categoryId: '', packSize: '6', bagKg: '', returnableEmpty: true, reorder: '', riceMode: 'LOOSE' as RiceMode };
+const BAG_CHIPS = [5, 10, 20, 25, 40, 50];
 type Form = typeof EMPTY;
 
 /** Units sent to the API for a bottle or rice product. */
 function unitsFor(line: Line, f: Form) {
   return line === 'BOTTLES'
     ? [{ unitName: 'BOTTLE', factorToBase: 1 }, { unitName: 'CARTON', factorToBase: Number(f.packSize) }]
-    : [
-        { unitName: 'KG', factorToBase: 1 },
-        { unitName: 'MAUND', factorToBase: 40 },
-        ...(f.bagKg ? [{ unitName: 'BAG', factorToBase: Number(f.bagKg) }] : []),
-      ];
+    : f.riceMode === 'PACKED'
+      // Packed rice is sold by the bag; kg is kept as the unit stock is counted in.
+      ? [{ unitName: 'KG', factorToBase: 1 }, { unitName: 'BAG', factorToBase: Number(f.bagKg) || 25 }]
+      // Loose rice: by kg, by the maund (40 kg) or by the bori (a bag, usually 50 kg).
+      : [{ unitName: 'KG', factorToBase: 1 }, { unitName: 'MAUND', factorToBase: 40 }, { unitName: 'BAG', factorToBase: Number(f.bagKg) || 50 }];
 }
 
 export default function ProductsPage() {
@@ -102,6 +104,33 @@ export default function ProductsPage() {
   /** The categories of one kind of product, as "Basmati › Super Kernel", for the product form. */
   const categoriesFor = useCallback((l: Line) => allCategories.filter((c) => c.businessLine.code === l).map((c) => ({ id: c.id, text: pathOf(c.id) })).sort((a, b) => a.text.localeCompare(b.text)), [allCategories, pathOf]);
   const priceOf = (p: Product) => prices.filter((x) => x.productId === p.id);
+  // Loose rice made before bags were offered can only be billed in kg or maund.
+  const noBag = useMemo(() => (products ?? []).filter((p) => p.isActive && p.baseUnit === 'KG' && !p.isPacked && !p.units.some((u) => u.unitName === 'BAG')), [products]);
+  const [fixingBags, setFixingBags] = useState(false);
+  async function addBags() {
+    setFixingBags(true);
+    try {
+      let rated = 0;
+      for (let i = 0; i < noBag.length; i += 5) {
+        await Promise.all(noBag.slice(i, i + 5).map(async (p) => {
+          await api(`/products/${p.id}`, { method: 'PATCH', json: { units: [...p.units.map((u) => ({ unitName: u.unitName, factorToBase: Number(u.factorToBase) })), { unitName: 'BAG', factorToBase: 50 }] } });
+          // the bag price follows the kg price, so a bill can use it at once
+          const mine = prices.filter((x) => x.productId === p.id);
+          const bag = mine.filter((x) => x.unitName === 'KG').map((x) => ({ unitName: 'BAG', tier: x.tier ?? 'RETAIL', rate: round2(Number(x.rate) * 50) }));
+          if (canRate && bag.length) {
+            await api(`/product-prices/${p.id}`, { method: 'PUT', json: { prices: [...mine.map((x) => ({ unitName: x.unitName, tier: x.tier ?? 'RETAIL', rate: Number(x.rate) })), ...bag] } });
+            rated += 1;
+          }
+        }));
+      }
+      toast.success(`Bag option (50 kg) added to ${noBag.length} rice product${noBag.length === 1 ? '' : 's'}${rated ? `, with a bag rate worked out from the kg rate` : ''}`);
+      await load();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setFixingBags(false);
+    }
+  }
 
   const inactiveCount = products?.filter((p) => !p.isActive).length ?? 0;
   const topOf = useCallback((p: Product) => pathOf(p.categoryId).split(' › ')[0] || p.category.name, [pathOf]);
@@ -209,6 +238,14 @@ export default function ProductsPage() {
             <button key={name} type="button" className={`chip${cat === name ? ' on' : ''}`} aria-pressed={cat === name} onClick={() => { setCat(cat === name ? '' : name); reset(); }}>{name}<span className="chip-count">{count}</span></button>
           ))}
         </div>
+      )}
+
+      {line === 'RICE' && canEdit && noBag.length > 0 && (
+        <p className="alert-bar" role="status">
+          <Icon name="alert" />
+          <span><b>{noBag.length} loose rice product{noBag.length === 1 ? ' has' : 's have'} no bag option</b>, so bills, purchases and stock can only use kg and maund. This adds a 50 kg bori to {noBag.length === 1 ? 'it' : 'all of them'} (you can change the weight by editing a product).</span>
+          <button type="button" disabled={fixingBags} onClick={() => void addBags()}>{fixingBags ? 'Adding…' : 'Add bag option'}</button>
+        </p>
       )}
 
       {missingRate > 0 && (
@@ -352,10 +389,11 @@ function ProductDialog({ line: startLine, product, categoriesFor, onNewCategory,
   const factor = (u: string) => product?.units.find((x) => x.unitName === u)?.factorToBase;
   const [form, setForm] = useState<Form>(() => (product ? {
     name: product.name, brand: product.brand ?? '', size: product.size ?? '', categoryId: product.categoryId,
-    packSize: String(Number(factor('CARTON') ?? 6)), bagKg: factor('BAG') ? String(Number(factor('BAG'))) : '', returnableEmpty: product.returnableEmpty,
+    packSize: String(Number(factor('CARTON') ?? 6)), bagKg: factor('BAG') ? String(Number(factor('BAG'))) : product.baseUnit === 'KG' ? '50' : '', returnableEmpty: product.returnableEmpty,
+    riceMode: (product.isPacked ? 'PACKED' : 'LOOSE') as RiceMode,
     // Shown in peti for bottles, kg for rice; stored in base units.
     reorder: product.reorderLevel == null ? '' : String(round2(Number(product.reorderLevel) / (product.baseUnit === 'BOTTLE' ? Number(factor('CARTON') ?? 1) : 1))),
-  } : EMPTY));
+  } : { ...EMPTY, bagKg: startLine === 'RICE' ? '50' : '', returnableEmpty: startLine === 'BOTTLES' }));
   const units = unitsFor(line, form);
   // Keyed "CARTON|RETAIL", "CARTON|WHOLESALE"…
   const [rates, setRates] = useState<Record<string, string>>(() => Object.fromEntries(prices.map((p) => [rateKey(p.unitName, p.tier ?? 'RETAIL'), String(Number(p.rate))])));
@@ -365,7 +403,7 @@ function ProductDialog({ line: startLine, product, categoriesFor, onNewCategory,
   const switchKind = (k: Line) => {
     if (k === line) return;
     setLine(k);
-    setForm({ ...EMPTY, name: form.name, brand: form.brand, returnableEmpty: k === 'BOTTLES' });
+    setForm({ ...EMPTY, name: form.name, brand: form.brand, returnableEmpty: k === 'BOTTLES', bagKg: k === 'RICE' ? '50' : '' });
     setRates({});
     setNewCat(null);
   };
@@ -391,8 +429,8 @@ function ProductDialog({ line: startLine, product, categoriesFor, onNewCategory,
     setBusy(true);
     const bottles = line === 'BOTTLES';
     const body = {
-      categoryId: form.categoryId, name: form.name.trim(), brand: form.brand || undefined, size: form.size || undefined,
-      isPacked: !bottles && !!form.bagKg, returnableEmpty: bottles && form.returnableEmpty, units,
+      categoryId: form.categoryId, name: form.name.trim(), brand: form.brand || undefined, size: (form.size || (!bottles && form.riceMode === 'PACKED' && form.bagKg ? `${Number(form.bagKg)} kg bag` : '')) || undefined,
+      isPacked: !bottles && form.riceMode === 'PACKED', returnableEmpty: bottles && form.returnableEmpty, units,
       reorderLevel: form.reorder === '' ? null : Number(form.reorder) * (bottles ? Number(form.packSize) || 1 : 1),
     };
     try {
@@ -478,10 +516,32 @@ function ProductDialog({ line: startLine, product, categoriesFor, onNewCategory,
                 </>
               ) : (
                 <>
-                  <Field label="Size" optional span={6}><input value={form.size} placeholder="25 kg bag" onChange={(e) => set({ size: e.target.value })} /></Field>
-                  <Field label="Bag weight" optional span={6} hint="Leave empty for loose rice sold by kg and maund">
-                    <Affix suffix="kg"><input type="number" step="any" min="0" inputMode="decimal" placeholder="Loose" value={form.bagKg} onChange={(e) => set({ bagKg: e.target.value })} /></Affix>
+                  <div className="fld span-12">
+                    <span className="fld-label"><span>How is it sold?</span></span>
+                    <Choice name="rice-mode" value={form.riceMode} columns={2}
+                      onChange={(v) => set({ riceMode: v, bagKg: v === 'LOOSE' ? (Number(form.bagKg) > 0 ? form.bagKg : '50') : (form.bagKg === '50' || !form.bagKg ? '25' : form.bagKg) })}
+                      options={[
+                        { value: 'LOOSE', label: 'Loose rice', description: 'By kg, by maund or by the bori (bag)', icon: 'stock' },
+                        { value: 'PACKED', label: 'Packed bags', description: 'Fixed bags like 5, 10 or 25 kg', icon: 'products' },
+                      ]} />
+                  </div>
+                  <Field label={form.riceMode === 'LOOSE' ? 'Bori (bag) weight' : 'Bag weight'} required span={6} hint={form.riceMode === 'LOOSE' ? 'What one bag of this rice weighs, usually 50 kg. A maund is always 40 kg.' : 'What one bag weighs.'}>
+                    <Affix suffix="kg"><input type="number" step="any" min="0.1" required inputMode="decimal" value={form.bagKg} onChange={(e) => set({ bagKg: e.target.value })} /></Affix>
                   </Field>
+                  <Field label="Size" optional span={6} hint={form.riceMode === 'PACKED' ? 'Leave empty to use the bag weight, e.g. "25 kg bag".' : undefined}>
+                    <input value={form.size} placeholder={form.riceMode === 'PACKED' ? `${Number(form.bagKg) || 25} kg bag` : 'Optional'} onChange={(e) => set({ size: e.target.value })} />
+                  </Field>
+                  {form.riceMode === 'PACKED' && (
+                    <div className="span-12 size-chips" role="group" aria-label="Common bag weights">
+                      {BAG_CHIPS.map((kg) => (
+                        <button key={kg} type="button" className={`size-chip${Number(form.bagKg) === kg ? ' on' : ''}`} aria-pressed={Number(form.bagKg) === kg} onClick={() => set({ bagKg: String(kg) })}><b>{kg} kg</b><span>bag</span></button>
+                      ))}
+                    </div>
+                  )}
+                  <p className="span-12 rice-units" aria-live="polite">
+                    <span>Bills, purchases and stock can use</span>
+                    {units.map((u) => <b key={u.unitName} className="badge blue">{u.unitName === 'KG' ? 'Kg' : u.unitName === 'MAUND' ? 'Maund (40 kg)' : `${form.riceMode === 'LOOSE' ? 'Bori' : 'Bag'} (${Number(u.factorToBase)} kg)`}</b>)}
+                  </p>
                 </>
               )}
               <Field label="Reorder when stock falls to" optional span={6} hint="All locations together. Shows on the dashboard and Stock page when reached.">

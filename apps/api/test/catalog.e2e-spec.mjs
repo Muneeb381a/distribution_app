@@ -74,6 +74,29 @@ describe('add products from the catalog', () => {
     expect(ok(await t.owner.get(`/product-prices?productId=${id(brand, '2 L')}`))).toHaveLength(2);
   });
 
+  it('adds a bag option to loose rice that only had kg and maund, and the bag can then be bought and sold', async () => {
+    const cat = ok(await t.owner.get('/categories?line=RICE'))[0];
+    const p = ok(await t.owner.post('/products', { categoryId: cat.id, name: uniq('Old loose'), baseUnit: 'KG', units: [{ unitName: 'KG', factorToBase: 1 }, { unitName: 'MAUND', factorToBase: 40 }] }));
+    expect(units(p)).toEqual({ KG: 1, MAUND: 40 });
+    ok(await t.owner.put(`/product-prices/${p.id}`, { prices: [{ unitName: 'KG', rate: 60 }, { unitName: 'MAUND', rate: 2400 }] }));
+
+    const edited = ok(await t.owner.patch(`/products/${p.id}`, { units: [{ unitName: 'KG', factorToBase: 1 }, { unitName: 'MAUND', factorToBase: 40 }, { unitName: 'BAG', factorToBase: 50 }] }));
+    expect(units(edited)).toEqual({ KG: 1, MAUND: 40, BAG: 50 });
+    // a bag rate worked out from the kg rate, keeping the rates that were already there
+    ok(await t.owner.put(`/product-prices/${p.id}`, { prices: [{ unitName: 'KG', rate: 60 }, { unitName: 'MAUND', rate: 2400 }, { unitName: 'BAG', rate: 3000 }] }));
+
+    const godown = ok(await t.owner.get('/locations')).find((l) => l.type === 'GODOWN');
+    const sup = ok(await t.owner.post('/suppliers', { name: uniq('Mill') }));
+    ok(await t.owner.post('/purchases', { supplierId: sup.id, locationId: godown.id, items: [{ productId: p.id, unitName: 'BAG', qty: 20, unitPrice: 2500 }] }));
+    const stockKg = async () => Number(ok(await t.owner.get(`/stock?locationId=${godown.id}&search=${encodeURIComponent(p.name)}`)).find((r) => r.productId === p.id)?.ok ?? 0);
+    expect(await stockKg()).toBe(1000);
+    ok(await t.owner.post('/sales', { saleType: 'COUNTER', locationId: godown.id, items: [{ productId: p.id, unitName: 'BAG', qty: 2 }] }));
+    expect(await stockKg()).toBe(900);
+    // packed rice drops the maund and keeps kg and bag
+    const packed = ok(await t.owner.patch(`/products/${p.id}`, { isPacked: true, units: [{ unitName: 'KG', factorToBase: 1 }, { unitName: 'BAG', factorToBase: 25 }] }));
+    expect(units(packed)).toEqual({ KG: 1, BAG: 25 });
+  });
+
   it('needs the master-data permission and validates the rows', async () => {
     expect((await t.as().post('/products/bulk', { items: [] })).status).toBe(401);
     expect((await t.owner.post('/products/bulk', { items: [{ line: 'BOTTLES', path: [], name: 'x', packSize: 0, returnableEmpty: false }] })).status).toBe(400);

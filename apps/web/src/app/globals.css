@@ -2664,3 +2664,5 @@ tr.open-changed td { background: color-mix(in srgb, #f59e0b 9%, transparent); }
 .kind-opt.on > svg { color: var(--accent); }
 .cat-new { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
 .cat-new input { flex: 1; min-width: 0; }
+
+.rice-units { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 2px 0 0; font-size: 13px; color: var(--muted); }
