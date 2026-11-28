@@ -121,10 +121,16 @@ export default function PurchasesPage() {
             <div className="items-head" style={{ gridTemplateColumns: ITEM_COLS }}><span>Product</span><span>Unit</span><span className="r">Qty</span><span className="r">Price / unit</span><span className="r">Amount</span><span /></div>
             {lines.map((l, i) => {
               const amount = (Number(l.qty) || 0) * (Number(l.unitPrice) || 0);
+              // "= 2,500 kg" under a line of 50 bags, "= 36 bottles" under 6 peti: what is really coming in.
+              const pr = prod(l.productId);
+              const un = pr?.units.find((x) => x.unitName === l.unitName);
+              const inBase = (Number(l.qty) || 0) * Number(un?.factorToBase ?? 1);
+              const inBaseText = pr && un && Number(un.factorToBase) !== 1 && inBase > 0 ? `= ${inBase.toLocaleString('en-PK', { maximumFractionDigits: 3 })} ${pr.baseUnit === 'KG' ? 'kg' : 'bottles'}` : null;
               return (
                 <div className="items-row" key={i} style={{ gridTemplateColumns: ITEM_COLS }}>
                   <div className="item-product">
                     <Combobox id={`purchase-product-${i}`} ariaLabel="Product" required compact options={productOpts} value={l.productId} recentKey="product" placeholder="Type product name…" onChange={(v) => setLine(i, { productId: v, unitName: prod(v)?.units.find((u) => u.unitName === 'CARTON' || u.unitName === 'BAG')?.unitName ?? prod(v)?.units[0]?.unitName ?? '' })} />
+                    {inBaseText && <small className="line-hint">{Number(l.qty)} {unitLabel(l.unitName).toLowerCase()} {inBaseText}</small>}
                   </div>
                   <select aria-label="Unit" required disabled={!l.productId} value={l.unitName} onChange={(e) => setLine(i, { unitName: e.target.value })}>
                     {prod(l.productId)?.units.map((u) => <option key={u.unitName} value={u.unitName}>{unitLabel(u.unitName)}{Number(u.factorToBase) !== 1 ? ` (${Number(u.factorToBase)})` : ''}</option>)}

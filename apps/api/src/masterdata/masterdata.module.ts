@@ -6,6 +6,7 @@ import { CustomerType, EmployeeType, LocationType, SupplierType, UnitName } from
 import { PrismaService } from '../prisma.service.js';
 import { AuditService } from '../audit/audit.module.js';
 import { CurrentUser, RequirePermissions, type AuthUser } from '../common/decorators.js';
+import { withCustomerBalances, withSupplierBalances } from '../common/balances.js';
 
 class LocationDto {
   @IsString() name: string;
@@ -100,11 +101,16 @@ class MasterDataController {
   }
 
   // ----- customers -----
+  /**
+   * Customers. Only active ones unless includeInactive=true (the Customers screen, so a hidden one can be found and
+   * switched back on); that form also carries each customer's balance, hidden ones included.
+   */
   @Get('customers')
-  customers(@Query('search') search?: string, @Query('area') area?: string, @Query('type') type?: CustomerType) {
-    return this.prisma.customer.findMany({
+  async customers(@Query('search') search?: string, @Query('area') area?: string, @Query('type') type?: CustomerType, @Query('includeInactive') includeInactive?: string) {
+    const all = includeInactive === 'true';
+    const rows = await this.prisma.customer.findMany({
       where: {
-        isActive: true,
+        isActive: all ? undefined : true,
         area,
         type,
         OR: search
@@ -117,6 +123,7 @@ class MasterDataController {
       },
       orderBy: { name: 'asc' },
     });
+    return all ? withCustomerBalances(this.prisma, rows) : rows;
   }
 
   @Get('customers/:id')
@@ -154,9 +161,12 @@ class MasterDataController {
   }
 
   // ----- suppliers -----
+  /** Suppliers; hidden ones and every balance too when includeInactive=true (the Suppliers screen). */
   @Get('suppliers')
-  suppliers() {
-    return this.prisma.supplier.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } });
+  async suppliers(@Query('includeInactive') includeInactive?: string) {
+    const all = includeInactive === 'true';
+    const rows = await this.prisma.supplier.findMany({ where: { isActive: all ? undefined : true }, orderBy: { name: 'asc' } });
+    return all ? withSupplierBalances(this.prisma, rows) : rows;
   }
 
   @Post('suppliers') @RequirePermissions('MASTER_DATA_EDIT')

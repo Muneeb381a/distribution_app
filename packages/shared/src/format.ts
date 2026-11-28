@@ -14,7 +14,12 @@ export const rs = (v: string | number | null | undefined) => `Rs ${money(v)}`;
 /** Round to paisa, the precision every bill is stored in. */
 export const round2 = (v: number) => Math.round(v * 100) / 100;
 
-/** "36 (6 peti)" for bottles that come in cartons, "50 kg" for rice, plain number otherwise. */
+const grouped = (n: number) => n.toLocaleString('en-PK', { maximumFractionDigits: 3 });
+
+/**
+ * A stock quantity the way the shop talks about it: "36 (6 peti)" for bottles that come in cartons, and for rice both
+ * the weight and the bags: "2,500 kg (50 bags)", "2,512 kg (50 bags + 12 kg)". Plain number otherwise.
+ */
 export function formatQty(qtyBase: string | number, units: { unitName: string; factorToBase: string | number }[], baseUnit: string) {
   const q = Number(qtyBase);
   const carton = units.find((u) => u.unitName === 'CARTON');
@@ -24,7 +29,20 @@ export function formatQty(qtyBase: string | number, units: { unitName: string; f
     const r = q - c * f;
     return c ? `${q} (${c} peti${r ? ` + ${r}` : ''})` : String(q);
   }
-  return `${q}${baseUnit === 'KG' ? ' kg' : ''}`;
+  if (baseUnit === 'KG') {
+    const bag = units.find((u) => u.unitName === 'BAG' && Number(u.factorToBase) > 1);
+    if (bag && q > 0) {
+      const f = Number(bag.factorToBase);
+      const bags = Math.trunc(q / f);
+      const rest = Math.round((q - bags * f) * 1000) / 1000;
+      if (bags) return `${grouped(q)} kg (${bags} ${bags === 1 ? 'bag' : 'bags'}${rest ? ` + ${grouped(rest)} kg` : ''})`;
+    }
+    // loose rice sold by the maund and not by the bag: show the maunds
+    const maund = units.find((u) => u.unitName === 'MAUND' && Number(u.factorToBase) > 1);
+    if (!bag && maund && q > 0) return `${grouped(q)} kg (${grouped(Math.round((q / Number(maund.factorToBase)) * 100) / 100)} maund)`;
+    return `${grouped(q)} kg`;
+  }
+  return String(q);
 }
 
 /** A Pakistani number as WhatsApp wants it: "0300-1234567" → "923001234567"; "" if there is none. */

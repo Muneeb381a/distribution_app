@@ -65,6 +65,16 @@ test('formats', () => {
   assert.equal(formatQty(36, [{ unitName: 'CARTON', factorToBase: '6' }], 'BOTTLE'), '36 (6 peti)');
   assert.equal(formatQty(40, [{ unitName: 'CARTON', factorToBase: '6' }], 'BOTTLE'), '40 (6 peti + 4)');
   assert.equal(formatQty(50, [], 'KG'), '50 kg');
+  // rice: the weight and the bags together
+  const bori = [{ unitName: 'KG', factorToBase: '1' }, { unitName: 'MAUND', factorToBase: '40' }, { unitName: 'BAG', factorToBase: '50' }];
+  assert.equal(formatQty(2500, bori, 'KG'), '2,500 kg (50 bags)');
+  assert.equal(formatQty(2512, bori, 'KG'), '2,512 kg (50 bags + 12 kg)');
+  assert.equal(formatQty(50, bori, 'KG'), '50 kg (1 bag)');
+  assert.equal(formatQty(30, bori, 'KG'), '30 kg');
+  assert.equal(formatQty(0, bori, 'KG'), '0 kg');
+  assert.equal(formatQty('1250', [{ unitName: 'KG', factorToBase: '1' }, { unitName: 'BAG', factorToBase: '25' }], 'KG'), '1,250 kg (50 bags)');
+  assert.equal(formatQty(400, [{ unitName: 'KG', factorToBase: '1' }, { unitName: 'MAUND', factorToBase: '40' }], 'KG'), '400 kg (10 maund)');
+  assert.equal(formatQty(12.5, bori, 'KG'), '12.5 kg');
 });
 test('document numbers', () => {
   assert.equal(offlineNumber('BTL', 'D2', 14), 'BTL-D2-000014');

@@ -2641,3 +2641,6 @@ tr.open-changed td { background: color-mix(in srgb, #f59e0b 9%, transparent); }
 @media (max-width: 700px) { .open-meta { grid-template-columns: minmax(0, 1fr); } }
 .open-meta label { display: grid; gap: 4px; font-size: 12.5px; font-weight: 600; color: var(--text-2); }
 .open-meta small { font-weight: 500; }
+
+.line-hint { display: block; margin-top: 3px; font-size: 12px; font-weight: 600; color: var(--accent-text, var(--accent)); }
+.held { font-variant-numeric: tabular-nums; white-space: nowrap; }

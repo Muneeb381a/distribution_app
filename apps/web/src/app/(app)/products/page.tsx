@@ -9,7 +9,7 @@ import Link from 'next/link';
 import ChangeRatesDialog from '@/components/ChangeRatesDialog';
 import { StatTiles } from '@/components/StatTiles';
 import { Affix, Field, Toggle } from '@/components/Form';
-import { DRINK_SIZE_PRESETS, defaultPack, money, PRICE_TIERS, round2, unitLabel } from '@dist/shared';
+import { DRINK_SIZE_PRESETS, defaultPack, formatQty, money, PRICE_TIERS, round2, unitLabel } from '@dist/shared';
 
 type Line = 'BOTTLES' | 'RICE';
 interface Category { id: string; name: string; parentId: string | null; businessLine: { code: Line } }
@@ -48,6 +48,8 @@ export default function ProductsPage() {
   const [products, setProducts] = useState<Product[] | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [prices, setPrices] = useState<Price[]>([]);
+  // Saleable stock of each product, all places together.
+  const [onHand, setOnHand] = useState<Record<string, number>>({});
   const [filter, setFilter] = useState('');
   const [showInactive, setShowInactive] = useState(false);
   const [editing, setEditing] = useState<Product | 'new' | null>(null);
@@ -63,11 +65,15 @@ export default function ProductsPage() {
 
   const load = useCallback(async () => {
     try {
-      const [p, c, pr] = await Promise.all([
+      const [p, c, pr, st] = await Promise.all([
         api<Product[]>(`/products?line=${line}&includeInactive=true`),
         api<Category[]>(`/categories?line=${line}`),
         api<Price[]>('/product-prices'),
+        api<{ productId: string; ok: string }[]>('/stock').catch(() => []),
       ]);
+      const held: Record<string, number> = {};
+      for (const r of st) held[r.productId] = (held[r.productId] ?? 0) + Number(r.ok);
+      setOnHand(held);
       setProducts(p);
       setCategories(c);
       setPrices(pr);
@@ -215,12 +221,13 @@ export default function ProductsPage() {
               <SortTh k="name" sort={sort} toggle={toggle}>Product</SortTh>
               <SortTh k="category" sort={sort} toggle={toggle}>Category</SortTh>
               <th>Packing</th>
+              <th className="num">In stock</th>
               <SortTh k="rate" sort={sort} toggle={toggle} num>Default rate</SortTh>
               {(canEdit || canRate) && <th><span className="sr-only">Actions</span></th>}
             </tr>
           </thead>
           <tbody>
-            {!products && <SkeletonRows cols={canEdit || canRate ? 5 : 4} />}
+            {!products && <SkeletonRows cols={canEdit || canRate ? 6 : 5} />}
             {page.map((p) => (
               <tr key={p.id} className={p.isActive ? '' : 'inactive'}>
                 <td>
@@ -234,11 +241,12 @@ export default function ProductsPage() {
                 </td>
                 <td><span className="cat-path">{(pathOf(p.categoryId) || p.category.name).split(' › ').map((part, i) => <span key={i}>{part}</span>)}</span></td>
                 <td><Packing p={p} /></td>
+                <td className="num"><Held p={p} qty={onHand[p.id]} /></td>
                 <td className="num"><Rates rows={priceOf(p)} /></td>
                 {(canEdit || canRate) && <td>{rowActions(p)}</td>}
               </tr>
             ))}
-            {products && !shown.length && <tr><td colSpan={5}>{emptyState()}</td></tr>}
+            {products && !shown.length && <tr><td colSpan={6}>{emptyState()}</td></tr>}
           </tbody>
         </table>
       ) : (
@@ -257,6 +265,7 @@ export default function ProductsPage() {
                 </header>
                 <span className="cat-path">{(pathOf(p.categoryId) || p.category.name).split(' › ').map((part, i) => <span key={i}>{part}</span>)}{!p.isActive && <span className="badge">Inactive</span>}</span>
                 <Packing p={p} />
+                <div className="prod-card-rates"><span>In stock</span><Held p={p} qty={onHand[p.id]} /></div>
                 <div className="prod-card-rates"><span>Default rate</span><Rates rows={priceOf(p)} left /></div>
               </article>
             ))}
@@ -294,6 +303,12 @@ function ProductTile({ line, size = 40 }: { line: Line; size?: number }) {
 }
 
 /** How it is packed: units bigger than the base unit, and whether empties come back. */
+/** What is in stock, with the bags beside the kg for rice and the peti beside the bottles. */
+function Held({ p, qty }: { p: Product; qty: number | undefined }) {
+  if (!qty) return <span className="muted">None</span>;
+  return <b className="held">{formatQty(qty, p.units, p.baseUnit)}</b>;
+}
+
 function Packing({ p }: { p: Product }) {
   const packs = p.units.filter((u) => Number(u.factorToBase) !== 1);
   return (

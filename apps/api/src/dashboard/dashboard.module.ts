@@ -35,8 +35,9 @@ class DashboardController {
       }),
       this.prisma.expense.findMany({ where: { status: 'ACTIVE', date: { gte: from, lte: today } }, select: { date: true, amount: true } }),
       this.prisma.payment.findMany({ where: { status: 'ACTIVE', date: { gte: from, lte: today }, saleId: null }, select: { date: true, amount: true } }),
-      this.prisma.customer.findMany({ select: { id: true, name: true, shopName: true, area: true, openingBalance: true, creditLimit: true } }),
-      this.prisma.supplier.findMany({ select: { id: true, openingBalance: true } }),
+      // Only people still on the books: the khata and supplier screens list the same ones, so the totals match them.
+      this.prisma.customer.findMany({ where: { isActive: true }, select: { id: true, name: true, shopName: true, area: true, openingBalance: true, creditLimit: true } }),
+      this.prisma.supplier.findMany({ where: { isActive: true }, select: { id: true, openingBalance: true } }),
       this.prisma.sale.findMany({
         where: { status: 'ACTIVE' }, orderBy: { createdAt: 'desc' }, take: 8,
         select: { id: true, billNo: true, date: true, net: true, paidNow: true, businessLine: true, customer: { select: { name: true } } },

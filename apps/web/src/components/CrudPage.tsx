@@ -63,8 +63,12 @@ interface Props<T extends { id: string }> {
   formDescription?: string;
   /** A live preview drawn above the form fields from what is typed so far. */
   preview?: (values: Record<string, string>, editing: boolean) => ReactNode;
-  /** Summary tiles above the list, worked out from the active rows. */
-  summary?: (rows: T[]) => Tile[];
+  /** Summary tiles above the list, worked out from the active rows (and, as the second argument, every row, hidden ones too). */
+  summary?: (rows: T[], all: T[]) => Tile[];
+  /** Where the list is read from, when that differs from `path` (e.g. to include hidden records). */
+  listPath?: string;
+  /** A warning shown in the "Deactivate?" question for a row, e.g. that it still owes money. */
+  deactivateNote?: (row: T) => ReactNode;
 }
 
 type Row = { id: string; isActive?: boolean } & Record<string, unknown>;
@@ -77,7 +81,7 @@ function textOf(v: unknown, f: Field): string {
   return String(v);
 }
 
-export default function CrudPage<T extends { id: string }>({ title, path, fields, columns, editPermission, toBody, extraRowActions, noun, icon = 'file', editable = true, sections, formDescription, preview, summary }: Props<T>) {
+export default function CrudPage<T extends { id: string }>({ title, path, fields, columns, editPermission, toBody, extraRowActions, noun, icon = 'file', editable = true, sections, formDescription, preview, summary, listPath, deactivateNote }: Props<T>) {
   const [rows, setRows] = useState<T[] | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
@@ -93,8 +97,8 @@ export default function CrudPage<T extends { id: string }>({ title, path, fields
   const singular = noun ?? title.replace(/s$/i, '').toLowerCase();
 
   const load = useCallback(
-    () => api<T[]>(path).then((r) => { setRows(r); setError(''); }).catch((e) => setError(e.message)),
-    [path],
+    () => api<T[]>(listPath ?? path).then((r) => { setRows(r); setError(''); }).catch((e) => setError(e.message)),
+    [path, listPath],
   );
 
   useEffect(() => {
@@ -181,7 +185,7 @@ export default function CrudPage<T extends { id: string }>({ title, path, fields
     const name = String((r as unknown as Row).name ?? singular);
     if (!isActive && !(await confirm({
       title: `Deactivate ${name}?`,
-      body: <p>It is hidden from pickers and new entries. History stays as it is, and you can activate it again.</p>,
+      body: <>{deactivateNote?.(r)}<p>It is hidden from pickers and new entries. History stays as it is, and you can activate it again.</p></>,
       confirmLabel: 'Deactivate',
       danger: true,
     }))) return;
@@ -211,7 +215,7 @@ export default function CrudPage<T extends { id: string }>({ title, path, fields
         )}
       </div>
       {error && <p className="error">{error}</p>}
-      {summary && rows && rows.length > 0 && <StatTiles items={summary(rows.filter((r) => (r as unknown as Row).isActive !== false))} />}
+      {summary && rows && rows.length > 0 && <StatTiles items={summary(rows.filter((r) => (r as unknown as Row).isActive !== false), rows)} />}
       {canEdit && mode && (
         <div className="drawer-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) void requestClose(); }}>
           <aside ref={formRef} className="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); void requestClose(); } }}>
